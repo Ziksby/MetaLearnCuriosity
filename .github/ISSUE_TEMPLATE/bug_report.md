@@ -17,9 +17,9 @@ assignees: Ziksby
 
 <!--- Outline the steps required to reproduce the bug. Include any relevant code or commands if applicable. -->
 
-1. 
-2. 
-3. 
+1.
+2.
+3.
 
 **Expected Behavior:**
 
