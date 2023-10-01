@@ -8,4 +8,4 @@ from typing import Sequence, NamedTuple, Any
 from flax.training.train_state import TrainState
 import distrax
 import gymnax
-from Meta-learned-curiosity-jax.wrappers import LogWrapper, FlattenObservationWrapper
+from Meta_learned_curiosity_jax.wrappers import LogWrapper, FlattenObservationWrapper
