@@ -5,58 +5,103 @@ import numpy as np
 import optax
 from flax.linen.initializers import constant, orthogonal
 from typing import Sequence, NamedTuple, Any
-from flax.training.train_state import TrainState
+from flax.training.network_state import TrainState
 import distrax
 import gymnax
 from MetaLearnCuriosity.wrappers import LogWrapper, FlattenObservationWrapper
 
 
+# THE NETWORKS
+class TargetEncoder(nn.Module):
+    @nn.compact
+    def __call__(self, x):
+        actor_mean = nn.Dense(
+            64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
+        )(x)
+        actor_mean = nn.tanh(actor_mean)
+        actor_mean = nn.Dense(
+            64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
+        )(actor_mean)
+        actor_mean = nn.tanh(actor_mean)
+        return actor_mean
+
+
+class OnlineEncoder(nn.Module):
+    @nn.compact
+    def __call__(self, x):
+        actor_mean = nn.Dense(
+            64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
+        )(x)
+        actor_mean = nn.tanh(actor_mean)
+        actor_mean = nn.Dense(
+            64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
+        )(actor_mean)
+        actor_mean = nn.tanh(actor_mean)
+        return actor_mean
+
+
+# The predictor
+class OnlinePredictor(nn.Module):
+    action_dim: Sequence[int]
+
+    @nn.compact
+    def __call__(self, x, action):
+
+        # One-hot encode the action
+        one_hot_action = jax.nn.one_hot(action, self.action_dim)
+
+        inp = jnp.concatenate([x, one_hot_action], axis=-1)
+
+        layer_out = nn.Dense(
+            64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
+        )(inp)
+        layer_out = nn.tanh(layer_out)
+        layer_out = nn.Dense(
+            64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
+        )(layer_out)
+        layer_out = nn.tanh(layer_out)
+        layer_out = nn.Dense(64, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(
+            layer_out
+        )
+        return layer_out
+
+
 class ActorCritic(nn.Module):
     action_dim: Sequence[int]
-    activation: str = "tanh"
 
     @nn.compact
     def __call__(self, x):
-        if self.activation == "relu":
-            activation = nn.relu
-        else:
-            activation = nn.tanh
-        actor_mean = nn.Dense(
-            64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
-        )(x)
-        actor_mean = activation(actor_mean)
-        actor_mean = nn.Dense(
-            64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
-        )(actor_mean)
-        actor_mean = activation(actor_mean)
+
         actor_mean = nn.Dense(
             self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
-        )(actor_mean)
+        )(x)
         pi = distrax.Categorical(logits=actor_mean)
 
-        critic = nn.Dense(
-            64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
-        )(x)
-        critic = activation(critic)
-        critic = nn.Dense(
-            64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
-        )(critic)
-        critic = activation(critic)
-        critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(
-            critic
-        )
+        critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(x)
 
         return pi, jnp.squeeze(critic, axis=-1)
 
 
+# THE TRANSITION CLASS
 class Transition(NamedTuple):
     done: jnp.ndarray
     action: jnp.ndarray
     value: jnp.ndarray
     reward: jnp.ndarray
+    int_reward: jnp.ndarray
     log_prob: jnp.ndarray
-    obs: jnp.ndarray
+    last_obs: jnp.ndarray
+    next_obs: jnp.ndarray
     info: jnp.ndarray
+
+
+# HELPER FUNCTIONS
+def l2_norm_squared(arr, axis=None):
+    return jnp.sum(jnp.square(arr), axis=axis)
+
+
+def l2_norm(arr):
+    return jnp.sqrt(jnp.sum(jnp.square(arr)))
 
 
 def make_train(config):
@@ -80,12 +125,25 @@ def make_train(config):
 
     def train(rng):
         # INIT NETWORK
-        network = ActorCritic(
-            env.action_space(env_params).n, activation=config["ACTIVATION"]
-        )
-        rng, _rng = jax.random.split(rng)
+        network = ActorCritic(env.action_space(env_params).n)
+        predicator = OnlinePredictor(env.action_space(env_params).n)
+        target = TargetEncoder()
+        online = OnlineEncoder()
+
+        rng, _target_rng = jax.random.split(rng)
+        rng, _online_rng = jax.random.split(rng)
+        rng, _predicator_rng = jax.random.split(rng)
+        rng, _network_rng = jax.random.split(rng)
+
         init_x = jnp.zeros(env.observation_space(env_params).shape)
-        network_params = network.init(_rng, init_x)
+        encoded_x = jnp.zeros((init_x.shape[0], 64))
+        init_action = jnp.zeros(env.action_space(env_params).shape, dtype=jnp.int32)
+
+        target_params = target.init(_target_rng, init_x)
+        online_params = online.init(_online_rng, init_x)
+        predicator_params = predicator.init(_predicator_rng, encoded_x, init_action)
+        network_params = network.init(_network_rng, encoded_x)
+
         if config["ANNEAL_LR"]:
             tx = optax.chain(
                 optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
@@ -96,10 +154,17 @@ def make_train(config):
                 optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
                 optax.adam(config["LR"], eps=1e-5),
             )
-        train_state = TrainState.create(
+        network_state = TrainState.create(
             apply_fn=network.apply,
             params=network_params,
             tx=tx,
+        )
+
+        online_state = TrainState.create(
+            apply_fn=online.apply, params=online_params, tx=tx
+        )
+        predicator_state = TrainState.create(
+            apply_fn=predicator.apply, params=predicator_params, tx=tx
         )
 
         # INIT ENV
@@ -111,11 +176,12 @@ def make_train(config):
         def _update_step(runner_state, unused):
             # COLLECT TRAJECTORIES
             def _env_step(runner_state, unused):
-                train_state, env_state, last_obs, rng = runner_state
+                network_state, env_state, last_obs, rng = runner_state
 
                 # SELECT ACTION
                 rng, _rng = jax.random.split(rng)
-                pi, value = network.apply(train_state.params, last_obs)
+                encoded_last_obs = online.apply(online_state.params, last_obs)
+                pi, value = network.apply(network_state.params, encoded_last_obs)
                 action = pi.sample(seed=_rng)
                 log_prob = pi.log_prob(action)
 
@@ -125,10 +191,29 @@ def make_train(config):
                 obsv, env_state, reward, done, info = jax.vmap(
                     env.step, in_axes=(0, 0, 0, None)
                 )(rng_step, env_state, action, env_params)
+
+                # WORLD MODEL PREDICATION AND TARGET PREDICATION
+                pred_obs = predicator.apply(predicator_state.params, action)
+                tar_obs = target.apply(target_params, last_obs)
+
+                # int reward
+                pred_norm = (pred_obs) / (l2_norm(pred_obs))
+                tar_norm = (tar_obs) / (l2_norm(tar_obs))
+                int_reward = l2_norm_squared(pred_norm - tar_norm)
+
                 transition = Transition(
-                    done, action, value, reward, log_prob, last_obs, info
+                    done,
+                    action,
+                    value,
+                    reward,
+                    int_reward,
+                    log_prob,
+                    last_obs,
+                    obsv,
+                    info,
                 )
-                runner_state = (train_state, env_state, obsv, rng)
+                runner_state = (network_state, env_state, obsv, rng)
+
                 return runner_state, transition
 
             runner_state, traj_batch = jax.lax.scan(
@@ -136,8 +221,8 @@ def make_train(config):
             )
 
             # CALCULATE ADVANTAGE
-            train_state, env_state, last_obs, rng = runner_state
-            _, last_val = network.apply(train_state.params, last_obs)
+            network_state, env_state, last_obs, rng = runner_state
+            _, last_val = network.apply(network_state.params, last_obs)
 
             def _calculate_gae(traj_batch, last_val):
                 def _get_advantages(gae_and_next_value, transition):
@@ -167,7 +252,7 @@ def make_train(config):
 
             # UPDATE NETWORK
             def _update_epoch(update_state, unused):
-                def _update_minbatch(train_state, batch_info):
+                def _update_minbatch(network_state, batch_info):
                     traj_batch, advantages, targets = batch_info
 
                     def _loss_fn(params, traj_batch, gae, targets):
@@ -210,12 +295,12 @@ def make_train(config):
 
                     grad_fn = jax.value_and_grad(_loss_fn, has_aux=True)
                     total_loss, grads = grad_fn(
-                        train_state.params, traj_batch, advantages, targets
+                        network_state.params, traj_batch, advantages, targets
                     )
-                    train_state = train_state.apply_gradients(grads=grads)
-                    return train_state, total_loss
+                    network_state = network_state.apply_gradients(grads=grads)
+                    return network_state, total_loss
 
-                train_state, traj_batch, advantages, targets, rng = update_state
+                network_state, traj_batch, advantages, targets, rng = update_state
                 rng, _rng = jax.random.split(rng)
                 batch_size = config["MINIBATCH_SIZE"] * config["NUM_MINIBATCHES"]
                 assert (
@@ -235,17 +320,17 @@ def make_train(config):
                     ),
                     shuffled_batch,
                 )
-                train_state, total_loss = jax.lax.scan(
-                    _update_minbatch, train_state, minibatches
+                network_state, total_loss = jax.lax.scan(
+                    _update_minbatch, network_state, minibatches
                 )
-                update_state = (train_state, traj_batch, advantages, targets, rng)
+                update_state = (network_state, traj_batch, advantages, targets, rng)
                 return update_state, total_loss
 
-            update_state = (train_state, traj_batch, advantages, targets, rng)
+            update_state = (network_state, traj_batch, advantages, targets, rng)
             update_state, loss_info = jax.lax.scan(
                 _update_epoch, update_state, None, config["UPDATE_EPOCHS"]
             )
-            train_state = update_state[0]
+            network_state = update_state[0]
             metric = traj_batch.info
             rng = update_state[-1]
             if config.get("DEBUG"):
@@ -264,11 +349,11 @@ def make_train(config):
 
                 jax.debug.callback(callback, metric)
 
-            runner_state = (train_state, env_state, last_obs, rng)
+            runner_state = (network_state, env_state, last_obs, rng)
             return runner_state, metric
 
         rng, _rng = jax.random.split(rng)
-        runner_state = (train_state, env_state, obsv, _rng)
+        runner_state = (network_state, env_state, obsv, _rng)
         runner_state, metric = jax.lax.scan(
             _update_step, runner_state, None, config["NUM_UPDATES"]
         )
@@ -299,3 +384,4 @@ if __name__ == "__main__":
     rng = jax.random.PRNGKey(42)
     train_jit = jax.jit(make_train(config))
     out = train_jit(rng)
+    print("DONE!")
