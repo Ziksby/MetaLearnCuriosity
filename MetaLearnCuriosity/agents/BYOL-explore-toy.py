@@ -71,12 +71,20 @@ class ActorCritic(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-
+        actor_mean = nn.Dense(
+            64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
+        )(x)
+        actor_mean = nn.tanh(actor_mean)
         actor_mean = nn.Dense(
             self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
-        )(x)
+        )(actor_mean)
         pi = distrax.Categorical(logits=actor_mean)
 
+        # THE CRITIC
+        critic = nn.Dense(
+            64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
+        )(x)
+        actor_mean = nn.tanh(actor_mean)
         critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(x)
 
         return pi, jnp.squeeze(critic, axis=-1)
@@ -90,8 +98,8 @@ class Transition(NamedTuple):
     reward: jnp.ndarray
     int_reward: jnp.ndarray
     log_prob: jnp.ndarray
+    obs: jnp.ndarray
     last_obs: jnp.ndarray
-    next_obs: jnp.ndarray
     info: jnp.ndarray
 
 
@@ -176,7 +184,15 @@ def make_train(config):
         def _update_step(runner_state, unused):
             # COLLECT TRAJECTORIES
             def _env_step(runner_state, unused):
-                network_state, env_state, last_obs, rng = runner_state
+                (
+                    network_state,
+                    online_state,
+                    predicator_state,
+                    target_params,
+                    env_state,
+                    last_obs,
+                    rng,
+                ) = runner_state
 
                 # SELECT ACTION
                 rng, _rng = jax.random.split(rng)
@@ -193,13 +209,13 @@ def make_train(config):
                 )(rng_step, env_state, action, env_params)
 
                 # WORLD MODEL PREDICATION AND TARGET PREDICATION
-                pred_obs = predicator.apply(predicator_state.params, action)
-                tar_obs = target.apply(target_params, last_obs)
+                pred_obs = predicator.apply(predicator_state.params, last_obs, action)
+                tar_obs = target.apply(target_params, obsv)
 
                 # int reward
                 pred_norm = (pred_obs) / (l2_norm(pred_obs))
                 tar_norm = (tar_obs) / (l2_norm(tar_obs))
-                int_reward = l2_norm_squared(pred_norm - tar_norm)
+                int_reward = l2_norm_squared(pred_norm - tar_norm) * (1 - done)
 
                 transition = Transition(
                     done,
@@ -212,7 +228,15 @@ def make_train(config):
                     obsv,
                     info,
                 )
-                runner_state = (network_state, env_state, obsv, rng)
+                runner_state = (
+                    network_state,
+                    online_state,
+                    predicator_state,
+                    target_params,
+                    env_state,
+                    obsv,
+                    rng,
+                )
 
                 return runner_state, transition
 
@@ -220,8 +244,20 @@ def make_train(config):
                 _env_step, runner_state, None, config["NUM_STEPS"]
             )
 
+            # ** Uncertainty calculation is not needed here.
+            # ** The uncertainty is just given by int_reward.
+            # ** This is because K=1, the open loop horizon is 1.
+
             # CALCULATE ADVANTAGE
-            network_state, env_state, last_obs, rng = runner_state
+            (
+                network_state,
+                online_state,
+                predicator_state,
+                target_params,
+                env_state,
+                last_obs,
+                rng,
+            ) = runner_state
             _, last_val = network.apply(network_state.params, last_obs)
 
             def _calculate_gae(traj_batch, last_val):
@@ -255,9 +291,22 @@ def make_train(config):
                 def _update_minbatch(network_state, batch_info):
                     traj_batch, advantages, targets = batch_info
 
-                    def _loss_fn(params, traj_batch, gae, targets):
+                    def _byol_loss(target_params, predicator_params, traj_batch):
+                        pred_obs = predicator.apply(
+                            predicator_params, traj_batch.last_obs, traj_batch.action
+                        )
+                        tar_obs = target.apply(target_params, traj_batch.obs)
+                        pred_norm = (pred_obs) / (l2_norm(pred_obs))
+                        tar_norm = (tar_obs) / (l2_norm(tar_obs))
+                        loss = l2_norm_squared(pred_norm - tar_norm)
+                        return loss.mean()
+
+                    def _rl_loss_fn(
+                        target_params, online_params, traj_batch, gae, targets
+                    ):
                         # RERUN NETWORK
-                        pi, value = network.apply(params, traj_batch.obs)
+                        encoded_obs = online.apply(online_params, traj_batch.obs)
+                        pi, value = network.apply(target_params, encoded_obs)
                         log_prob = pi.log_prob(traj_batch.action)
 
                         # CALCULATE VALUE LOSS
@@ -293,7 +342,7 @@ def make_train(config):
                         )
                         return total_loss, (value_loss, loss_actor, entropy)
 
-                    grad_fn = jax.value_and_grad(_loss_fn, has_aux=True)
+                    grad_fn = jax.value_and_grad(_rl_loss_fn, has_aux=True)
                     total_loss, grads = grad_fn(
                         network_state.params, traj_batch, advantages, targets
                     )
@@ -349,11 +398,27 @@ def make_train(config):
 
                 jax.debug.callback(callback, metric)
 
-            runner_state = (network_state, env_state, last_obs, rng)
+            runner_state = (
+                network_state,
+                online_state,
+                predicator_state,
+                target_params,
+                env_state,
+                last_obs,
+                rng,
+            )
             return runner_state, metric
 
         rng, _rng = jax.random.split(rng)
-        runner_state = (network_state, env_state, obsv, _rng)
+        runner_state = (
+            network_state,
+            online_state,
+            predicator_state,
+            target_params,
+            env_state,
+            obsv,
+            _rng,
+        )
         runner_state, metric = jax.lax.scan(
             _update_step, runner_state, None, config["NUM_UPDATES"]
         )
