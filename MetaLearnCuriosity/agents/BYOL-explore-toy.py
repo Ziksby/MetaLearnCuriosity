@@ -9,9 +9,11 @@ from flax.training.network_state import TrainState
 import distrax
 import gymnax
 from MetaLearnCuriosity.wrappers import LogWrapper, FlattenObservationWrapper
-
+import jax.tree_util
 
 # THE NETWORKS
+
+
 class TargetEncoder(nn.Module):
     @nn.compact
     def __call__(self, x):
@@ -258,7 +260,8 @@ def make_train(config):
                 last_obs,
                 rng,
             ) = runner_state
-            _, last_val = network.apply(network_state.params, last_obs)
+            encoded_last_obs = online_state.apply(online_state.params, last_obs)
+            _, last_val = network.apply(network_state.params, encoded_last_obs)
 
             def _calculate_gae(traj_batch, last_val):
                 def _get_advantages(gae_and_next_value, transition):
@@ -288,12 +291,24 @@ def make_train(config):
 
             # UPDATE NETWORK
             def _update_epoch(update_state, unused):
-                def _update_minbatch(network_state, batch_info):
+                def _update_minbatch(train_states, batch_info):
+                    (
+                        network_state,
+                        online_state,
+                        predicator_state,
+                        target_params,
+                    ) = train_states
                     traj_batch, advantages, targets = batch_info
 
-                    def _byol_loss(target_params, predicator_params, traj_batch):
+                    def _byol_loss(
+                        predicator_params, online_params, target_params, traj_batch
+                    ):
+                        # encoded_obs = online.apply(online_params, traj_batch.obs)
+                        encoded_last_obs = online.apply(
+                            online_params, traj_batch.last_obs
+                        )
                         pred_obs = predicator.apply(
-                            predicator_params, traj_batch.last_obs, traj_batch.action
+                            predicator_params, encoded_last_obs, traj_batch.action
                         )
                         tar_obs = target.apply(target_params, traj_batch.obs)
                         pred_norm = (pred_obs) / (l2_norm(pred_obs))
@@ -302,11 +317,11 @@ def make_train(config):
                         return loss.mean()
 
                     def _rl_loss_fn(
-                        target_params, online_params, traj_batch, gae, targets
+                        network_params, online_params, traj_batch, gae, targets
                     ):
                         # RERUN NETWORK
                         encoded_obs = online.apply(online_params, traj_batch.obs)
-                        pi, value = network.apply(target_params, encoded_obs)
+                        pi, value = network.apply(network_params, encoded_obs)
                         log_prob = pi.log_prob(traj_batch.action)
 
                         # CALCULATE VALUE LOSS
@@ -335,21 +350,83 @@ def make_train(config):
                         loss_actor = loss_actor.mean()
                         entropy = pi.entropy().mean()
 
-                        total_loss = (
+                        rl_total_loss = (
                             loss_actor
                             + config["VF_COEF"] * value_loss
                             - config["ENT_COEF"] * entropy
                         )
-                        return total_loss, (value_loss, loss_actor, entropy)
+                        return rl_total_loss, (value_loss, loss_actor, entropy)
 
-                    grad_fn = jax.value_and_grad(_rl_loss_fn, has_aux=True)
-                    total_loss, grads = grad_fn(
+                    def _encoder_loss(
+                        network_params,
+                        predicator_params,
+                        online_params,
+                        target_params,
+                        traj_batch,
+                        gae,
+                        targets,
+                    ):
+                        rl_loss, _ = _rl_loss_fn(
+                            network_state.params,
+                            online_state.params,
+                            traj_batch,
+                            gae,
+                            targets,
+                        )
+
+                        byol_loss = _byol_loss(
+                            predicator_state.params,
+                            online_state.params,
+                            target_params,
+                            traj_batch,
+                        )
+
+                        encoder_total_loss = rl_loss + byol_loss
+
+                        # ? Should one take mean of the losses or just sum them together
+
+                        return encoder_total_loss
+
+                    rl_grad_fn = jax.value_and_grad(_rl_loss_fn, has_aux=True)
+                    rl_total_loss, rl_grads = rl_grad_fn(
                         network_state.params, traj_batch, advantages, targets
                     )
-                    network_state = network_state.apply_gradients(grads=grads)
-                    return network_state, total_loss
 
-                network_state, traj_batch, advantages, targets, rng = update_state
+                    byol_grad_fn = jax.grad(_byol_loss)
+                    byol_grad = byol_grad_fn(
+                        predicator_params, online_params, target_params, traj_batch
+                    )
+
+                    encoder_grad_fn = jax.grad(_encoder_loss)
+                    encoder_grad = encoder_grad_fn(
+                        network_params,
+                        predicator_params,
+                        online_params,
+                        target_params,
+                        traj_batch,
+                        advantages,
+                        targets,
+                    )
+
+                    network_state = network_state.apply_gradients(grads=rl_grads)
+                    online_state = online_state.apply_gradients(grads=encoder_grad)
+                    predicator_state = predicator_state.apply_gradients(grads=byol_grad)
+                    target_params = jax.tree_util.tree_map(
+                        lambda target_params, online_params: target_params
+                        * config["EMA_PARAMETER"]
+                        + (1 - config["EMA_PARAMETER"]) * online_params,
+                        target_params,
+                        online_state.params,
+                    )
+
+                    return (
+                        network_state,
+                        online_state,
+                        predicator_state,
+                        target_params,
+                    ), rl_total_loss
+
+                train_states, traj_batch, advantages, targets, rng = update_state
                 rng, _rng = jax.random.split(rng)
                 batch_size = config["MINIBATCH_SIZE"] * config["NUM_MINIBATCHES"]
                 assert (
@@ -369,11 +446,11 @@ def make_train(config):
                     ),
                     shuffled_batch,
                 )
-                network_state, total_loss = jax.lax.scan(
-                    _update_minbatch, network_state, minibatches
+                train_states, rl_total_loss = jax.lax.scan(
+                    _update_minbatch, train_states, minibatches
                 )
-                update_state = (network_state, traj_batch, advantages, targets, rng)
-                return update_state, total_loss
+                update_state = (train_states, traj_batch, advantages, targets, rng)
+                return update_state, rl_total_loss
 
             update_state = (network_state, traj_batch, advantages, targets, rng)
             update_state, loss_info = jax.lax.scan(
@@ -445,6 +522,7 @@ if __name__ == "__main__":
         "ENV_NAME": "CartPole-v1",
         "ANNEAL_LR": True,
         "DEBUG": True,
+        "EMA_PARAMETER": 0.99,
     }
     rng = jax.random.PRNGKey(42)
     train_jit = jax.jit(make_train(config))
