@@ -154,6 +154,9 @@ def make_train(config):
         predicator_params = predicator.init(_predicator_rng, encoded_x, init_action)
         network_params = network.init(_network_rng, encoded_x)
 
+        r_bar = 0
+        r_bar_sq = 0
+        c = 0
         if config["ANNEAL_LR"]:
             tx = optax.chain(
                 optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
@@ -194,6 +197,9 @@ def make_train(config):
                     env_state,
                     last_obs,
                     rng,
+                    r_bar,
+                    r_bar_sq,
+                    c,
                 ) = runner_state
 
                 # SELECT ACTION
@@ -238,6 +244,9 @@ def make_train(config):
                     env_state,
                     obsv,
                     rng,
+                    r_bar,
+                    r_bar_sq,
+                    c,
                 )
 
                 return runner_state, transition
@@ -259,11 +268,56 @@ def make_train(config):
                 env_state,
                 last_obs,
                 rng,
+                r_bar,
+                r_bar_sq,
+                c,
             ) = runner_state
-            encoded_last_obs = online_state.apply(online_state.params, last_obs)
+            encoded_last_obs = online.apply(online_state.params, last_obs)
             _, last_val = network.apply(network_state.params, encoded_last_obs)
 
-            def _calculate_gae(traj_batch, last_val):
+            def _update_reward_norm_params(r_bar, r_bar_sq, c, r_c, r_c_sq):
+                r_bar = (
+                    config["REW_NORM_PARAMETER"] * r_bar
+                    + (1 - config["REW_NORM_PARAMETER"]) * r_c
+                )
+                r_bar_sq = (
+                    config["REW_NORM_PARAMETER"] * r_bar_sq
+                    + (1 - config["REW_NORM_PARAMETER"]) * r_c_sq
+                )
+                c = c + 1
+
+                return r_bar, r_bar_sq, c
+
+            def _normlise_int_rewards(int_reward, r_bar, r_bar_sq, c):
+                r_c = int_reward[:-1].mean()
+                r_c_sq = jnp.square(int_reward[:-1]).mean()
+                r_bar, r_bar_sq, c = _update_reward_norm_params(
+                    r_bar, r_bar_sq, c, r_c, r_c_sq
+                )
+                mu_r = r_bar / (1 - config["REW_NORM_PARAMETER"])
+                mu_r_sq = r_bar_sq / (1 - config["REW_NORM_PARAMETER"])
+                mu_array = jnp.array([0, mu_r_sq - jnp.square(mu_r)])
+                sigma_r = jnp.sqrt(jnp.max(mu_array) + 10e-8)
+                norm_int_reward = int_reward[:-1] / sigma_r
+                return norm_int_reward, r_bar, r_bar_sq, c
+
+            def _calculate_gae(traj_batch, last_val, r_bar, r_bar_sq, c):
+                norm_int_reward, r_bar, r_bar_sq, c = _normlise_int_rewards(
+                    traj_batch.int_reward, r_bar, r_bar_sq, c
+                )
+                # ** I want to loop over the Transitions which is why I am making a new Transition object
+                norm_traj_batch = Transition(
+                    traj_batch.done,
+                    traj_batch.action,
+                    traj_batch.value,
+                    traj_batch.reward,
+                    norm_int_reward,
+                    traj_batch.log_prob,
+                    traj_batch.last_obs,
+                    traj_batch.obsv,
+                    traj_batch.info,
+                )
+
                 def _get_advantages(gae_and_next_value, transition):
                     gae, next_value = gae_and_next_value
                     done, value, reward = (
@@ -271,6 +325,7 @@ def make_train(config):
                         transition.value,
                         transition.reward,
                     )
+
                     delta = reward + config["GAMMA"] * next_value * (1 - done) - value
                     gae = (
                         delta
@@ -281,13 +336,15 @@ def make_train(config):
                 _, advantages = jax.lax.scan(
                     _get_advantages,
                     (jnp.zeros_like(last_val), last_val),
-                    traj_batch,
+                    norm_traj_batch,
                     reverse=True,
                     unroll=16,
                 )
-                return advantages, advantages + traj_batch.value
+                return advantages, advantages + traj_batch.value, r_bar, r_bar_sq, c
 
-            advantages, targets = _calculate_gae(traj_batch, last_val)
+            advantages, targets, r_bar, r_bar_sq, c = _calculate_gae(
+                traj_batch, last_val, r_bar, r_bar_sq, c
+            )
 
             # UPDATE NETWORK
             def _update_epoch(update_state, unused):
@@ -394,14 +451,17 @@ def make_train(config):
 
                     byol_grad_fn = jax.grad(_byol_loss)
                     byol_grad = byol_grad_fn(
-                        predicator_params, online_params, target_params, traj_batch
+                        predicator_state.params,
+                        online_state.params,
+                        target_params,
+                        traj_batch,
                     )
 
-                    encoder_grad_fn = jax.grad(_encoder_loss)
+                    encoder_grad_fn = jax.grad(_encoder_loss, 2)
                     encoder_grad = encoder_grad_fn(
-                        network_params,
-                        predicator_params,
-                        online_params,
+                        network_state.params,
+                        predicator_state.params,
+                        online_state.params,
                         target_params,
                         traj_batch,
                         advantages,
@@ -446,17 +506,25 @@ def make_train(config):
                     ),
                     shuffled_batch,
                 )
+                # ** We are looping over the minibatches
                 train_states, rl_total_loss = jax.lax.scan(
                     _update_minbatch, train_states, minibatches
                 )
                 update_state = (train_states, traj_batch, advantages, targets, rng)
                 return update_state, rl_total_loss
 
-            update_state = (network_state, traj_batch, advantages, targets, rng)
+            train_states = (
+                network_state,
+                online_state,
+                predicator_state,
+                target_params,
+            )
+            update_state = (train_states, traj_batch, advantages, targets, rng)
             update_state, loss_info = jax.lax.scan(
                 _update_epoch, update_state, None, config["UPDATE_EPOCHS"]
             )
-            network_state = update_state[0]
+            train_states = update_state[0]
+            network_state, online_state, predicator_state, target_params = train_states
             metric = traj_batch.info
             rng = update_state[-1]
             if config.get("DEBUG"):
@@ -483,6 +551,9 @@ def make_train(config):
                 env_state,
                 last_obs,
                 rng,
+                r_bar,
+                r_bar_sq,
+                c,
             )
             return runner_state, metric
 
@@ -495,6 +566,9 @@ def make_train(config):
             env_state,
             obsv,
             _rng,
+            r_bar,
+            r_bar_sq,
+            c,
         )
         runner_state, metric = jax.lax.scan(
             _update_step, runner_state, None, config["NUM_UPDATES"]
@@ -523,6 +597,7 @@ if __name__ == "__main__":
         "ANNEAL_LR": True,
         "DEBUG": True,
         "EMA_PARAMETER": 0.99,
+        "REW_NORM_PARAMETER": 0.99,
     }
     rng = jax.random.PRNGKey(42)
     train_jit = jax.jit(make_train(config))
