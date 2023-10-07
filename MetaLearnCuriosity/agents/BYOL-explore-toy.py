@@ -5,7 +5,7 @@ import numpy as np
 import optax
 from flax.linen.initializers import constant, orthogonal
 from typing import Sequence, NamedTuple, Any
-from flax.training.network_state import TrainState
+from flax.training.train_state import TrainState
 import distrax
 import gymnax
 from MetaLearnCuriosity.wrappers import LogWrapper, FlattenObservationWrapper
