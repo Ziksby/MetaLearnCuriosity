@@ -49,11 +49,11 @@ class OnlinePredictor(nn.Module):
     @nn.compact
     def __call__(self, x, action):
 
+        # ! concatenation does not work yet.
         # One-hot encode the action
-        one_hot_action = jax.nn.one_hot(action, self.action_dim)
-
-        inp = jnp.concatenate([x, one_hot_action], axis=-1)
-
+        # one_hot_action = jax.nn.one_hot(action, self.action_dim)
+        # inp = jnp.concatenate([x, one_hot_action])
+        inp = x
         layer_out = nn.Dense(
             64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
         )(inp)
@@ -217,14 +217,15 @@ def make_train(config):
                 )(rng_step, env_state, action, env_params)
 
                 # WORLD MODEL PREDICATION AND TARGET PREDICATION
-                pred_obs = predicator.apply(predicator_state.params, last_obs, action)
+                pred_obs = predicator.apply(
+                    predicator_state.params, encoded_last_obs, action
+                )
                 tar_obs = target.apply(target_params, obsv)
 
                 # int reward
                 pred_norm = (pred_obs) / (l2_norm(pred_obs))
                 tar_norm = (tar_obs) / (l2_norm(tar_obs))
                 int_reward = l2_norm_squared(pred_norm - tar_norm) * (1 - done)
-
                 transition = Transition(
                     done,
                     action,
@@ -289,8 +290,8 @@ def make_train(config):
                 return r_bar, r_bar_sq, c
 
             def _normlise_int_rewards(int_reward, r_bar, r_bar_sq, c):
-                r_c = int_reward[:-1].mean()
-                r_c_sq = jnp.square(int_reward[:-1]).mean()
+                r_c = int_reward.mean()
+                r_c_sq = jnp.square(int_reward).mean()
                 r_bar, r_bar_sq, c = _update_reward_norm_params(
                     r_bar, r_bar_sq, c, r_c, r_c_sq
                 )
@@ -298,7 +299,7 @@ def make_train(config):
                 mu_r_sq = r_bar_sq / (1 - config["REW_NORM_PARAMETER"])
                 mu_array = jnp.array([0, mu_r_sq - jnp.square(mu_r)])
                 sigma_r = jnp.sqrt(jnp.max(mu_array) + 10e-8)
-                norm_int_reward = int_reward[:-1] / sigma_r
+                norm_int_reward = int_reward / sigma_r
                 return norm_int_reward, r_bar, r_bar_sq, c
 
             def _calculate_gae(traj_batch, last_val, r_bar, r_bar_sq, c):
@@ -314,7 +315,7 @@ def make_train(config):
                     norm_int_reward,
                     traj_batch.log_prob,
                     traj_batch.last_obs,
-                    traj_batch.obsv,
+                    traj_batch.obs,
                     traj_batch.info,
                 )
 
@@ -340,7 +341,13 @@ def make_train(config):
                     reverse=True,
                     unroll=16,
                 )
-                return advantages, advantages + traj_batch.value, r_bar, r_bar_sq, c
+                return (
+                    advantages,
+                    advantages + norm_traj_batch.value,
+                    r_bar,
+                    r_bar_sq,
+                    c,
+                )
 
             advantages, targets, r_bar, r_bar_sq, c = _calculate_gae(
                 traj_batch, last_val, r_bar, r_bar_sq, c
@@ -393,7 +400,7 @@ def make_train(config):
 
                         # CALCULATE ACTOR LOSS
                         ratio = jnp.exp(log_prob - traj_batch.log_prob)
-                        gae = (gae - gae.mean()) / (gae.std() + 1e-8)
+                        # gae = (gae - gae.mean()) / (gae.std() + 1e-8)
                         loss_actor1 = ratio * gae
                         loss_actor2 = (
                             jnp.clip(
@@ -446,7 +453,11 @@ def make_train(config):
 
                     rl_grad_fn = jax.value_and_grad(_rl_loss_fn, has_aux=True)
                     rl_total_loss, rl_grads = rl_grad_fn(
-                        network_state.params, traj_batch, advantages, targets
+                        network_state.params,
+                        online_state.params,
+                        traj_batch,
+                        advantages,
+                        targets,
                     )
 
                     byol_grad_fn = jax.grad(_byol_loss)
@@ -490,7 +501,7 @@ def make_train(config):
                 rng, _rng = jax.random.split(rng)
                 batch_size = config["MINIBATCH_SIZE"] * config["NUM_MINIBATCHES"]
                 assert (
-                    batch_size == config["NUM_STEPS"] * config["NUM_ENVS"]
+                    batch_size == (config["NUM_STEPS"]) * config["NUM_ENVS"]
                 ), "batch size must be equal to number of steps * number of envs"
                 permutation = jax.random.permutation(_rng, batch_size)
                 batch = (traj_batch, advantages, targets)
@@ -593,13 +604,12 @@ if __name__ == "__main__":
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
         "ACTIVATION": "tanh",
-        "ENV_NAME": "CartPole-v1",
+        "ENV_NAME": "MountainCar-v0",
         "ANNEAL_LR": True,
-        "DEBUG": True,
+        "DEBUG": False,
         "EMA_PARAMETER": 0.99,
         "REW_NORM_PARAMETER": 0.99,
     }
     rng = jax.random.PRNGKey(42)
     train_jit = jax.jit(make_train(config))
     out = train_jit(rng)
-    print("DONE!")
