@@ -3,3 +3,5 @@ Curiosax_env/
 # Ignore compiled files
 *.pyc
 __pycache__/
+# Ignore Wandb
+wandb/

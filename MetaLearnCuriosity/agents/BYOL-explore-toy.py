@@ -10,6 +10,7 @@ import distrax
 import gymnax
 from MetaLearnCuriosity.wrappers import LogWrapper, FlattenObservationWrapper
 import jax.tree_util
+import wandb
 
 # THE NETWORKS
 
@@ -276,6 +277,8 @@ def make_train(config):
             encoded_last_obs = online.apply(online_state.params, last_obs)
             _, last_val = network.apply(network_state.params, encoded_last_obs)
 
+            # TODO: Add Reward Prioritisation
+
             def _update_reward_norm_params(r_bar, r_bar_sq, c, r_c, r_c_sq):
                 r_bar = (
                     config["REW_NORM_PARAMETER"] * r_bar
@@ -460,16 +463,16 @@ def make_train(config):
                         targets,
                     )
 
-                    byol_grad_fn = jax.grad(_byol_loss)
-                    byol_grad = byol_grad_fn(
+                    byol_grad_fn = jax.value_and_grad(_byol_loss)
+                    byol_loss, byol_grad = byol_grad_fn(
                         predicator_state.params,
                         online_state.params,
                         target_params,
                         traj_batch,
                     )
 
-                    encoder_grad_fn = jax.grad(_encoder_loss, 2)
-                    encoder_grad = encoder_grad_fn(
+                    encoder_grad_fn = jax.value_and_grad(_encoder_loss, 2)
+                    encoder_loss, encoder_grad = encoder_grad_fn(
                         network_state.params,
                         predicator_state.params,
                         online_state.params,
@@ -495,7 +498,7 @@ def make_train(config):
                         online_state,
                         predicator_state,
                         target_params,
-                    ), rl_total_loss
+                    ), (rl_total_loss, byol_loss, encoder_loss)
 
                 train_states, traj_batch, advantages, targets, rng = update_state
                 rng, _rng = jax.random.split(rng)
@@ -518,11 +521,11 @@ def make_train(config):
                     shuffled_batch,
                 )
                 # ** We are looping over the minibatches
-                train_states, rl_total_loss = jax.lax.scan(
+                train_states, total_losses = jax.lax.scan(
                     _update_minbatch, train_states, minibatches
                 )
                 update_state = (train_states, traj_batch, advantages, targets, rng)
-                return update_state, rl_total_loss
+                return update_state, total_losses
 
             train_states = (
                 network_state,
@@ -566,7 +569,7 @@ def make_train(config):
                 r_bar_sq,
                 c,
             )
-            return runner_state, metric
+            return runner_state, (metric, loss_info)
 
         rng, _rng = jax.random.split(rng)
         runner_state = (
@@ -581,10 +584,18 @@ def make_train(config):
             r_bar_sq,
             c,
         )
-        runner_state, metric = jax.lax.scan(
+        runner_state, extra_info = jax.lax.scan(
             _update_step, runner_state, None, config["NUM_UPDATES"]
         )
-        return {"runner_state": runner_state, "metrics": metric}
+        metric, loss_info = extra_info
+        rl_total_loss, byol_loss, encoder_loss = loss_info
+        return {
+            "runner_state": runner_state,
+            "metrics": metric,
+            "rl_loss": rl_total_loss,
+            "byol_loss": byol_loss,
+            "encoder_loss": encoder_loss,
+        }
 
     return train
 
@@ -594,7 +605,7 @@ if __name__ == "__main__":
         "LR": 2.5e-4,
         "NUM_ENVS": 4,
         "NUM_STEPS": 128,
-        "TOTAL_TIMESTEPS": 5e5,
+        "TOTAL_TIMESTEPS": 1e5,
         "UPDATE_EPOCHS": 4,
         "NUM_MINIBATCHES": 4,
         "GAMMA": 0.99,
@@ -604,12 +615,29 @@ if __name__ == "__main__":
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
         "ACTIVATION": "tanh",
-        "ENV_NAME": "MountainCar-v0",
+        "ENV_NAME": "CartPole-v1",
         "ANNEAL_LR": True,
         "DEBUG": False,
         "EMA_PARAMETER": 0.99,
         "REW_NORM_PARAMETER": 0.99,
     }
+    wandb.init(
+        # set the wandb project where this run will be logged
+        project="MetaLearnCuriosity",
+        # track hyperparameters and run metadata
+        config=config,
+    )
     rng = jax.random.PRNGKey(42)
     train_jit = jax.jit(make_train(config))
-    out = train_jit(rng)
+    output = train_jit(rng)
+    wandb.log(
+        {
+            "episode return": output["metrics"]["returned_episode_returns"]
+            .mean(-1)
+            .reshape(-1),
+            "byol_loss": output["byol_loss"].mean(-1).reshape(-1),
+            "encoder_loss": output["encoder_loss"].mean(-1).reshape(-1),
+            "rl_loss": output["rl_loss"][0].mean(-1).reshape(-1),
+        }
+    )
+    wandb.finish()
