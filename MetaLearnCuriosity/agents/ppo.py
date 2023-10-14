@@ -298,6 +298,6 @@ if __name__ == "__main__":
         "ANNEAL_LR": True,
         "DEBUG": True,
     }
-    rng = jax.random.PRNGKey(30)
+    rng = jax.random.PRNGKey(42)
     train_jit = jax.jit(make_train(config))
     out = train_jit(rng)
