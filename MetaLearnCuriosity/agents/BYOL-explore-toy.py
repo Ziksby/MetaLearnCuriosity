@@ -10,62 +10,89 @@ import distrax
 import gymnax
 from MetaLearnCuriosity.wrappers import LogWrapper, FlattenObservationWrapper
 import jax.tree_util
-import wandb
 
 # THE NETWORKS
 
 
 class TargetEncoder(nn.Module):
+    encoder_layer_out_shape: Sequence[int]
+
     @nn.compact
     def __call__(self, x):
         actor_mean = nn.Dense(
-            64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
         )(x)
         actor_mean = nn.tanh(actor_mean)
         actor_mean = nn.Dense(
-            64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
         )(actor_mean)
         actor_mean = nn.tanh(actor_mean)
+        actor_mean = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
+        )(actor_mean)
         return actor_mean
 
 
 class OnlineEncoder(nn.Module):
+    encoder_layer_out_shape: Sequence[int]
+
     @nn.compact
     def __call__(self, x):
         actor_mean = nn.Dense(
-            64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
         )(x)
         actor_mean = nn.tanh(actor_mean)
         actor_mean = nn.Dense(
-            64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
         )(actor_mean)
         actor_mean = nn.tanh(actor_mean)
+        actor_mean = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
+        )(actor_mean)
         return actor_mean
 
 
 # The predictor
 class OnlinePredictor(nn.Module):
-    action_dim: Sequence[int]
+    encoder_layer_out_shape: Sequence[int]
 
     @nn.compact
-    def __call__(self, x, action):
+    def __call__(self, x):
 
         # ! concatenation does not work yet.
         # One-hot encode the action
         # one_hot_action = jax.nn.one_hot(action, self.action_dim)
-        # inp = jnp.concatenate([x, one_hot_action])
-        inp = x
+        # inp = jnp.concatenate((x,action), axis=-1)
+
         layer_out = nn.Dense(
-            64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
-        )(inp)
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
+        )(x)
         layer_out = nn.tanh(layer_out)
         layer_out = nn.Dense(
-            64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
         )(layer_out)
         layer_out = nn.tanh(layer_out)
-        layer_out = nn.Dense(64, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(
-            layer_out
-        )
+        layer_out = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(1.0),
+            bias_init=constant(0.0),
+        )(layer_out)
         return layer_out
 
 
@@ -74,6 +101,8 @@ class ActorCritic(nn.Module):
 
     @nn.compact
     def __call__(self, x):
+
+        # THE ACTOR MEAN
         actor_mean = nn.Dense(
             64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
         )(x)
@@ -107,8 +136,8 @@ class Transition(NamedTuple):
 
 
 # HELPER FUNCTIONS
-def l2_norm_squared(arr, axis=None):
-    return jnp.sum(jnp.square(arr), axis=axis)
+def l2_norm_squared(arr):
+    return jnp.sum(jnp.square(arr))
 
 
 def l2_norm(arr):
@@ -136,10 +165,12 @@ def make_train(config):
 
     def train(rng):
         # INIT NETWORK
+        action_dim = env.action_space(env_params).n
+        encoder_layer_out_shape = 64
         network = ActorCritic(env.action_space(env_params).n)
-        predicator = OnlinePredictor(env.action_space(env_params).n)
-        target = TargetEncoder()
-        online = OnlineEncoder()
+        predicator = OnlinePredictor(encoder_layer_out_shape)
+        target = TargetEncoder(encoder_layer_out_shape)
+        online = OnlineEncoder(encoder_layer_out_shape)
 
         rng, _target_rng = jax.random.split(rng)
         rng, _online_rng = jax.random.split(rng)
@@ -147,12 +178,20 @@ def make_train(config):
         rng, _network_rng = jax.random.split(rng)
 
         init_x = jnp.zeros(env.observation_space(env_params).shape)
-        encoded_x = jnp.zeros((init_x.shape[0], 64))
-        init_action = jnp.zeros(env.action_space(env_params).shape, dtype=jnp.int32)
+
+        encoded_x = jnp.zeros(
+            (env.observation_space(env_params).shape[0], encoder_layer_out_shape)
+        )
+        one_hot_encoded = jnp.zeros(
+            (
+                env.observation_space(env_params).shape[0],
+                (encoder_layer_out_shape + action_dim),
+            )
+        )
 
         target_params = target.init(_target_rng, init_x)
         online_params = online.init(_online_rng, init_x)
-        predicator_params = predicator.init(_predicator_rng, encoded_x, init_action)
+        predicator_params = predicator.init(_predicator_rng, one_hot_encoded)
         network_params = network.init(_network_rng, encoded_x)
 
         r_bar = 0
@@ -218,9 +257,11 @@ def make_train(config):
                 )(rng_step, env_state, action, env_params)
 
                 # WORLD MODEL PREDICATION AND TARGET PREDICATION
-                pred_obs = predicator.apply(
-                    predicator_state.params, encoded_last_obs, action
+                one_hot_action = jax.nn.one_hot(action, action_dim)
+                encoded_one_hot = jnp.concatenate(
+                    (encoded_last_obs, one_hot_action), axis=-1
                 )
+                pred_obs = predicator.apply(predicator_state.params, encoded_one_hot)
                 tar_obs = target.apply(target_params, obsv)
 
                 # int reward
@@ -293,6 +334,7 @@ def make_train(config):
                 return r_bar, r_bar_sq, c
 
             def _normlise_int_rewards(int_reward, r_bar, r_bar_sq, c):
+
                 r_c = int_reward.mean()
                 r_c_sq = jnp.square(int_reward).mean()
                 r_bar, r_bar_sq, c = _update_reward_norm_params(
@@ -309,7 +351,7 @@ def make_train(config):
                 norm_int_reward, r_bar, r_bar_sq, c = _normlise_int_rewards(
                     traj_batch.int_reward, r_bar, r_bar_sq, c
                 )
-                # ** I want to loop over the Transitions which is why I am making a new Transition object
+                # * I want to loop over the Transitions which is why I am making a new Transition object
                 norm_traj_batch = Transition(
                     traj_batch.done,
                     traj_batch.action,
@@ -324,19 +366,23 @@ def make_train(config):
 
                 def _get_advantages(gae_and_next_value, transition):
                     gae, next_value = gae_and_next_value
-                    done, value, reward = (
+                    done, value, reward, int_reward = (
                         transition.done,
                         transition.value,
                         transition.reward,
+                        transition.int_reward,
                     )
-
-                    delta = reward + config["GAMMA"] * next_value * (1 - done) - value
+                    total_reward = reward + (config["INT_LAMBDA"] * int_reward)
+                    delta = (
+                        total_reward + config["GAMMA"] * next_value * (1 - done) - value
+                    )
                     gae = (
                         delta
                         + config["GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
                     )
                     return (gae, value), gae
 
+                # Looping over time steps in the "batch".
                 _, advantages = jax.lax.scan(
                     _get_advantages,
                     (jnp.zeros_like(last_val), last_val),
@@ -374,8 +420,14 @@ def make_train(config):
                         encoded_last_obs = online.apply(
                             online_params, traj_batch.last_obs
                         )
+                        one_hot_action = jax.nn.one_hot(traj_batch.action, action_dim)
+                        encoded_one_hot = jnp.concatenate(
+                            (encoded_last_obs, one_hot_action), axis=-1
+                        )
+
                         pred_obs = predicator.apply(
-                            predicator_params, encoded_last_obs, traj_batch.action
+                            predicator_params,
+                            encoded_one_hot,
                         )
                         tar_obs = target.apply(target_params, traj_batch.obs)
                         pred_norm = (pred_obs) / (l2_norm(pred_obs))
@@ -605,7 +657,7 @@ if __name__ == "__main__":
         "LR": 2.5e-4,
         "NUM_ENVS": 4,
         "NUM_STEPS": 128,
-        "TOTAL_TIMESTEPS": 1e5,
+        "TOTAL_TIMESTEPS": 5e5,
         "UPDATE_EPOCHS": 4,
         "NUM_MINIBATCHES": 4,
         "GAMMA": 0.99,
@@ -615,29 +667,13 @@ if __name__ == "__main__":
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
         "ACTIVATION": "tanh",
-        "ENV_NAME": "CartPole-v1",
+        "ENV_NAME": "MountainCar-v0",
         "ANNEAL_LR": True,
         "DEBUG": False,
         "EMA_PARAMETER": 0.99,
         "REW_NORM_PARAMETER": 0.99,
+        "INT_LAMBDA": 0.1,
     }
-    wandb.init(
-        # set the wandb project where this run will be logged
-        project="MetaLearnCuriosity",
-        # track hyperparameters and run metadata
-        config=config,
-    )
     rng = jax.random.PRNGKey(42)
     train_jit = jax.jit(make_train(config))
     output = train_jit(rng)
-    wandb.log(
-        {
-            "episode return": output["metrics"]["returned_episode_returns"]
-            .mean(-1)
-            .reshape(-1),
-            "byol_loss": output["byol_loss"].mean(-1).reshape(-1),
-            "encoder_loss": output["encoder_loss"].mean(-1).reshape(-1),
-            "rl_loss": output["rl_loss"][0].mean(-1).reshape(-1),
-        }
-    )
-    wandb.finish()
