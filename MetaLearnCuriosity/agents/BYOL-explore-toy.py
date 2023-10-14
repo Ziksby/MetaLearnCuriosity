@@ -1,15 +1,17 @@
+from typing import Any, NamedTuple, Sequence
+
+import distrax
+import flax.linen as nn
+import gymnax
 import jax
 import jax.numpy as jnp
-import flax.linen as nn
+import jax.tree_util
 import numpy as np
 import optax
 from flax.linen.initializers import constant, orthogonal
-from typing import Sequence, NamedTuple, Any
 from flax.training.train_state import TrainState
-import distrax
-import gymnax
-from MetaLearnCuriosity.wrappers import LogWrapper, FlattenObservationWrapper
-import jax.tree_util
+
+from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper
 
 # THE NETWORKS
 
