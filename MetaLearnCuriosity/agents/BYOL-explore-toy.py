@@ -73,10 +73,7 @@ class OnlinePredictor(nn.Module):
     @nn.compact
     def __call__(self, x):
 
-        # ! concatenation does not work yet.
-        # One-hot encode the action
-        # one_hot_action = jax.nn.one_hot(action, self.action_dim)
-        # inp = jnp.concatenate((x,action), axis=-1)
+        # ! concatenation does not work in the call function
 
         layer_out = nn.Dense(
             self.encoder_layer_out_shape,
