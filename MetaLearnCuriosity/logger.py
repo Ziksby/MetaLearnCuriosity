@@ -20,7 +20,7 @@ class WBLogger:
         )
 
         for returns in output["metrics"]["returned_episode_returns"].mean(-1).reshape(-1):
-            self.episode_returns.log({"episode_return": returns})
+            self.episode_returns.log({f"episode_return_{self.config['ENV_NAME']}": returns})
         self.episode_returns.finish()
 
     def log_byol_losses(self, output):
@@ -35,9 +35,15 @@ class WBLogger:
         for loss in range(len(output["rl_loss"][0].mean(-1).reshape(-1))):
             self.losses.log(
                 {
-                    "byol_loss": output["byol_loss"].mean(-1).reshape(-1)[loss],
-                    "encoder_loss": output["encoder_loss"].mean(-1).reshape(-1)[loss],
-                    "rl_loss": output["rl_loss"][0].mean(-1).reshape(-1)[loss],
+                    f"byol_loss_{self.config['ENV_NAME']}": output["byol_loss"]
+                    .mean(-1)
+                    .reshape(-1)[loss],
+                    f"encoder_loss_{self.config['ENV_NAME']}": output["encoder_loss"]
+                    .mean(-1)
+                    .reshape(-1)[loss],
+                    f"rl_loss_{self.config['ENV_NAME']}": output["rl_loss"][0]
+                    .mean(-1)
+                    .reshape(-1)[loss],
                 }
             )
         self.losses.finish()
@@ -53,7 +59,9 @@ class WBLogger:
         for loss in range(len(output["rl_loss"][0].mean(-1).reshape(-1))):
             self.losses.log(
                 {
-                    "rl_loss": output["rl_loss"][0].mean(-1).reshape(-1)[loss],
+                    f"rl_loss_{self.config['ENV_NAME']}": output["rl_loss"][0]
+                    .mean(-1)
+                    .reshape(-1)[loss],
                 }
             )
         self.losses.finish()
