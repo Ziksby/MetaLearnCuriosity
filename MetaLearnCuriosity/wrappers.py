@@ -94,9 +94,7 @@ class LogWrapper(GymnaxWrapper):
         action: Union[int, float],
         params: Optional[environment.EnvParams] = None,
     ) -> Tuple[chex.Array, environment.EnvState, float, bool, dict]:
-        obs, env_state, reward, done, info = self._env.step(
-            key, state.env_state, action, params
-        )
+        obs, env_state, reward, done, info = self._env.step(key, state.env_state, action, params)
         new_episode_return = state.episode_returns + reward
         new_episode_length = state.episode_lengths + 1
         state = LogEnvState(
@@ -236,9 +234,7 @@ class NormalizeVecObservation(GymnaxWrapper):
         return (obs - state.mean) / jnp.sqrt(state.var + 1e-8), state
 
     def step(self, key, state, action, params=None):
-        obs, env_state, reward, done, info = self._env.step(
-            key, state.env_state, action, params
-        )
+        obs, env_state, reward, done, info = self._env.step(key, state.env_state, action, params)
 
         batch_mean = jnp.mean(obs, axis=0)
         batch_var = jnp.var(obs, axis=0)
@@ -296,9 +292,7 @@ class NormalizeVecReward(GymnaxWrapper):
         return obs, state
 
     def step(self, key, state, action, params=None):
-        obs, env_state, reward, done, info = self._env.step(
-            key, state.env_state, action, params
-        )
+        obs, env_state, reward, done, info = self._env.step(key, state.env_state, action, params)
         return_val = state.return_val * self.gamma * (1 - done) + reward
 
         batch_mean = jnp.mean(return_val, axis=0)
