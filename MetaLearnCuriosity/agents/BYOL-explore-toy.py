@@ -472,8 +472,6 @@ def make_train(config):
 
                         encoder_total_loss = rl_loss + byol_loss
 
-                        # ? Should one take mean of the losses or just sum them together
-
                         return encoder_total_loss
 
                     rl_grad_fn = jax.value_and_grad(_rl_loss_fn, has_aux=True)
