@@ -34,11 +34,6 @@ class TargetEncoder(nn.Module):
             bias_init=constant(0.0),
         )(actor_mean)
         actor_mean = nn.tanh(actor_mean)
-        actor_mean = nn.Dense(
-            self.encoder_layer_out_shape,
-            kernel_init=orthogonal(np.sqrt(2)),
-            bias_init=constant(0.0),
-        )(actor_mean)
         return actor_mean
 
 
@@ -59,11 +54,6 @@ class OnlineEncoder(nn.Module):
             bias_init=constant(0.0),
         )(actor_mean)
         actor_mean = nn.tanh(actor_mean)
-        actor_mean = nn.Dense(
-            self.encoder_layer_out_shape,
-            kernel_init=orthogonal(np.sqrt(2)),
-            bias_init=constant(0.0),
-        )(actor_mean)
         return actor_mean
 
 
@@ -112,8 +102,8 @@ class ActorCritic(nn.Module):
 
         # THE CRITIC
         critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
-        actor_mean = nn.tanh(actor_mean)
-        critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(x)
+        critic = nn.tanh(critic)
+        critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(critic)
 
         return pi, jnp.squeeze(critic, axis=-1)
 
@@ -425,7 +415,7 @@ def make_train(config):
 
                         # CALCULATE ACTOR LOSS
                         ratio = jnp.exp(log_prob - traj_batch.log_prob)
-                        # gae = (gae - gae.mean()) / (gae.std() + 1e-8)
+                        gae = (gae - gae.mean()) / (gae.std() + 1e-8)
                         loss_actor1 = ratio * gae
                         loss_actor2 = (
                             jnp.clip(
@@ -557,6 +547,7 @@ def make_train(config):
             train_states = update_state[0]
             network_state, online_state, predicator_state, target_params = train_states
             metric = traj_batch.info
+            int_reward = traj_batch.int_reward
             rng = update_state[-1]
             if config.get("DEBUG"):
 
@@ -580,7 +571,7 @@ def make_train(config):
                 r_bar_sq,
                 c,
             )
-            return runner_state, (metric, loss_info)
+            return runner_state, (metric, loss_info, int_reward)
 
         rng, _rng = jax.random.split(rng)
         runner_state = (
@@ -598,11 +589,12 @@ def make_train(config):
         runner_state, extra_info = jax.lax.scan(
             _update_step, runner_state, None, config["NUM_UPDATES"]
         )
-        metric, loss_info = extra_info
+        metric, loss_info, int_reward = extra_info
         rl_total_loss, byol_loss, encoder_loss = loss_info
         return {
             "runner_state": runner_state,
             "metrics": metric,
+            "int_reward": int_reward,
             "rl_loss": rl_total_loss,
             "byol_loss": byol_loss,
             "encoder_loss": encoder_loss,
@@ -626,7 +618,7 @@ if __name__ == "__main__":
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
         "ACTIVATION": "tanh",
-        "ENV_NAME": "MountainCar-v0",
+        "ENV_NAME": "CartPole-v1",
         "ANNEAL_LR": True,
         "DEBUG": False,
         "EMA_PARAMETER": 0.99,
@@ -637,6 +629,11 @@ if __name__ == "__main__":
     train_jit = jax.jit(make_train(config))
     output = train_jit(rng)
 
-    logger = WBLogger(config=config, group=f"byol_toy/{config['ENV_NAME']}", tags=["toy example"])
+    logger = WBLogger(
+        config=config,
+        group=f"byol_toy/{config['ENV_NAME']}",
+        tags=["toy example"],
+        notes="gae: normed",
+    )
     logger.log_episode_return(output)
     logger.log_byol_losses(output)
