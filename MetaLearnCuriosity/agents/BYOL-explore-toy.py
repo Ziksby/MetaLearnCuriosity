@@ -11,6 +11,7 @@ import optax
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 
+from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper
 
 # THE NETWORKS
@@ -21,24 +22,19 @@ class TargetEncoder(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        actor_mean = nn.Dense(
+        encoded_obs = nn.Dense(
             self.encoder_layer_out_shape,
             kernel_init=orthogonal(np.sqrt(2)),
             bias_init=constant(0.0),
         )(x)
-        actor_mean = nn.tanh(actor_mean)
-        actor_mean = nn.Dense(
+        encoded_obs = nn.tanh(encoded_obs)
+        encoded_obs = nn.Dense(
             self.encoder_layer_out_shape,
-            kernel_init=orthogonal(np.sqrt(2)),
+            kernel_init=orthogonal(np.sqrt(1.0)),
             bias_init=constant(0.0),
-        )(actor_mean)
-        actor_mean = nn.tanh(actor_mean)
-        actor_mean = nn.Dense(
-            self.encoder_layer_out_shape,
-            kernel_init=orthogonal(np.sqrt(2)),
-            bias_init=constant(0.0),
-        )(actor_mean)
-        return actor_mean
+        )(encoded_obs)
+        encoded_obs = nn.tanh(encoded_obs)
+        return encoded_obs
 
 
 class OnlineEncoder(nn.Module):
@@ -46,24 +42,19 @@ class OnlineEncoder(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        actor_mean = nn.Dense(
+        encoded_obs = nn.Dense(
             self.encoder_layer_out_shape,
             kernel_init=orthogonal(np.sqrt(2)),
             bias_init=constant(0.0),
         )(x)
-        actor_mean = nn.tanh(actor_mean)
-        actor_mean = nn.Dense(
+        encoded_obs = nn.tanh(encoded_obs)
+        encoded_obs = nn.Dense(
             self.encoder_layer_out_shape,
-            kernel_init=orthogonal(np.sqrt(2)),
+            kernel_init=orthogonal(np.sqrt(1.0)),
             bias_init=constant(0.0),
-        )(actor_mean)
-        actor_mean = nn.tanh(actor_mean)
-        actor_mean = nn.Dense(
-            self.encoder_layer_out_shape,
-            kernel_init=orthogonal(np.sqrt(2)),
-            bias_init=constant(0.0),
-        )(actor_mean)
-        return actor_mean
+        )(encoded_obs)
+        encoded_obs = nn.tanh(encoded_obs)
+        return encoded_obs
 
 
 # The predictor
@@ -73,10 +64,7 @@ class OnlinePredictor(nn.Module):
     @nn.compact
     def __call__(self, x):
 
-        # ! concatenation does not work yet.
-        # One-hot encode the action
-        # one_hot_action = jax.nn.one_hot(action, self.action_dim)
-        # inp = jnp.concatenate((x,action), axis=-1)
+        # ! concatenation of action and obs does not work in the call function
 
         layer_out = nn.Dense(
             self.encoder_layer_out_shape,
@@ -105,9 +93,11 @@ class ActorCritic(nn.Module):
     def __call__(self, x):
 
         # THE ACTOR MEAN
-        actor_mean = nn.Dense(
-            64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
-        )(x)
+        actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
+        actor_mean = nn.tanh(actor_mean)
+        actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(
+            actor_mean
+        )
         actor_mean = nn.tanh(actor_mean)
         actor_mean = nn.Dense(
             self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
@@ -115,11 +105,11 @@ class ActorCritic(nn.Module):
         pi = distrax.Categorical(logits=actor_mean)
 
         # THE CRITIC
-        critic = nn.Dense(
-            64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0)
-        )(x)
-        actor_mean = nn.tanh(actor_mean)
-        critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(x)
+        critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
+        critic = nn.tanh(critic)
+        critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(critic)
+        critic = nn.tanh(critic)
+        critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(critic)
 
         return pi, jnp.squeeze(critic, axis=-1)
 
@@ -147,12 +137,8 @@ def l2_norm(arr):
 
 
 def make_train(config):
-    config["NUM_UPDATES"] = (
-        config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
-    )
-    config["MINIBATCH_SIZE"] = (
-        config["NUM_ENVS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
-    )
+    config["NUM_UPDATES"] = config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
+    config["MINIBATCH_SIZE"] = config["NUM_ENVS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
     env, env_params = gymnax.make(config["ENV_NAME"])
     env = FlattenObservationWrapper(env)
     env = LogWrapper(env)
@@ -181,9 +167,7 @@ def make_train(config):
 
         init_x = jnp.zeros(env.observation_space(env_params).shape)
 
-        encoded_x = jnp.zeros(
-            (env.observation_space(env_params).shape[0], encoder_layer_out_shape)
-        )
+        encoded_x = jnp.zeros((env.observation_space(env_params).shape[0], encoder_layer_out_shape))
         one_hot_encoded = jnp.zeros(
             (
                 env.observation_space(env_params).shape[0],
@@ -215,9 +199,7 @@ def make_train(config):
             tx=tx,
         )
 
-        online_state = TrainState.create(
-            apply_fn=online.apply, params=online_params, tx=tx
-        )
+        online_state = TrainState.create(apply_fn=online.apply, params=online_params, tx=tx)
         predicator_state = TrainState.create(
             apply_fn=predicator.apply, params=predicator_params, tx=tx
         )
@@ -254,15 +236,13 @@ def make_train(config):
                 # STEP ENV
                 rng, _rng = jax.random.split(rng)
                 rng_step = jax.random.split(_rng, config["NUM_ENVS"])
-                obsv, env_state, reward, done, info = jax.vmap(
-                    env.step, in_axes=(0, 0, 0, None)
-                )(rng_step, env_state, action, env_params)
+                obsv, env_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None))(
+                    rng_step, env_state, action, env_params
+                )
 
                 # WORLD MODEL PREDICATION AND TARGET PREDICATION
                 one_hot_action = jax.nn.one_hot(action, action_dim)
-                encoded_one_hot = jnp.concatenate(
-                    (encoded_last_obs, one_hot_action), axis=-1
-                )
+                encoded_one_hot = jnp.concatenate((encoded_last_obs, one_hot_action), axis=-1)
                 pred_obs = predicator.apply(predicator_state.params, encoded_one_hot)
                 tar_obs = target.apply(target_params, obsv)
 
@@ -324,8 +304,7 @@ def make_train(config):
 
             def _update_reward_norm_params(r_bar, r_bar_sq, c, r_c, r_c_sq):
                 r_bar = (
-                    config["REW_NORM_PARAMETER"] * r_bar
-                    + (1 - config["REW_NORM_PARAMETER"]) * r_c
+                    config["REW_NORM_PARAMETER"] * r_bar + (1 - config["REW_NORM_PARAMETER"]) * r_c
                 )
                 r_bar_sq = (
                     config["REW_NORM_PARAMETER"] * r_bar_sq
@@ -339,9 +318,7 @@ def make_train(config):
 
                 r_c = int_reward.mean()
                 r_c_sq = jnp.square(int_reward).mean()
-                r_bar, r_bar_sq, c = _update_reward_norm_params(
-                    r_bar, r_bar_sq, c, r_c, r_c_sq
-                )
+                r_bar, r_bar_sq, c = _update_reward_norm_params(r_bar, r_bar_sq, c, r_c, r_c_sq)
                 mu_r = r_bar / (1 - config["REW_NORM_PARAMETER"])
                 mu_r_sq = r_bar_sq / (1 - config["REW_NORM_PARAMETER"])
                 mu_array = jnp.array([0, mu_r_sq - jnp.square(mu_r)])
@@ -375,13 +352,8 @@ def make_train(config):
                         transition.int_reward,
                     )
                     total_reward = reward + (config["INT_LAMBDA"] * int_reward)
-                    delta = (
-                        total_reward + config["GAMMA"] * next_value * (1 - done) - value
-                    )
-                    gae = (
-                        delta
-                        + config["GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
-                    )
+                    delta = total_reward + config["GAMMA"] * next_value * (1 - done) - value
+                    gae = delta + config["GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
                     return (gae, value), gae
 
                 # Looping over time steps in the "batch".
@@ -415,13 +387,9 @@ def make_train(config):
                     ) = train_states
                     traj_batch, advantages, targets = batch_info
 
-                    def _byol_loss(
-                        predicator_params, online_params, target_params, traj_batch
-                    ):
+                    def _byol_loss(predicator_params, online_params, target_params, traj_batch):
                         # encoded_obs = online.apply(online_params, traj_batch.obs)
-                        encoded_last_obs = online.apply(
-                            online_params, traj_batch.last_obs
-                        )
+                        encoded_last_obs = online.apply(online_params, traj_batch.last_obs)
                         one_hot_action = jax.nn.one_hot(traj_batch.action, action_dim)
                         encoded_one_hot = jnp.concatenate(
                             (encoded_last_obs, one_hot_action), axis=-1
@@ -437,27 +405,23 @@ def make_train(config):
                         loss = l2_norm_squared(pred_norm - tar_norm)
                         return loss.mean()
 
-                    def _rl_loss_fn(
-                        network_params, online_params, traj_batch, gae, targets
-                    ):
+                    def _rl_loss_fn(network_params, online_params, traj_batch, gae, targets):
                         # RERUN NETWORK
                         encoded_obs = online.apply(online_params, traj_batch.obs)
                         pi, value = network.apply(network_params, encoded_obs)
                         log_prob = pi.log_prob(traj_batch.action)
 
                         # CALCULATE VALUE LOSS
-                        value_pred_clipped = traj_batch.value + (
-                            value - traj_batch.value
-                        ).clip(-config["CLIP_EPS"], config["CLIP_EPS"])
+                        value_pred_clipped = traj_batch.value + (value - traj_batch.value).clip(
+                            -config["CLIP_EPS"], config["CLIP_EPS"]
+                        )
                         value_losses = jnp.square(value - targets)
                         value_losses_clipped = jnp.square(value_pred_clipped - targets)
-                        value_loss = (
-                            0.5 * jnp.maximum(value_losses, value_losses_clipped).mean()
-                        )
+                        value_loss = 0.5 * jnp.maximum(value_losses, value_losses_clipped).mean()
 
                         # CALCULATE ACTOR LOSS
                         ratio = jnp.exp(log_prob - traj_batch.log_prob)
-                        # gae = (gae - gae.mean()) / (gae.std() + 1e-8)
+                        gae = (gae - gae.mean()) / (gae.std() + 1e-8)
                         loss_actor1 = ratio * gae
                         loss_actor2 = (
                             jnp.clip(
@@ -504,8 +468,6 @@ def make_train(config):
 
                         encoder_total_loss = rl_loss + byol_loss
 
-                        # ? Should one take mean of the losses or just sum them together
-
                         return encoder_total_loss
 
                     rl_grad_fn = jax.value_and_grad(_rl_loss_fn, has_aux=True)
@@ -540,8 +502,7 @@ def make_train(config):
                     online_state = online_state.apply_gradients(grads=encoder_grad)
                     predicator_state = predicator_state.apply_gradients(grads=byol_grad)
                     target_params = jax.tree_util.tree_map(
-                        lambda target_params, online_params: target_params
-                        * config["EMA_PARAMETER"]
+                        lambda target_params, online_params: target_params * config["EMA_PARAMETER"]
                         + (1 - config["EMA_PARAMETER"]) * online_params,
                         target_params,
                         online_state.params,
@@ -569,9 +530,7 @@ def make_train(config):
                     lambda x: jnp.take(x, permutation, axis=0), batch
                 )
                 minibatches = jax.tree_util.tree_map(
-                    lambda x: jnp.reshape(
-                        x, [config["NUM_MINIBATCHES"], -1] + list(x.shape[1:])
-                    ),
+                    lambda x: jnp.reshape(x, [config["NUM_MINIBATCHES"], -1] + list(x.shape[1:])),
                     shuffled_batch,
                 )
                 # ** We are looping over the minibatches
@@ -594,20 +553,15 @@ def make_train(config):
             train_states = update_state[0]
             network_state, online_state, predicator_state, target_params = train_states
             metric = traj_batch.info
+            int_reward = traj_batch.int_reward
             rng = update_state[-1]
             if config.get("DEBUG"):
 
                 def callback(info):
-                    return_values = info["returned_episode_returns"][
-                        info["returned_episode"]
-                    ]
-                    timesteps = (
-                        info["timestep"][info["returned_episode"]] * config["NUM_ENVS"]
-                    )
+                    return_values = info["returned_episode_returns"][info["returned_episode"]]
+                    timesteps = info["timestep"][info["returned_episode"]] * config["NUM_ENVS"]
                     for t in range(len(timesteps)):
-                        print(
-                            f"global step={timesteps[t]}, episodic return={return_values[t]}"
-                        )
+                        print(f"global step={timesteps[t]}, episodic return={return_values[t]}")
 
                 jax.debug.callback(callback, metric)
 
@@ -623,7 +577,7 @@ def make_train(config):
                 r_bar_sq,
                 c,
             )
-            return runner_state, (metric, loss_info)
+            return runner_state, (metric, loss_info, int_reward)
 
         rng, _rng = jax.random.split(rng)
         runner_state = (
@@ -641,11 +595,12 @@ def make_train(config):
         runner_state, extra_info = jax.lax.scan(
             _update_step, runner_state, None, config["NUM_UPDATES"]
         )
-        metric, loss_info = extra_info
+        metric, loss_info, int_reward = extra_info
         rl_total_loss, byol_loss, encoder_loss = loss_info
         return {
             "runner_state": runner_state,
             "metrics": metric,
+            "int_reward": int_reward,
             "rl_loss": rl_total_loss,
             "byol_loss": byol_loss,
             "encoder_loss": encoder_loss,
@@ -669,7 +624,7 @@ if __name__ == "__main__":
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
         "ACTIVATION": "tanh",
-        "ENV_NAME": "MountainCar-v0",
+        "ENV_NAME": "Empty-misc",
         "ANNEAL_LR": True,
         "DEBUG": False,
         "EMA_PARAMETER": 0.99,
@@ -679,3 +634,12 @@ if __name__ == "__main__":
     rng = jax.random.PRNGKey(42)
     train_jit = jax.jit(make_train(config))
     output = train_jit(rng)
+
+    logger = WBLogger(
+        config=config,
+        group=f"byol_toy/{config['ENV_NAME']}",
+        tags=["toy example"],
+        notes="gae: normed",
+    )
+    logger.log_episode_return(output)
+    logger.log_byol_losses(output)
