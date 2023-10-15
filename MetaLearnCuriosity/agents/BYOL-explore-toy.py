@@ -11,6 +11,7 @@ import optax
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 
+from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper
 
 # THE NETWORKS
@@ -637,3 +638,7 @@ if __name__ == "__main__":
     rng = jax.random.PRNGKey(42)
     train_jit = jax.jit(make_train(config))
     output = train_jit(rng)
+
+    logger = WBLogger(config=config, group=f"byol_toy/{config['ENV_NAME']}", tags=["toy example"])
+    logger.log_episode_return(output)
+    logger.log_byol_losses(output)

@@ -10,6 +10,7 @@ import optax
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 
+from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper
 
 
@@ -234,12 +235,15 @@ def make_train(config):
                 jax.debug.callback(callback, metric)
 
             runner_state = (train_state, env_state, last_obs, rng)
-            return runner_state, metric
+            return runner_state, (metric, loss_info)
 
         rng, _rng = jax.random.split(rng)
         runner_state = (train_state, env_state, obsv, _rng)
-        runner_state, metric = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
-        return {"runner_state": runner_state, "metrics": metric}
+        runner_state, extra_info = jax.lax.scan(
+            _update_step, runner_state, None, config["NUM_UPDATES"]
+        )
+        metric, rl_loss = extra_info
+        return {"runner_state": runner_state, "metrics": metric, "rl_loss": rl_loss}
 
     return train
 
@@ -261,8 +265,12 @@ if __name__ == "__main__":
         "ACTIVATION": "tanh",
         "ENV_NAME": "CartPole-v1",
         "ANNEAL_LR": True,
-        "DEBUG": True,
+        "DEBUG": False,
     }
     rng = jax.random.PRNGKey(42)
     train_jit = jax.jit(make_train(config))
-    out = train_jit(rng)
+    output = train_jit(rng)
+
+    logger = WBLogger(config=config, group=f"ppo_discrete/{config['ENV_NAME']}", tags=["ppo"])
+    logger.log_episode_return(output)
+    logger.log_rl_losses(output)
