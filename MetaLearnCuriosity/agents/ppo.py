@@ -250,6 +250,8 @@ def make_train(config):
 
 if __name__ == "__main__":
     config = {
+        "SEED": 42,
+        "NUM_SEEDS": 30,
         "LR": 2.5e-4,
         "NUM_ENVS": 4,
         "NUM_STEPS": 128,
