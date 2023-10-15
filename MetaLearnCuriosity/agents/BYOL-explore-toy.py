@@ -22,19 +22,19 @@ class TargetEncoder(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        actor_mean = nn.Dense(
+        encoded_obs = nn.Dense(
             self.encoder_layer_out_shape,
             kernel_init=orthogonal(np.sqrt(2)),
             bias_init=constant(0.0),
         )(x)
-        actor_mean = nn.tanh(actor_mean)
-        actor_mean = nn.Dense(
+        encoded_obs = nn.tanh(encoded_obs)
+        encoded_obs = nn.Dense(
             self.encoder_layer_out_shape,
-            kernel_init=orthogonal(np.sqrt(2)),
+            kernel_init=orthogonal(np.sqrt(1.0)),
             bias_init=constant(0.0),
-        )(actor_mean)
-        actor_mean = nn.tanh(actor_mean)
-        return actor_mean
+        )(encoded_obs)
+        encoded_obs = nn.tanh(encoded_obs)
+        return encoded_obs
 
 
 class OnlineEncoder(nn.Module):
@@ -42,19 +42,19 @@ class OnlineEncoder(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        actor_mean = nn.Dense(
+        encoded_obs = nn.Dense(
             self.encoder_layer_out_shape,
             kernel_init=orthogonal(np.sqrt(2)),
             bias_init=constant(0.0),
         )(x)
-        actor_mean = nn.tanh(actor_mean)
-        actor_mean = nn.Dense(
+        encoded_obs = nn.tanh(encoded_obs)
+        encoded_obs = nn.Dense(
             self.encoder_layer_out_shape,
-            kernel_init=orthogonal(np.sqrt(2)),
+            kernel_init=orthogonal(np.sqrt(1.0)),
             bias_init=constant(0.0),
-        )(actor_mean)
-        actor_mean = nn.tanh(actor_mean)
-        return actor_mean
+        )(encoded_obs)
+        encoded_obs = nn.tanh(encoded_obs)
+        return encoded_obs
 
 
 # The predictor
@@ -95,6 +95,10 @@ class ActorCritic(nn.Module):
         # THE ACTOR MEAN
         actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
         actor_mean = nn.tanh(actor_mean)
+        actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(
+            actor_mean
+        )
+        actor_mean = nn.tanh(actor_mean)
         actor_mean = nn.Dense(
             self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
@@ -102,6 +106,8 @@ class ActorCritic(nn.Module):
 
         # THE CRITIC
         critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
+        critic = nn.tanh(critic)
+        critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(critic)
         critic = nn.tanh(critic)
         critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(critic)
 
@@ -618,7 +624,7 @@ if __name__ == "__main__":
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
         "ACTIVATION": "tanh",
-        "ENV_NAME": "CartPole-v1",
+        "ENV_NAME": "Empty-misc",
         "ANNEAL_LR": True,
         "DEBUG": False,
         "EMA_PARAMETER": 0.99,

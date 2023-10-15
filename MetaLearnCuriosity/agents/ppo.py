@@ -263,7 +263,7 @@ if __name__ == "__main__":
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
         "ACTIVATION": "tanh",
-        "ENV_NAME": "MountainCar-v0",
+        "ENV_NAME": "Empty-misc",
         "ANNEAL_LR": True,
         "DEBUG": False,
     }
