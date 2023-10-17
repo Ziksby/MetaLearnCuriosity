@@ -289,9 +289,14 @@ if __name__ == "__main__":
         "DEBUG": True,
     }
     rng = jax.random.PRNGKey(config["SEED"])
-    rngs = jax.random.split(rng, config["NUM_SEEDS"])
-    train_vjit = jax.jit(jax.vmap(make_train(config)))
-    output = train_vjit(rngs)
+    if config["NUM_SEEDS"] > 1:
+        rngs = jax.random.split(rng, config["NUM_SEEDS"])
+        train_vjit = jax.jit(jax.vmap(make_train(config)))
+        output = train_vjit(rngs)
+
+    else:
+        train_jit = jax.jit(make_train(config))
+        output = train_jit(rng)
 
     logger = WBLogger(config=config, group=f"dpo_cts/{config['ENV_NAME']}", tags=["cts_dpo"])
     logger.log_episode_return(output, config["NUM_SEEDS"])

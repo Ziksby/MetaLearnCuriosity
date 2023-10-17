@@ -340,11 +340,16 @@ if __name__ == "__main__":
         "ANNEAL_LR": True,
         "DEBUG": True,
     }
-
     rng = jax.random.PRNGKey(config["SEED"])
-    rngs = jax.random.split(rng, config["NUM_SEEDS"])
-    train_vjit = jax.jit(jax.vmap(make_train(config)))
-    output = train_vjit(rngs)
+
+    if config["NUM_SEEDS"] > 1:
+        rngs = jax.random.split(rng, config["NUM_SEEDS"])
+        train_vjit = jax.jit(jax.vmap(make_train(config)))
+        output = train_vjit(rngs)
+
+    else:
+        train_jit = jax.jit(make_train(config))
+        output = train_jit(rng)
 
     logger = WBLogger(config=config, group=f"ppo_rnn/{config['ENV_NAME']}", tags=["rnn_ppo"])
     logger.log_episode_return(output, config["NUM_SEEDS"])
