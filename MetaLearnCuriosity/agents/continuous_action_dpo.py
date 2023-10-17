@@ -1,8 +1,15 @@
+"""Re-implementation of Discovered Policy Optimisation (DPO)
+
+https://arxiv.org/abs/2210.05639
+
+This differs from PPO in just a few lines of the policy objective.
+
+Please refer to the paper for more details.
+"""
 from typing import Any, NamedTuple, Sequence
 
 import distrax
 import flax.linen as nn
-import gymnax
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -11,7 +18,14 @@ from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 
 from MetaLearnCuriosity.logger import WBLogger
-from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper
+from MetaLearnCuriosity.wrappers import (
+    BraxGymnaxWrapper,
+    ClipAction,
+    LogWrapper,
+    NormalizeVecObservation,
+    NormalizeVecReward,
+    VecEnv,
+)
 
 
 class ActorCritic(nn.Module):
@@ -24,20 +38,21 @@ class ActorCritic(nn.Module):
             activation = nn.relu
         else:
             activation = nn.tanh
-        actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
+        actor_mean = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
         actor_mean = activation(actor_mean)
-        actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(
+        actor_mean = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(
             actor_mean
         )
         actor_mean = activation(actor_mean)
         actor_mean = nn.Dense(
             self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
-        pi = distrax.Categorical(logits=actor_mean)
+        actor_logtstd = self.param("log_std", nn.initializers.zeros, (self.action_dim,))
+        pi = distrax.MultivariateNormalDiag(actor_mean, jnp.exp(actor_logtstd))
 
-        critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
+        critic = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
         critic = activation(critic)
-        critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(critic)
+        critic = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(critic)
         critic = activation(critic)
         critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(critic)
 
@@ -57,9 +72,13 @@ class Transition(NamedTuple):
 def make_train(config):
     config["NUM_UPDATES"] = config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     config["MINIBATCH_SIZE"] = config["NUM_ENVS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
-    env, env_params = gymnax.make(config["ENV_NAME"])
-    env = FlattenObservationWrapper(env)
+    env, env_params = BraxGymnaxWrapper(config["ENV_NAME"]), None
     env = LogWrapper(env)
+    env = ClipAction(env)
+    env = VecEnv(env)
+    if config["NORMALIZE_ENV"]:
+        env = NormalizeVecObservation(env)
+        env = NormalizeVecReward(env, config["GAMMA"])
 
     def linear_schedule(count):
         frac = (
@@ -71,7 +90,9 @@ def make_train(config):
 
     def train(rng):
         # INIT NETWORK
-        network = ActorCritic(env.action_space(env_params).n, activation=config["ACTIVATION"])
+        network = ActorCritic(
+            env.action_space(env_params).shape[0], activation=config["ACTIVATION"]
+        )
         rng, _rng = jax.random.split(rng)
         init_x = jnp.zeros(env.observation_space(env_params).shape)
         network_params = network.init(_rng, init_x)
@@ -94,7 +115,7 @@ def make_train(config):
         # INIT ENV
         rng, _rng = jax.random.split(rng)
         reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
-        obsv, env_state = jax.vmap(env.reset, in_axes=(0, None))(reset_rng, env_params)
+        obsv, env_state = env.reset(reset_rng, env_params)
 
         # TRAIN LOOP
         def _update_step(runner_state, unused):
@@ -111,7 +132,7 @@ def make_train(config):
                 # STEP ENV
                 rng, _rng = jax.random.split(rng)
                 rng_step = jax.random.split(_rng, config["NUM_ENVS"])
-                obsv, env_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None))(
+                obsv, env_state, reward, done, info = env.step(
                     rng_step, env_state, action, env_params
                 )
                 transition = Transition(done, action, value, reward, log_prob, last_obs, info)
@@ -168,19 +189,17 @@ def make_train(config):
                         value_loss = 0.5 * jnp.maximum(value_losses, value_losses_clipped).mean()
 
                         # CALCULATE ACTOR LOSS
-                        ratio = jnp.exp(log_prob - traj_batch.log_prob)
+                        alpha = config["DPO_ALPHA"]
+                        beta = config["DPO_BETA"]
+                        log_diff = log_prob - traj_batch.log_prob
+                        ratio = jnp.exp(log_diff)
                         gae = (gae - gae.mean()) / (gae.std() + 1e-8)
-                        loss_actor1 = ratio * gae
-                        loss_actor2 = (
-                            jnp.clip(
-                                ratio,
-                                1.0 - config["CLIP_EPS"],
-                                1.0 + config["CLIP_EPS"],
-                            )
-                            * gae
-                        )
-                        loss_actor = -jnp.minimum(loss_actor1, loss_actor2)
-                        loss_actor = loss_actor.mean()
+                        is_pos = (gae >= 0.0).astype("float32")
+                        r1 = ratio - 1.0
+                        drift1 = nn.relu(r1 * gae - alpha * nn.tanh(r1 * gae / alpha))
+                        drift2 = nn.relu(log_diff * gae - beta * nn.tanh(log_diff * gae / beta))
+                        drift = drift1 * is_pos + drift2 * (1 - is_pos)
+                        loss_actor = -(ratio * gae - drift).mean()
                         entropy = pi.entropy().mean()
 
                         total_loss = (
@@ -235,15 +254,12 @@ def make_train(config):
                 jax.debug.callback(callback, metric)
 
             runner_state = (train_state, env_state, last_obs, rng)
-            return runner_state, (metric, loss_info)
+            return runner_state, metric
 
         rng, _rng = jax.random.split(rng)
         runner_state = (train_state, env_state, obsv, _rng)
-        runner_state, extra_info = jax.lax.scan(
-            _update_step, runner_state, None, config["NUM_UPDATES"]
-        )
-        metric, rl_loss = extra_info
-        return {"runner_state": runner_state, "metrics": metric, "rl_loss": rl_loss}
+        runner_state, metric = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
+        return {"runner_state": runner_state, "metrics": metric}
 
     return train
 
@@ -252,28 +268,31 @@ if __name__ == "__main__":
     config = {
         "SEED": 42,
         "NUM_SEEDS": 30,
-        "LR": 2.5e-4,
-        "NUM_ENVS": 4,
-        "NUM_STEPS": 128,
-        "TOTAL_TIMESTEPS": 5e5,
+        "LR": 3e-4,
+        "NUM_ENVS": 2048,
+        "NUM_STEPS": 10,
+        "TOTAL_TIMESTEPS": 5e7,
         "UPDATE_EPOCHS": 4,
-        "NUM_MINIBATCHES": 4,
+        "NUM_MINIBATCHES": 32,
         "GAMMA": 0.99,
         "GAE_LAMBDA": 0.95,
         "CLIP_EPS": 0.2,
-        "ENT_COEF": 0.01,
+        "DPO_ALPHA": 2.0,
+        "DPO_BETA": 0.6,
+        "ENT_COEF": 0.0,
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
         "ACTIVATION": "tanh",
-        "ENV_NAME": "Empty-misc",
-        "ANNEAL_LR": True,
-        "DEBUG": False,
+        "ENV_NAME": "hopper",
+        "ANNEAL_LR": False,
+        "NORMALIZE_ENV": True,
+        "DEBUG": True,
     }
     rng = jax.random.PRNGKey(config["SEED"])
     rngs = jax.random.split(rng, config["NUM_SEEDS"])
     train_vjit = jax.jit(jax.vmap(make_train(config)))
     output = train_vjit(rngs)
 
-    logger = WBLogger(config=config, group=f"ppo_discrete/{config['ENV_NAME']}", tags=["ppo"])
+    logger = WBLogger(config=config, group=f"dpo_cts/{config['ENV_NAME']}", tags=["cts_dpo"])
     logger.log_episode_return(output)
     # logger.log_rl_losses(output)
