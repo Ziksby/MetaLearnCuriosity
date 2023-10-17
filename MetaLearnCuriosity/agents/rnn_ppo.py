@@ -348,4 +348,4 @@ if __name__ == "__main__":
 
     logger = WBLogger(config=config, group=f"ppo_rnn/{config['ENV_NAME']}", tags=["rnn_ppo"])
     logger.log_episode_return(output, config["NUM_SEEDS"])
-    # logger.log_rl_losses(output)
+    logger.log_rl_losses(output, config["NUM_SEEDS"])
