@@ -633,9 +633,10 @@ if __name__ == "__main__":
         "REW_NORM_PARAMETER": 0.99,
         "INT_LAMBDA": 0.1,
     }
-    rng = jax.random.PRNGKey(42)
-    train_jit = jax.jit(make_train(config))
-    output = train_jit(rng)
+    rng = jax.random.PRNGKey(config["SEED"])
+    rngs = jax.random.split(rng, config["NUM_SEEDS"])
+    train_vjit = jax.jit(jax.vmap(make_train(config)))
+    output = train_vjit(rngs)
 
     logger = WBLogger(
         config=config,
@@ -644,4 +645,4 @@ if __name__ == "__main__":
         notes="gae: normed",
     )
     logger.log_episode_return(output)
-    logger.log_byol_losses(output)
+    # logger.log_byol_losses(output)

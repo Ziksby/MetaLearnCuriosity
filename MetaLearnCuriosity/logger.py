@@ -1,5 +1,8 @@
 import datetime
 
+import jax
+import jax.numpy as jnp
+
 import wandb
 
 
@@ -18,8 +21,8 @@ class WBLogger:
             tags=self.tags,
             notes=self.notes,
         )
-
-        for returns in output["metrics"]["returned_episode_returns"].mean(-1).reshape(-1):
+        outs_avg = jnp.mean(output["metrics"]["returned_episode_returns"], axis=0)
+        for returns in outs_avg.mean(-1).reshape(-1):
             self.episode_returns.log({f"episode_return_{self.config['ENV_NAME']}": returns})
         self.episode_returns.finish()
 

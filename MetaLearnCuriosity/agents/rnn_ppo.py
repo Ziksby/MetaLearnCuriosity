@@ -341,6 +341,11 @@ if __name__ == "__main__":
         "DEBUG": True,
     }
 
-    rng = jax.random.PRNGKey(30)
-    train_jit = jax.jit(make_train(config))
-    output = train_jit(rng)
+    rng = jax.random.PRNGKey(config["SEED"])
+    rngs = jax.random.split(rng, config["NUM_SEEDS"])
+    train_vjit = jax.jit(jax.vmap(make_train(config)))
+    output = train_vjit(rngs)
+
+    logger = WBLogger(config=config, group=f"ppo_rnn/{config['ENV_NAME']}", tags=["rnn_ppo"])
+    logger.log_episode_return(output)
+    # logger.log_rl_losses(output)
