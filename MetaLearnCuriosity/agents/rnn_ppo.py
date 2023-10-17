@@ -347,5 +347,5 @@ if __name__ == "__main__":
     output = train_vjit(rngs)
 
     logger = WBLogger(config=config, group=f"ppo_rnn/{config['ENV_NAME']}", tags=["rnn_ppo"])
-    logger.log_episode_return(output)
+    logger.log_episode_return(output, config["NUM_SEEDS"])
     # logger.log_rl_losses(output)

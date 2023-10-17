@@ -644,5 +644,5 @@ if __name__ == "__main__":
         tags=["toy example"],
         notes="gae: normed",
     )
-    logger.log_episode_return(output)
+    logger.log_episode_return(output, config["NUM_SEEDS"])
     # logger.log_byol_losses(output)

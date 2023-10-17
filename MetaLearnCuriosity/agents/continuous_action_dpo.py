@@ -294,5 +294,5 @@ if __name__ == "__main__":
     output = train_vjit(rngs)
 
     logger = WBLogger(config=config, group=f"dpo_cts/{config['ENV_NAME']}", tags=["cts_dpo"])
-    logger.log_episode_return(output)
+    logger.log_episode_return(output, config["NUM_SEEDS"])
     # logger.log_rl_losses(output)
