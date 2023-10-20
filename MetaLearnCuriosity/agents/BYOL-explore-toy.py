@@ -127,15 +127,6 @@ class Transition(NamedTuple):
     info: jnp.ndarray
 
 
-# HELPER FUNCTIONS
-def l2_norm_squared(arr):
-    return jnp.sum(jnp.square(arr))
-
-
-def l2_norm(arr):
-    return jnp.sqrt(jnp.sum(jnp.square(arr)))
-
-
 def make_train(config):
     config["NUM_UPDATES"] = config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     config["MINIBATCH_SIZE"] = config["NUM_ENVS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
@@ -247,9 +238,9 @@ def make_train(config):
                 tar_obs = target.apply(target_params, obsv)
 
                 # int reward
-                pred_norm = (pred_obs) / (l2_norm(pred_obs))
-                tar_norm = (tar_obs) / (l2_norm(tar_obs))
-                int_reward = l2_norm_squared(pred_norm - tar_norm) * (1 - done)
+                pred_norm = (pred_obs) / (jnp.linalg.norm(pred_obs, axis=1)[:, None])
+                tar_norm = (tar_obs) / (jnp.linalg.norm(tar_obs, axis=1)[:, None])
+                int_reward = jnp.square(jnp.linalg.norm((pred_norm - tar_norm), axis=1))
                 transition = Transition(
                     done,
                     action,
@@ -400,9 +391,9 @@ def make_train(config):
                             encoded_one_hot,
                         )
                         tar_obs = target.apply(target_params, traj_batch.obs)
-                        pred_norm = (pred_obs) / (l2_norm(pred_obs))
-                        tar_norm = (tar_obs) / (l2_norm(tar_obs))
-                        loss = l2_norm_squared(pred_norm - tar_norm)
+                        pred_norm = (pred_obs) / (jnp.linalg.norm(pred_obs, axis=1)[:, None])
+                        tar_norm = (tar_obs) / (jnp.linalg.norm(tar_obs, axis=1)[:, None])
+                        loss = jnp.square(jnp.linalg.norm((pred_norm - tar_norm), axis=1))
                         return loss.mean()
 
                     def _rl_loss_fn(network_params, online_params, traj_batch, gae, targets):
@@ -634,9 +625,14 @@ if __name__ == "__main__":
         "INT_LAMBDA": 0.1,
     }
     rng = jax.random.PRNGKey(config["SEED"])
-    rngs = jax.random.split(rng, config["NUM_SEEDS"])
-    train_vjit = jax.jit(jax.vmap(make_train(config)))
-    output = train_vjit(rngs)
+    if config["NUM_SEEDS"] > 1:
+        rngs = jax.random.split(rng, config["NUM_SEEDS"])
+        train_vjit = jax.jit(jax.vmap(make_train(config)))
+        output = train_vjit(rngs)
+
+    else:
+        train_jit = jax.jit(make_train(config))
+        output = train_jit(rng)
 
     logger = WBLogger(
         config=config,
@@ -644,5 +640,6 @@ if __name__ == "__main__":
         tags=["toy example"],
         notes="gae: normed",
     )
-    logger.log_episode_return(output)
-    # logger.log_byol_losses(output)
+    logger.log_episode_return(output, config["NUM_SEEDS"])
+    logger.log_byol_losses(output, config["NUM_SEEDS"])
+    logger.log_int_rewards(output, config["NUM_SEEDS"])
