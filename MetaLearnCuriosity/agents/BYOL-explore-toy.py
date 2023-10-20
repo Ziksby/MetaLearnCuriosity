@@ -642,3 +642,4 @@ if __name__ == "__main__":
     )
     logger.log_episode_return(output, config["NUM_SEEDS"])
     logger.log_byol_losses(output, config["NUM_SEEDS"])
+    logger.log_int_rewards(output, config["NUM_SEEDS"])
