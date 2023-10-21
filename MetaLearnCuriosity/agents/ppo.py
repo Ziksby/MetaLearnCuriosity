@@ -242,8 +242,15 @@ def make_train(config):
         runner_state, extra_info = jax.lax.scan(
             _update_step, runner_state, None, config["NUM_UPDATES"]
         )
-        metric, rl_loss = extra_info
-        return {"runner_state": runner_state, "metrics": metric, "rl_loss": rl_loss}
+        metric, rl_total_loss = extra_info
+        return {
+            "runner_state": runner_state,
+            "metrics": metric,
+            "total_rl_loss": rl_total_loss[0],
+            "rl_value_loss": rl_total_loss[1][0],
+            "rl_actor_loss": rl_total_loss[1][1],
+            "rl_entrophy_loss": rl_total_loss[1][2],
+        }
 
     return train
 

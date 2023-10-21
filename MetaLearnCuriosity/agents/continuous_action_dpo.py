@@ -254,12 +254,22 @@ def make_train(config):
                 jax.debug.callback(callback, metric)
 
             runner_state = (train_state, env_state, last_obs, rng)
-            return runner_state, metric
+            return runner_state, (metric, loss_info)
 
         rng, _rng = jax.random.split(rng)
         runner_state = (train_state, env_state, obsv, _rng)
-        runner_state, metric = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
-        return {"runner_state": runner_state, "metrics": metric}
+        runner_state, extra_info = jax.lax.scan(
+            _update_step, runner_state, None, config["NUM_UPDATES"]
+        )
+        metric, rl_total_loss = extra_info
+        return {
+            "runner_state": runner_state,
+            "metrics": metric,
+            "total_rl_loss": rl_total_loss[0],
+            "rl_value_loss": rl_total_loss[1][0],
+            "rl_actor_loss": rl_total_loss[1][1],
+            "rl_entrophy_loss": rl_total_loss[1][2],
+        }
 
     return train
 
