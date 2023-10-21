@@ -592,7 +592,7 @@ def make_train(config):
             "runner_state": runner_state,
             "metrics": metric,
             "int_reward": int_reward,
-            "total_rl_loss": rl_total_loss[0],
+            "rl_total_loss": rl_total_loss[0],
             "rl_value_loss": rl_total_loss[1][0],
             "rl_actor_loss": rl_total_loss[1][1],
             "rl_entrophy_loss": rl_total_loss[1][2],
@@ -606,7 +606,7 @@ def make_train(config):
 if __name__ == "__main__":
     config = {
         "SEED": 42,
-        "NUM_SEEDS": 1,
+        "NUM_SEEDS": 30,
         "LR": 2.5e-4,
         "NUM_ENVS": 4,
         "NUM_STEPS": 128,
