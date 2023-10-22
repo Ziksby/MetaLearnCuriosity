@@ -34,14 +34,14 @@ assignees: Ziksby
 - Python Version (if applicable): <!--- Specify the Python version, if the bug is related to Python code. -->
 - Other relevant software or versions:
 
-## Screenshots or Code Snippets (if applicable):
+### Screenshots or Code Snippets (if applicable)
 
 <!--- Include screenshots, code snippets, or error messages that help illustrate the bug. -->
 
-## Possible Fix:
+### Possible Fix
 
 <!--- If you have suggestions for a fix or can identify the source of the problem, please provide details here. -->
 
-## Related Issues / Additional Information (Optional):
+### Related Issues / Additional Information (Optional)
 
 <!--- If there are any related issues or pull requests, please link them here. -->
