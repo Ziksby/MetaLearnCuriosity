@@ -288,6 +288,8 @@ if __name__ == "__main__":
         train_jit = jax.jit(make_train(config))
         output = train_jit(rng)
 
-    logger = WBLogger(config=config, group=f"ppo_discrete/{config['ENV_NAME']}", tags=["ppo"])
+    logger = WBLogger(
+        config=config, group=f"ppo_discrete/{config['ENV_NAME']}", tags=["discrete_ppo"]
+    )
     logger.log_episode_return(output, config["NUM_SEEDS"])
     logger.log_rl_losses(output, config["NUM_SEEDS"])
