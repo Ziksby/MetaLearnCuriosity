@@ -70,9 +70,8 @@ class WBLogger:
 
         if num_seeds > 1:
             byol_avg = jnp.mean(output["byol_loss"], axis=0)
-            rl_avg = jnp.mean(output["rl_loss"][0], axis=0)
             encoder_avg = jnp.mean(output["encoder_loss"], axis=0)
-            for loss in range(len(rl_avg.mean(-1).reshape(-1))):
+            for loss in range(len(byol_avg.mean(-1).reshape(-1))):
                 self.losses.log(
                     {
                         f"byol_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": byol_avg.mean(
@@ -85,24 +84,18 @@ class WBLogger:
                         )[
                             loss
                         ],
-                        f"rl_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": rl_avg.mean(
-                            -1
-                        ).reshape(-1)[loss],
                     }
                 )
             self.losses.finish()
         else:
 
-            for loss in range(len(output["rl_loss"][0].mean(-1).reshape(-1))):
+            for loss in range(len(output["byol_loss"].mean(-1).reshape(-1))):
                 self.losses.log(
                     {
                         f"byol_loss_{self.config['ENV_NAME']}": output["byol_loss"]
                         .mean(-1)
                         .reshape(-1)[loss],
                         f"encoder_loss_{self.config['ENV_NAME']}": output["encoder_loss"]
-                        .mean(-1)
-                        .reshape(-1)[loss],
-                        f"rl_loss_{self.config['ENV_NAME']}": output["rl_loss"][0]
                         .mean(-1)
                         .reshape(-1)[loss],
                     }
@@ -118,27 +111,61 @@ class WBLogger:
             notes=self.notes,
         )
         if num_seeds > 1:
-            rl_avg = jnp.mean(output["rl_loss"][0], axis=0)
-
-            for loss in range(len(rl_avg.mean(-1).reshape(-1))):
+            rl_total_avg = jnp.mean(output["rl_total_loss"], axis=0)
+            rl_value_avg = jnp.mean(output["rl_value_loss"], axis=0)
+            rl_actor_avg = jnp.mean(output["rl_actor_loss"], axis=0)
+            rl_entrophy_avg = jnp.mean(output["rl_entrophy_loss"], axis=0)
+            for loss in range(len(rl_total_avg.mean(-1).reshape(-1))):
                 self.losses.log(
                     {
-                        f"rl_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": rl_avg.mean(
+                        f"rl_total_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": rl_total_avg.mean(
                             -1
-                        ).reshape(-1)[loss],
+                        ).reshape(
+                            -1
+                        )[
+                            loss
+                        ],
+                        f"rl_value_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": rl_value_avg.mean(
+                            1
+                        ).reshape(
+                            -1
+                        )[
+                            loss
+                        ],
+                        f"rl_actor_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": rl_actor_avg.mean(
+                            1
+                        ).reshape(
+                            -1
+                        )[
+                            loss
+                        ],
+                        f"rl_entrophy_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": rl_entrophy_avg.mean(
+                            1
+                        ).reshape(
+                            -1
+                        )[
+                            loss
+                        ],
                     }
                 )
             self.losses.finish()
         else:
 
-            for loss in range(len(output["rl_loss"][0].mean(-1).reshape(-1))):
+            for loss in range(len(output["rl_total_loss"].mean(-1).reshape(-1))):
                 self.losses.log(
                     {
-                        f"rl_loss_{self.config['ENV_NAME']}": output["rl_loss"][0]
+                        f"rl_total_loss_{self.config['ENV_NAME']}": output["rl_total_loss"]
                         .mean(-1)
-                        .reshape(-1)[loss]
+                        .reshape(-1)[loss],
+                        f"rl_value_loss_{self.config['ENV_NAME']}": output["rl_value_loss"]
+                        .mean(-1)
+                        .reshape(-1)[loss],
+                        f"rl_actor_loss_{self.config['ENV_NAME']}": output["rl_actor_loss"]
+                        .mean(-1)
+                        .reshape(-1)[loss],
+                        f"rl_entrophy_loss_{self.config['ENV_NAME']}": output["rl_entrophy_loss"]
+                        .mean(-1)
+                        .reshape(-1)[loss],
                     }
                 )
             self.losses.finish()
-
-        print(output["rl_loss"][0].shape)

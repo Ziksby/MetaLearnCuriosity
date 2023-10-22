@@ -592,7 +592,10 @@ def make_train(config):
             "runner_state": runner_state,
             "metrics": metric,
             "int_reward": int_reward,
-            "rl_loss": rl_total_loss,
+            "rl_total_loss": rl_total_loss[0],
+            "rl_value_loss": rl_total_loss[1][0],
+            "rl_actor_loss": rl_total_loss[1][1],
+            "rl_entrophy_loss": rl_total_loss[1][2],
             "byol_loss": byol_loss,
             "encoder_loss": encoder_loss,
         }
@@ -641,5 +644,6 @@ if __name__ == "__main__":
         notes="gae: normed",
     )
     logger.log_episode_return(output, config["NUM_SEEDS"])
-    logger.log_byol_losses(output, config["NUM_SEEDS"])
     logger.log_int_rewards(output, config["NUM_SEEDS"])
+    logger.log_byol_losses(output, config["NUM_SEEDS"])
+    logger.log_rl_losses(output, config["NUM_SEEDS"])
