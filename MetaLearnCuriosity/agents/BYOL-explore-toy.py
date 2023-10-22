@@ -116,6 +116,7 @@ class ActorCritic(nn.Module):
 
 # THE TRANSITION CLASS
 class Transition(NamedTuple):
+    prev_done: jnp.ndarray
     done: jnp.ndarray
     action: jnp.ndarray
     value: jnp.ndarray
@@ -199,6 +200,7 @@ def make_train(config):
         rng, _rng = jax.random.split(rng)
         reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
         obsv, env_state = jax.vmap(env.reset, in_axes=(0, None))(reset_rng, env_params)
+        prev_done = jnp.zeros(config["NUM_ENVS"], dtype=jnp.bool_)
 
         # TRAIN LOOP
         def _update_step(runner_state, unused):
@@ -211,6 +213,7 @@ def make_train(config):
                     target_params,
                     env_state,
                     last_obs,
+                    prev_done,
                     rng,
                     r_bar,
                     r_bar_sq,
@@ -230,7 +233,6 @@ def make_train(config):
                 obsv, env_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None))(
                     rng_step, env_state, action, env_params
                 )
-
                 # WORLD MODEL PREDICATION AND TARGET PREDICATION
                 one_hot_action = jax.nn.one_hot(action, action_dim)
                 encoded_one_hot = jnp.concatenate((encoded_last_obs, one_hot_action), axis=-1)
@@ -240,8 +242,11 @@ def make_train(config):
                 # int reward
                 pred_norm = (pred_obs) / (jnp.linalg.norm(pred_obs, axis=1)[:, None])
                 tar_norm = (tar_obs) / (jnp.linalg.norm(tar_obs, axis=1)[:, None])
-                int_reward = jnp.square(jnp.linalg.norm((pred_norm - tar_norm), axis=1))
+                int_reward = jnp.square(jnp.linalg.norm((pred_norm - tar_norm), axis=1)) * (
+                    1 - prev_done
+                )
                 transition = Transition(
+                    prev_done,
                     done,
                     action,
                     value,
@@ -252,6 +257,7 @@ def make_train(config):
                     obsv,
                     info,
                 )
+
                 runner_state = (
                     network_state,
                     online_state,
@@ -259,6 +265,7 @@ def make_train(config):
                     target_params,
                     env_state,
                     obsv,
+                    done,
                     rng,
                     r_bar,
                     r_bar_sq,
@@ -283,6 +290,7 @@ def make_train(config):
                 target_params,
                 env_state,
                 last_obs,
+                prev_done,
                 rng,
                 r_bar,
                 r_bar_sq,
@@ -323,6 +331,7 @@ def make_train(config):
                 )
                 # * I want to loop over the Transitions which is why I am making a new Transition object
                 norm_traj_batch = Transition(
+                    traj_batch.prev_done,
                     traj_batch.done,
                     traj_batch.action,
                     traj_batch.value,
@@ -563,6 +572,7 @@ def make_train(config):
                 target_params,
                 env_state,
                 last_obs,
+                prev_done,
                 rng,
                 r_bar,
                 r_bar_sq,
@@ -578,6 +588,7 @@ def make_train(config):
             target_params,
             env_state,
             obsv,
+            prev_done,
             _rng,
             r_bar,
             r_bar_sq,
@@ -625,7 +636,7 @@ if __name__ == "__main__":
         "DEBUG": False,
         "EMA_PARAMETER": 0.99,
         "REW_NORM_PARAMETER": 0.99,
-        "INT_LAMBDA": 0.1,
+        "INT_LAMBDA": 0.8,
     }
     rng = jax.random.PRNGKey(config["SEED"])
     if config["NUM_SEEDS"] > 1:
@@ -640,7 +651,7 @@ if __name__ == "__main__":
     logger = WBLogger(
         config=config,
         group=f"byol_toy/{config['ENV_NAME']}",
-        tags=["toy example"],
+        tags=["byol_toy example"],
         notes="gae: normed",
     )
     logger.log_episode_return(output, config["NUM_SEEDS"])
