@@ -402,7 +402,9 @@ def make_train(config):
                         tar_obs = target.apply(target_params, traj_batch.obs)
                         pred_norm = (pred_obs) / (jnp.linalg.norm(pred_obs, axis=1)[:, None])
                         tar_norm = (tar_obs) / (jnp.linalg.norm(tar_obs, axis=1)[:, None])
-                        loss = jnp.square(jnp.linalg.norm((pred_norm - tar_norm), axis=1))
+                        loss = jnp.square(jnp.linalg.norm((pred_norm - tar_norm), axis=1)) * (
+                            1 - traj_batch.prev_done
+                        )
                         return loss.mean()
 
                     def _rl_loss_fn(network_params, online_params, traj_batch, gae, targets):
