@@ -5,3 +5,5 @@ Curiosax_env/
 __pycache__/
 # Ignore Wandb
 wandb/
+# Ignore experiment data
+MLC_logs/
