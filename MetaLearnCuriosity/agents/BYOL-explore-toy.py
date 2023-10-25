@@ -454,16 +454,16 @@ def make_train(config):
                         targets,
                     ):
                         rl_loss, _ = _rl_loss_fn(
-                            network_state.params,
-                            online_state.params,
+                            network_params,
+                            online_params,
                             traj_batch,
                             gae,
                             targets,
                         )
 
                         byol_loss = _byol_loss(
-                            predicator_state.params,
-                            online_state.params,
+                            predicator_params,
+                            online_params,
                             target_params,
                             traj_batch,
                         )
