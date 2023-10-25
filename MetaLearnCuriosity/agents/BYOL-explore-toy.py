@@ -336,7 +336,7 @@ def make_train(config):
                     traj_batch.action,
                     traj_batch.value,
                     traj_batch.reward,
-                    norm_int_reward,
+                    traj_batch.int_reward,
                     traj_batch.log_prob,
                     traj_batch.last_obs,
                     traj_batch.obs,
@@ -638,7 +638,7 @@ if __name__ == "__main__":
         "DEBUG": False,
         "EMA_PARAMETER": 0.99,
         "REW_NORM_PARAMETER": 0.99,
-        "INT_LAMBDA": 0.8,
+        "INT_LAMBDA": 0.0125,
     }
     rng = jax.random.PRNGKey(config["SEED"])
     if config["NUM_SEEDS"] > 1:
