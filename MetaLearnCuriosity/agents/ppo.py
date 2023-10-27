@@ -10,6 +10,7 @@ import optax
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 
+from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper
 
@@ -289,7 +290,12 @@ if __name__ == "__main__":
         output = train_jit(rng)
 
     logger = WBLogger(
-        config=config, group=f"ppo_discrete/{config['ENV_NAME']}", tags=["discrete_ppo"]
+        config=config,
+        group=f"ppo_discrete/{config['ENV_NAME']}",
+        tags=["discrete_ppo"],
+        name="dis_ppo",
     )
     logger.log_episode_return(output, config["NUM_SEEDS"])
     logger.log_rl_losses(output, config["NUM_SEEDS"])
+
+    Save(f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/dis_ppo_{config["NUM_SEEDS"]}', output)

@@ -11,8 +11,8 @@ import optax
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 
+from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
-from MetaLearnCuriosity.saver import Save
 from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper
 
 # THE NETWORKS
@@ -656,10 +656,11 @@ if __name__ == "__main__":
         group=f"byol_toy/{config['ENV_NAME']}",
         tags=["byol_toy example"],
         notes="gae: normed",
+        name="BYOL_toy",
     )
     logger.log_episode_return(output, config["NUM_SEEDS"])
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_byol_losses(output, config["NUM_SEEDS"])
     logger.log_rl_losses(output, config["NUM_SEEDS"])
 
-    Save(f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/BYOL', output)
+    Save(f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/BYOL_{config["NUM_SEEDS"]}', output)

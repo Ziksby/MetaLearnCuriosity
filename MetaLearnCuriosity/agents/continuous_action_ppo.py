@@ -9,6 +9,7 @@ import optax
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 
+from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.wrappers import (
     BraxGymnaxWrapper,
@@ -300,6 +301,10 @@ if __name__ == "__main__":
         train_jit = jax.jit(make_train(config))
         output = train_jit(rng)
 
-    logger = WBLogger(config=config, group=f"ppo_cts/{config['ENV_NAME']}", tags=["cts_ppo"])
+    logger = WBLogger(
+        config=config, group=f"ppo_cts/{config['ENV_NAME']}", tags=["cts_ppo"], name="cts_ppo"
+    )
     logger.log_episode_return(output, config["NUM_SEEDS"])
     logger.log_rl_losses(output, config["NUM_SEEDS"])
+
+    Save(f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/cts_ppo_{config["NUM_SEEDS"]}', output)

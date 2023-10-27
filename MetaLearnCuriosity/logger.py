@@ -7,15 +7,17 @@ import wandb
 
 
 class WBLogger:
-    def __init__(self, config, group, tags, notes=None):
+    def __init__(self, config, group, tags, name, notes=None):
         self.config = config
         self.tags = tags
         self.group = group
         self.notes = notes
+        self.name = name
 
     def log_episode_return(self, output, num_seeds):
         self.episode_returns = wandb.init(
             project="MetaLearnCuriosity",
+            name=f"{self.name}_epi_ret",
             config=self.config,
             group=self.group,
             tags=self.tags,
@@ -43,6 +45,7 @@ class WBLogger:
             group=self.group,
             tags=self.tags,
             notes=self.notes,
+            name=f"{self.name}_int_rew",
         )
 
         if num_seeds > 1:
@@ -66,6 +69,7 @@ class WBLogger:
             group=self.group,
             tags=self.tags,
             notes=self.notes,
+            name=f"{self.name}_byol_loss",
         )
 
         if num_seeds > 1:
@@ -109,6 +113,7 @@ class WBLogger:
             group=self.group,
             tags=self.tags,
             notes=self.notes,
+            name=f"{self.name}_rl_loss",
         )
         if num_seeds > 1:
             rl_total_avg = jnp.mean(output["rl_total_loss"], axis=0)
