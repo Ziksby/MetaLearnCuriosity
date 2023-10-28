@@ -333,6 +333,7 @@ def make_train(config):
 
 if __name__ == "__main__":
     config = {
+        "RUN_NAME": "rnn_ppo",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -363,9 +364,12 @@ if __name__ == "__main__":
         output = train_jit(rng)
 
     logger = WBLogger(
-        config=config, group=f"ppo_rnn/{config['ENV_NAME']}", tags=["rnn_ppo"], name="rnn_ppo"
+        config=config,
+        group=f"ppo_rnn/{config['ENV_NAME']}",
+        tags=["rnn_ppo"],
+        name=config["RUN_NAME"],
     )
     logger.log_episode_return(output, config["NUM_SEEDS"])
     logger.log_rl_losses(output, config["NUM_SEEDS"])
-
+    output["config"] = config
     Save(f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/rnn_ppo_{config["NUM_SEEDS"]}', output)

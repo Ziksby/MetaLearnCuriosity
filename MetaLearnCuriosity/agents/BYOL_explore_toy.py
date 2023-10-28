@@ -87,7 +87,7 @@ class OnlinePredictor(nn.Module):
         return layer_out
 
 
-class ActorCritic(nn.Module):
+class BYOLActorCritic(nn.Module):
     action_dim: Sequence[int]
 
     @nn.compact
@@ -129,7 +129,7 @@ class Transition(NamedTuple):
     info: jnp.ndarray
 
 
-def make_train(config):
+def byol_make_train(config):
     config["NUM_UPDATES"] = config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     config["MINIBATCH_SIZE"] = config["NUM_ENVS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
     env, env_params = gymnax.make(config["ENV_NAME"])
@@ -148,7 +148,7 @@ def make_train(config):
         # INIT NETWORK
         action_dim = env.action_space(env_params).n
         encoder_layer_out_shape = 64
-        network = ActorCritic(env.action_space(env_params).n)
+        network = BYOLActorCritic(env.action_space(env_params).n)
         predicator = OnlinePredictor(encoder_layer_out_shape)
         target = TargetEncoder(encoder_layer_out_shape)
         online = OnlineEncoder(encoder_layer_out_shape)
@@ -619,6 +619,7 @@ def make_train(config):
 
 if __name__ == "__main__":
     config = {
+        "RUN_NAME": "BYOL_toy",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -644,11 +645,11 @@ if __name__ == "__main__":
     rng = jax.random.PRNGKey(config["SEED"])
     if config["NUM_SEEDS"] > 1:
         rngs = jax.random.split(rng, config["NUM_SEEDS"])
-        train_vjit = jax.jit(jax.vmap(make_train(config)))
+        train_vjit = jax.jit(jax.vmap(byol_make_train(config)))
         output = train_vjit(rngs)
 
     else:
-        train_jit = jax.jit(make_train(config))
+        train_jit = jax.jit(byol_make_train(config))
         output = train_jit(rng)
 
     logger = WBLogger(
@@ -656,11 +657,13 @@ if __name__ == "__main__":
         group=f"byol_toy/{config['ENV_NAME']}",
         tags=["byol_toy example"],
         notes="gae: normed",
-        name="BYOL_toy",
+        name=config["RUN_NAME"],
     )
     logger.log_episode_return(output, config["NUM_SEEDS"])
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_byol_losses(output, config["NUM_SEEDS"])
     logger.log_rl_losses(output, config["NUM_SEEDS"])
+
+    output["config"] = config
 
     Save(f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/BYOL_{config["NUM_SEEDS"]}', output)
