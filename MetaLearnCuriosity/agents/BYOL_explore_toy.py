@@ -11,6 +11,7 @@ import optax
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 
+from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper
 
@@ -86,7 +87,7 @@ class OnlinePredictor(nn.Module):
         return layer_out
 
 
-class ActorCritic(nn.Module):
+class BYOLActorCritic(nn.Module):
     action_dim: Sequence[int]
 
     @nn.compact
@@ -128,7 +129,7 @@ class Transition(NamedTuple):
     info: jnp.ndarray
 
 
-def make_train(config):
+def byol_make_train(config):
     config["NUM_UPDATES"] = config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     config["MINIBATCH_SIZE"] = config["NUM_ENVS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
     env, env_params = gymnax.make(config["ENV_NAME"])
@@ -147,7 +148,7 @@ def make_train(config):
         # INIT NETWORK
         action_dim = env.action_space(env_params).n
         encoder_layer_out_shape = 64
-        network = ActorCritic(env.action_space(env_params).n)
+        network = BYOLActorCritic(env.action_space(env_params).n)
         predicator = OnlinePredictor(encoder_layer_out_shape)
         target = TargetEncoder(encoder_layer_out_shape)
         online = OnlineEncoder(encoder_layer_out_shape)
@@ -336,7 +337,7 @@ def make_train(config):
                     traj_batch.action,
                     traj_batch.value,
                     traj_batch.reward,
-                    norm_int_reward,
+                    traj_batch.int_reward,
                     traj_batch.log_prob,
                     traj_batch.last_obs,
                     traj_batch.obs,
@@ -402,7 +403,9 @@ def make_train(config):
                         tar_obs = target.apply(target_params, traj_batch.obs)
                         pred_norm = (pred_obs) / (jnp.linalg.norm(pred_obs, axis=1)[:, None])
                         tar_norm = (tar_obs) / (jnp.linalg.norm(tar_obs, axis=1)[:, None])
-                        loss = jnp.square(jnp.linalg.norm((pred_norm - tar_norm), axis=1))
+                        loss = jnp.square(jnp.linalg.norm((pred_norm - tar_norm), axis=1)) * (
+                            1 - traj_batch.prev_done
+                        )
                         return loss.mean()
 
                     def _rl_loss_fn(network_params, online_params, traj_batch, gae, targets):
@@ -452,16 +455,16 @@ def make_train(config):
                         targets,
                     ):
                         rl_loss, _ = _rl_loss_fn(
-                            network_state.params,
-                            online_state.params,
+                            network_params,
+                            online_params,
                             traj_batch,
                             gae,
                             targets,
                         )
 
                         byol_loss = _byol_loss(
-                            predicator_state.params,
-                            online_state.params,
+                            predicator_params,
+                            online_params,
                             target_params,
                             traj_batch,
                         )
@@ -616,6 +619,7 @@ def make_train(config):
 
 if __name__ == "__main__":
     config = {
+        "RUN_NAME": "BYOL_toy",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -636,16 +640,16 @@ if __name__ == "__main__":
         "DEBUG": False,
         "EMA_PARAMETER": 0.99,
         "REW_NORM_PARAMETER": 0.99,
-        "INT_LAMBDA": 0.8,
+        "INT_LAMBDA": 0.0125,
     }
     rng = jax.random.PRNGKey(config["SEED"])
     if config["NUM_SEEDS"] > 1:
         rngs = jax.random.split(rng, config["NUM_SEEDS"])
-        train_vjit = jax.jit(jax.vmap(make_train(config)))
+        train_vjit = jax.jit(jax.vmap(byol_make_train(config)))
         output = train_vjit(rngs)
 
     else:
-        train_jit = jax.jit(make_train(config))
+        train_jit = jax.jit(byol_make_train(config))
         output = train_jit(rng)
 
     logger = WBLogger(
@@ -653,8 +657,13 @@ if __name__ == "__main__":
         group=f"byol_toy/{config['ENV_NAME']}",
         tags=["byol_toy example"],
         notes="gae: normed",
+        name=config["RUN_NAME"],
     )
     logger.log_episode_return(output, config["NUM_SEEDS"])
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_byol_losses(output, config["NUM_SEEDS"])
     logger.log_rl_losses(output, config["NUM_SEEDS"])
+
+    output["config"] = config
+
+    Save(f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/BYOL_{config["NUM_SEEDS"]}', output)

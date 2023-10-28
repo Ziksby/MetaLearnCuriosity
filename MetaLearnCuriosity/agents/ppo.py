@@ -10,11 +10,12 @@ import optax
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 
+from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper
 
 
-class ActorCritic(nn.Module):
+class PPOActorCritic(nn.Module):
     action_dim: Sequence[int]
     activation: str = "tanh"
 
@@ -54,7 +55,7 @@ class Transition(NamedTuple):
     info: jnp.ndarray
 
 
-def make_train(config):
+def ppo_make_train(config):
     config["NUM_UPDATES"] = config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     config["MINIBATCH_SIZE"] = config["NUM_ENVS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
     env, env_params = gymnax.make(config["ENV_NAME"])
@@ -71,7 +72,7 @@ def make_train(config):
 
     def train(rng):
         # INIT NETWORK
-        network = ActorCritic(env.action_space(env_params).n, activation=config["ACTIVATION"])
+        network = PPOActorCritic(env.action_space(env_params).n, activation=config["ACTIVATION"])
         rng, _rng = jax.random.split(rng)
         init_x = jnp.zeros(env.observation_space(env_params).shape)
         network_params = network.init(_rng, init_x)
@@ -257,6 +258,7 @@ def make_train(config):
 
 if __name__ == "__main__":
     config = {
+        "RUN_NAME": "dis_ppo",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -281,15 +283,20 @@ if __name__ == "__main__":
 
     if config["NUM_SEEDS"] > 1:
         rngs = jax.random.split(rng, config["NUM_SEEDS"])
-        train_vjit = jax.jit(jax.vmap(make_train(config)))
+        train_vjit = jax.jit(jax.vmap(ppo_make_train(config)))
         output = train_vjit(rngs)
 
     else:
-        train_jit = jax.jit(make_train(config))
+        train_jit = jax.jit(ppo_make_train(config))
         output = train_jit(rng)
 
     logger = WBLogger(
-        config=config, group=f"ppo_discrete/{config['ENV_NAME']}", tags=["discrete_ppo"]
+        config=config,
+        group=f"ppo_discrete/{config['ENV_NAME']}",
+        tags=["discrete_ppo"],
+        name=config["RUN_NAME"],
     )
     logger.log_episode_return(output, config["NUM_SEEDS"])
     logger.log_rl_losses(output, config["NUM_SEEDS"])
+    output["config"] = config
+    Save(f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/dis_ppo_{config["NUM_SEEDS"]}', output)

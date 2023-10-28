@@ -33,11 +33,12 @@ glfw==2.6.2
 grpcio==1.59.0
 gym==0.26.2
 gym-notices==0.0.8
-gymnax @ git+https://github.com/Ziksby/gymnax.git@2ccdc967251125413ff5aa39a0acd885b852f066
+gymnax @ git+https://github.com/Ziksby/gymnax.git@4177cba82ef97e7c2f61a6d6ffbdc3d57ddaf791
 identify==2.5.30
 idna==3.4
 importlib-metadata==6.8.0
 importlib-resources==6.1.0
+isort==5.12.0
 itsdangerous==2.1.2
 jax==0.4.13
 jaxlib==0.4.13+cuda12.cudnn89
@@ -59,6 +60,7 @@ opt-einsum==3.3.0
 optax==0.1.7
 orbax-checkpoint==0.2.3
 packaging==23.1
+pandas==2.0.3
 pathtools==0.1.2
 Pillow==10.0.1
 pkg_resources==0.0.0
@@ -71,6 +73,7 @@ PyOpenGL==3.1.7
 pyparsing==3.1.1
 python-dateutil==2.8.2
 pytinyrenderer==0.0.14
+pytz==2023.3.post1
 PyYAML==6.0.1
 requests==2.31.0
 rich==13.6.0
@@ -85,6 +88,7 @@ tensorstore==0.1.45
 toolz==0.12.0
 trimesh==3.23.5
 typing_extensions==4.5.0
+tzdata==2023.3
 urllib3==2.0.6
 virtualenv==20.24.5
 wandb==0.15.12

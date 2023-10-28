@@ -13,6 +13,7 @@ from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 from gymnax.environments import spaces
 
+from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper
 
@@ -332,6 +333,7 @@ def make_train(config):
 
 if __name__ == "__main__":
     config = {
+        "RUN_NAME": "rnn_ppo",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -346,7 +348,7 @@ if __name__ == "__main__":
         "ENT_COEF": 0.01,
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
-        "ENV_NAME": "CartPole-v1",
+        "ENV_NAME": "Empty-misc",
         "ANNEAL_LR": True,
         "DEBUG": True,
     }
@@ -361,6 +363,13 @@ if __name__ == "__main__":
         train_jit = jax.jit(make_train(config))
         output = train_jit(rng)
 
-    logger = WBLogger(config=config, group=f"ppo_rnn/{config['ENV_NAME']}", tags=["rnn_ppo"])
+    logger = WBLogger(
+        config=config,
+        group=f"ppo_rnn/{config['ENV_NAME']}",
+        tags=["rnn_ppo"],
+        name=config["RUN_NAME"],
+    )
     logger.log_episode_return(output, config["NUM_SEEDS"])
     logger.log_rl_losses(output, config["NUM_SEEDS"])
+    output["config"] = config
+    Save(f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/rnn_ppo_{config["NUM_SEEDS"]}', output)
