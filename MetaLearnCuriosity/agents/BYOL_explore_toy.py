@@ -175,7 +175,7 @@ def byol_make_train(config):
 
         r_bar = 0
         r_bar_sq = 0
-        c = 0
+        c = 1
         if config["ANNEAL_LR"]:
             tx = optax.chain(
                 optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
@@ -319,8 +319,8 @@ def byol_make_train(config):
                 r_c = int_reward.mean()
                 r_c_sq = jnp.square(int_reward).mean()
                 r_bar, r_bar_sq, c = _update_reward_norm_params(r_bar, r_bar_sq, c, r_c, r_c_sq)
-                mu_r = r_bar / (1 - config["REW_NORM_PARAMETER"])
-                mu_r_sq = r_bar_sq / (1 - config["REW_NORM_PARAMETER"])
+                mu_r = r_bar / (1 - config["REW_NORM_PARAMETER"] ** c)
+                mu_r_sq = r_bar_sq / (1 - config["REW_NORM_PARAMETER"] ** c)
                 mu_array = jnp.array([0, mu_r_sq - jnp.square(mu_r)])
                 sigma_r = jnp.sqrt(jnp.max(mu_array) + 10e-8)
                 norm_int_reward = int_reward / sigma_r
@@ -337,7 +337,7 @@ def byol_make_train(config):
                     traj_batch.action,
                     traj_batch.value,
                     traj_batch.reward,
-                    traj_batch.int_reward,
+                    norm_int_reward,
                     traj_batch.log_prob,
                     traj_batch.last_obs,
                     traj_batch.obs,
