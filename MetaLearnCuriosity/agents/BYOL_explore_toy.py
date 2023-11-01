@@ -308,10 +308,10 @@ def byol_make_train(config):  # noqa: C901
 
             # TODO: Add Reward Prioritisation
 
-            def _update_reward_prior_norm(int_reward, mu_l):
+            def _update_reward_prior_norm(norm_int_reward, mu_l):
                 mu_l = (
                     config["REW_NORM_PARAMETER"] * mu_l
-                    + (1 - config["REW_NORM_PARAMETER"]) * int_reward.mean()
+                    + (1 - config["REW_NORM_PARAMETER"]) * norm_int_reward.mean()
                 )
                 return mu_l
 
@@ -336,7 +336,6 @@ def byol_make_train(config):  # noqa: C901
                 mu_r_sq = r_bar_sq / (1 - config["REW_NORM_PARAMETER"] ** c)
                 mu_array = jnp.array([0, mu_r_sq - jnp.square(mu_r)])
                 sigma_r = jnp.sqrt(jnp.max(mu_array) + 10e-8)
-                # adjusted_mu_l = mu_l / sigma_r
                 norm_int_reward = int_reward / sigma_r
                 mu_l = _update_reward_prior_norm(norm_int_reward, mu_l)
                 prior_norm_int_reward = jnp.maximum(norm_int_reward - mu_l, 0)
