@@ -299,4 +299,5 @@ if __name__ == "__main__":
     logger.log_episode_return(output, config["NUM_SEEDS"])
     logger.log_rl_losses(output, config["NUM_SEEDS"])
     output["config"] = config
-    Save(f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/dis_ppo_{config["NUM_SEEDS"]}', output)
+    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/dis_ppo_{config["NUM_SEEDS"]}'
+    Save(path, output)

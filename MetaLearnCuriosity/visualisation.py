@@ -3,35 +3,30 @@ import jax
 import jax.numpy as jnp
 from gymnax.visualize import Visualizer
 
-from MetaLearnCuriosity.agents.BYOL_explore_toy import (
-    BYOLActorCritic,
-    OnlineEncoder,
-    byol_make_train,
-)
-from MetaLearnCuriosity.agents.ppo import PPOActorCritic, ppo_make_train
+from MetaLearnCuriosity.agents.BYOL_explore_toy import BYOLActorCritic, OnlineEncoder
+from MetaLearnCuriosity.agents.ppo import PPOActorCritic
 from MetaLearnCuriosity.checkpoints import Restore
 from MetaLearnCuriosity.wrappers import FlattenObservationWrapper
 
 
-def train_best_seed(rng, make_train, config):
-    """
-    Train an RL agent for the best seed using a given training function.
+def extract_best_seed_params(output, best_seed, index):
+    params = {}
+    best_params = {}
+    # Assuming all Dense layers have the same keys
+    dense_keys = output["runner_state"][index]["params"]["params"].keys()
 
-    Parameters:
-    - rng (jax.random.PRNGKey): Random number generator key.
-    - make_train (function): A function that creates a training process for the RL agent.
-    - config (dict): Configuration parameters for the training process.
-
-    Returns:
-    - output: The result of the training process.
-    """
-
-    train_jit = jax.jit(make_train(config))
-    output = train_jit(rng)
-    return output
+    for layer_key in dense_keys:
+        params[layer_key] = {
+            "kernel": output["runner_state"][index]["params"]["params"][layer_key]["kernel"][
+                best_seed
+            ],
+            "bias": output["runner_state"][index]["params"]["params"][layer_key]["bias"][best_seed],
+        }
+    best_params["params"] = params
+    return best_params
 
 
-def find_best_seed_params(path, agent_type, make_train):
+def find_best_seed_params(path, agent_type):
     """
     Find the best seed parameters for an RL agent from a saved checkpoint.
 
@@ -56,23 +51,17 @@ def find_best_seed_params(path, agent_type, make_train):
             ).mean()
             performance_per_seed.append(current_mean)
         best_seed = jnp.argmax(jnp.array(performance_per_seed))
+        agent_params = extract_best_seed_params(output, best_seed, 0)
         if agent_type == "BYOL":
-            rng = output["runner_state"][-4][best_seed]
-            out = train_best_seed(rng, make_train, output["config"])
-            runner_state = out["runner_state"]
-            online_params = runner_state[1].params
+            online_params = extract_best_seed_params(output, best_seed, 1)
         else:
-            rng = output["runner_state"][-1][best_seed]
-            out = train_best_seed(rng, make_train, output["config"])
-            runner_state = out["runner_state"]
             online_params = None
-        agent_params = runner_state[0].params
     else:
         if agent_type == "BYOL":
-            online_params = runner_state[1].params
+            online_params = runner_state[1]["params"]
         else:
             online_params = None
-        agent_params = runner_state[0].params
+        agent_params = runner_state[0]["params"]
 
     return agent_params, online_params
 

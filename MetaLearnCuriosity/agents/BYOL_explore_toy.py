@@ -129,7 +129,7 @@ class Transition(NamedTuple):
     info: jnp.ndarray
 
 
-def byol_make_train(config):
+def byol_make_train(config):  # noqa: C901
     config["NUM_UPDATES"] = config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     config["MINIBATCH_SIZE"] = config["NUM_ENVS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
     env, env_params = gymnax.make(config["ENV_NAME"])
@@ -175,7 +175,8 @@ def byol_make_train(config):
 
         r_bar = 0
         r_bar_sq = 0
-        c = 0
+        mu_l = 0
+        c = 1
         if config["ANNEAL_LR"]:
             tx = optax.chain(
                 optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
@@ -215,10 +216,11 @@ def byol_make_train(config):
                     env_state,
                     last_obs,
                     prev_done,
-                    rng,
                     r_bar,
                     r_bar_sq,
                     c,
+                    mu_l,
+                    rng,
                 ) = runner_state
 
                 # SELECT ACTION
@@ -242,7 +244,9 @@ def byol_make_train(config):
 
                 # int reward
                 pred_norm = (pred_obs) / (jnp.linalg.norm(pred_obs, axis=1)[:, None])
-                tar_norm = (tar_obs) / (jnp.linalg.norm(tar_obs, axis=1)[:, None])
+                tar_norm = jax.lax.stop_gradient(
+                    (tar_obs) / (jnp.linalg.norm(tar_obs, axis=1)[:, None])
+                )
                 int_reward = jnp.square(jnp.linalg.norm((pred_norm - tar_norm), axis=1)) * (
                     1 - prev_done
                 )
@@ -267,10 +271,11 @@ def byol_make_train(config):
                     env_state,
                     obsv,
                     done,
-                    rng,
                     r_bar,
                     r_bar_sq,
                     c,
+                    mu_l,
+                    rng,
                 )
 
                 return runner_state, transition
@@ -292,15 +297,23 @@ def byol_make_train(config):
                 env_state,
                 last_obs,
                 prev_done,
-                rng,
                 r_bar,
                 r_bar_sq,
                 c,
+                mu_l,
+                rng,
             ) = runner_state
             encoded_last_obs = online.apply(online_state.params, last_obs)
             _, last_val = network.apply(network_state.params, encoded_last_obs)
 
             # TODO: Add Reward Prioritisation
+
+            def _update_reward_prior_norm(norm_int_reward, mu_l):
+                mu_l = (
+                    config["REW_NORM_PARAMETER"] * mu_l
+                    + (1 - config["REW_NORM_PARAMETER"]) * norm_int_reward.mean()
+                )
+                return mu_l
 
             def _update_reward_norm_params(r_bar, r_bar_sq, c, r_c, r_c_sq):
                 r_bar = (
@@ -314,21 +327,23 @@ def byol_make_train(config):
 
                 return r_bar, r_bar_sq, c
 
-            def _normlise_int_rewards(int_reward, r_bar, r_bar_sq, c):
+            def _normlise_prior_int_rewards(int_reward, r_bar, r_bar_sq, c, mu_l):
 
                 r_c = int_reward.mean()
                 r_c_sq = jnp.square(int_reward).mean()
                 r_bar, r_bar_sq, c = _update_reward_norm_params(r_bar, r_bar_sq, c, r_c, r_c_sq)
-                mu_r = r_bar / (1 - config["REW_NORM_PARAMETER"])
-                mu_r_sq = r_bar_sq / (1 - config["REW_NORM_PARAMETER"])
+                mu_r = r_bar / (1 - config["REW_NORM_PARAMETER"] ** c)
+                mu_r_sq = r_bar_sq / (1 - config["REW_NORM_PARAMETER"] ** c)
                 mu_array = jnp.array([0, mu_r_sq - jnp.square(mu_r)])
                 sigma_r = jnp.sqrt(jnp.max(mu_array) + 10e-8)
                 norm_int_reward = int_reward / sigma_r
-                return norm_int_reward, r_bar, r_bar_sq, c
+                mu_l = _update_reward_prior_norm(norm_int_reward, mu_l)
+                prior_norm_int_reward = jnp.maximum(norm_int_reward - mu_l, 0)
+                return prior_norm_int_reward, r_bar, r_bar_sq, c, mu_l
 
-            def _calculate_gae(traj_batch, last_val, r_bar, r_bar_sq, c):
-                norm_int_reward, r_bar, r_bar_sq, c = _normlise_int_rewards(
-                    traj_batch.int_reward, r_bar, r_bar_sq, c
+            def _calculate_gae(traj_batch, last_val, r_bar, r_bar_sq, c, mu_l):
+                prior_norm_int_reward, r_bar, r_bar_sq, c, mu_l = _normlise_prior_int_rewards(
+                    traj_batch.int_reward, r_bar, r_bar_sq, c, mu_l
                 )
                 # * I want to loop over the Transitions which is why I am making a new Transition object
                 norm_traj_batch = Transition(
@@ -337,7 +352,7 @@ def byol_make_train(config):
                     traj_batch.action,
                     traj_batch.value,
                     traj_batch.reward,
-                    traj_batch.int_reward,
+                    prior_norm_int_reward,
                     traj_batch.log_prob,
                     traj_batch.last_obs,
                     traj_batch.obs,
@@ -371,10 +386,11 @@ def byol_make_train(config):
                     r_bar,
                     r_bar_sq,
                     c,
+                    mu_l,
                 )
 
-            advantages, targets, r_bar, r_bar_sq, c = _calculate_gae(
-                traj_batch, last_val, r_bar, r_bar_sq, c
+            advantages, targets, r_bar, r_bar_sq, c, mu_l = _calculate_gae(
+                traj_batch, last_val, r_bar, r_bar_sq, c, mu_l
             )
 
             # UPDATE NETWORK
@@ -402,7 +418,9 @@ def byol_make_train(config):
                         )
                         tar_obs = target.apply(target_params, traj_batch.obs)
                         pred_norm = (pred_obs) / (jnp.linalg.norm(pred_obs, axis=1)[:, None])
-                        tar_norm = (tar_obs) / (jnp.linalg.norm(tar_obs, axis=1)[:, None])
+                        tar_norm = jax.lax.stop_gradient(
+                            (tar_obs) / (jnp.linalg.norm(tar_obs, axis=1)[:, None])
+                        )
                         loss = jnp.square(jnp.linalg.norm((pred_norm - tar_norm), axis=1)) * (
                             1 - traj_batch.prev_done
                         )
@@ -576,10 +594,11 @@ def byol_make_train(config):
                 env_state,
                 last_obs,
                 prev_done,
-                rng,
                 r_bar,
                 r_bar_sq,
                 c,
+                mu_l,
+                rng,
             )
             return runner_state, (metric, loss_info, int_reward)
 
@@ -592,10 +611,11 @@ def byol_make_train(config):
             env_state,
             obsv,
             prev_done,
-            _rng,
             r_bar,
             r_bar_sq,
             c,
+            mu_l,
+            _rng,
         )
         runner_state, extra_info = jax.lax.scan(
             _update_step, runner_state, None, config["NUM_UPDATES"]
@@ -640,7 +660,7 @@ if __name__ == "__main__":
         "DEBUG": False,
         "EMA_PARAMETER": 0.99,
         "REW_NORM_PARAMETER": 0.99,
-        "INT_LAMBDA": 0.0125,
+        "INT_LAMBDA": 0.005,
     }
     rng = jax.random.PRNGKey(config["SEED"])
     if config["NUM_SEEDS"] > 1:
@@ -663,7 +683,6 @@ if __name__ == "__main__":
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_byol_losses(output, config["NUM_SEEDS"])
     logger.log_rl_losses(output, config["NUM_SEEDS"])
-
+    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/BYOL_{config["NUM_SEEDS"]}'
     output["config"] = config
-
-    Save(f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/BYOL_{config["NUM_SEEDS"]}', output)
+    Save(path, output)
