@@ -306,8 +306,6 @@ def byol_make_train(config):  # noqa: C901
             encoded_last_obs = online.apply(online_state.params, last_obs)
             _, last_val = network.apply(network_state.params, encoded_last_obs)
 
-            # TODO: Add Reward Prioritisation
-
             def _update_reward_prior_norm(norm_int_reward, mu_l):
                 mu_l = (
                     config["REW_NORM_PARAMETER"] * mu_l
@@ -639,7 +637,7 @@ def byol_make_train(config):  # noqa: C901
 
 if __name__ == "__main__":
     config = {
-        "RUN_NAME": "BYOL_toy",
+        "RUN_NAME": "BYOL_Lite",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -655,7 +653,7 @@ if __name__ == "__main__":
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
         "ACTIVATION": "tanh",
-        "ENV_NAME": "Empty-misc",
+        "ENV_NAME": "DeepSea-bsuite",
         "ANNEAL_LR": True,
         "DEBUG": False,
         "EMA_PARAMETER": 0.99,

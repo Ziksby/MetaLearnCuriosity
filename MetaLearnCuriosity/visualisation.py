@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 from gymnax.visualize import Visualizer
 
-from MetaLearnCuriosity.agents.BYOL_explore_toy import BYOLActorCritic, OnlineEncoder
+from MetaLearnCuriosity.agents.byol_explore_lite import BYOLActorCritic, OnlineEncoder
 from MetaLearnCuriosity.agents.ppo import PPOActorCritic
 from MetaLearnCuriosity.checkpoints import Restore
 from MetaLearnCuriosity.wrappers import FlattenObservationWrapper
@@ -33,7 +33,6 @@ def find_best_seed_params(path, agent_type):
     Parameters:
     - path (str): Path to the checkpoint.
     - agent_type (str): The type of RL agent ("BYOL" or "PPO").
-    - make_train (function): A function that creates a training process for the RL agent.
 
     Returns:
     - agent_params: Parameters for the agent network.
@@ -66,12 +65,12 @@ def find_best_seed_params(path, agent_type):
     return agent_params, online_params
 
 
-def visualise_gymnax(env, path, agent_type, make_train):
+def visualise_gymnax(env, path, agent_type):
     """
-    Visualize the performance of an RL agent in a Gym environment and create an animation.
+    Visualize the performance of an RL agent in a gymnax environment and create an animation.
 
     Parameters:
-    - env: The Gym environment to visualize.
+    - env: The gymnax environment to visualize.
     - path (str): Path to the checkpoint.
     - agent_type (str): The type of RL agent ("BYOL" or "PPO").
     """
@@ -80,7 +79,7 @@ def visualise_gymnax(env, path, agent_type, make_train):
     state_seq, reward_seq = [], []
     rng, rng_reset = jax.random.split(rng)
 
-    agent_params, online_params = find_best_seed_params(path, agent_type, make_train)
+    agent_params, online_params = find_best_seed_params(path, agent_type)
     env, env_params = gymnax.make(env)
     env = FlattenObservationWrapper(env)
     action_dim = env.action_space(env_params).n
