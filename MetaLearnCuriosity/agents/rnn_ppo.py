@@ -29,6 +29,7 @@ class ScannedRNN(nn.Module):
     @nn.compact
     def __call__(self, carry, x):
         """Applies the module."""
+        features = carry[0].shape[-1]
         rnn_state = carry
         ins, resets = x
         rnn_state = jnp.where(
@@ -36,13 +37,15 @@ class ScannedRNN(nn.Module):
             self.initialize_carry(ins.shape[0], ins.shape[1]),
             rnn_state,
         )
-        new_rnn_state, y = nn.GRUCell()(rnn_state, ins)
+        new_rnn_state, y = nn.GRUCell(features)(rnn_state, ins)
         return new_rnn_state, y
 
     @staticmethod
     def initialize_carry(batch_size, hidden_size):
         # Use a dummy key since the default state init fn is just zeros.
-        return nn.GRUCell.initialize_carry(jax.random.PRNGKey(0), (batch_size,), hidden_size)
+        return nn.GRUCell(hidden_size, parent=None).initialize_carry(
+            jax.random.PRNGKey(0), (*(batch_size,), hidden_size)
+        )
 
 
 class ActorCriticRNN(nn.Module):
@@ -333,7 +336,7 @@ def make_train(config):
 
 if __name__ == "__main__":
     config = {
-        "RUN_NAME": "rnn_ppo",
+        "RUN_NAME": "rnn_ppo_DC",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -348,9 +351,9 @@ if __name__ == "__main__":
         "ENT_COEF": 0.01,
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
-        "ENV_NAME": "Empty-misc",
+        "ENV_NAME": "DiscountingChain-bsuite",
         "ANNEAL_LR": True,
-        "DEBUG": True,
+        "DEBUG": False,
     }
     rng = jax.random.PRNGKey(config["SEED"])
 

@@ -258,7 +258,7 @@ def ppo_make_train(config):
 
 if __name__ == "__main__":
     config = {
-        "RUN_NAME": "dis_ppo_deepsea",
+        "RUN_NAME": "dis_ppo_4R",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -274,7 +274,7 @@ if __name__ == "__main__":
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
         "ACTIVATION": "tanh",
-        "ENV_NAME": "DeepSea-bsuite",
+        "ENV_NAME": "FourRooms-misc",
         "ANNEAL_LR": True,
         "DEBUG": False,
     }
