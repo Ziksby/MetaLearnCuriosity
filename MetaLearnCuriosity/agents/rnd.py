@@ -146,6 +146,10 @@ def ppo_make_train(config):
                 optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
                 optax.adam(config["LR"], eps=1e-5),
             )
+        pred_tx = optax.chain(
+            optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+            optax.adam(config["LR"], eps=1e-5),
+        )
         network_state = TrainState.create(
             apply_fn=network.apply,
             params=network_params,
@@ -155,7 +159,7 @@ def ppo_make_train(config):
         predictor_state = TrainState.create(
             apply_fn=predictor.apply,
             params=pred_params,
-            tx=tx,
+            tx=pred_tx,
         )
 
         # INIT ENV
