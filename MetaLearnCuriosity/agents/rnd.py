@@ -297,7 +297,9 @@ def ppo_make_train(config):
                         transition.int_reward,
                     )
                     delta = (
-                        (reward + int_reward) + config["GAMMA"] * next_value * (1 - done) - value
+                        (reward + config["INT_LAMBDA"] * int_reward)
+                        + config["GAMMA"] * next_value * (1 - done)
+                        - value
                     )
                     gae = delta + config["GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
                     return (gae, value), gae
@@ -376,7 +378,7 @@ def ppo_make_train(config):
                     )
                     network_state = network_state.apply_gradients(grads=rl_grads)
                     predictor_state = predictor_state.apply_gradients(grads=rnd_grad)
-                    network_state, predictor_state, target_params = train_states
+                    train_states = network_state, predictor_state, target_params
                     return train_states, (total_rl_loss, rnd_loss)
 
                 train_states, traj_batch, advantages, targets, rng = update_state
@@ -469,7 +471,7 @@ def ppo_make_train(config):
 
 if __name__ == "__main__":
     config = {
-        "RUN_NAME": "rnd_999",
+        "RUN_NAME": "rnd",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -489,7 +491,7 @@ if __name__ == "__main__":
         "ANNEAL_LR": True,
         "DEBUG": False,
         "INT_GAMMA": 0.99,
-        "INT_LAMBDA": 0.005,
+        "INT_LAMBDA": 0.001,
     }
 
     rng = jax.random.PRNGKey(config["SEED"])
@@ -514,5 +516,5 @@ if __name__ == "__main__":
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_rnd_losses(output, config["NUM_SEEDS"])
     output["config"] = config
-    # path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/rnd_{config["NUM_SEEDS"]}'
-    # Save(path, output)
+    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/rnd_{config["NUM_SEEDS"]}'
+    Save(path, output)
