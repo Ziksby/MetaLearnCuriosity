@@ -194,7 +194,7 @@ def ppo_make_train(config):
                 )
 
                 # INT REWARD
-                tar_obsv = target.apply(target_params, obsv)
+                tar_obsv = jax.lax.stop_gradient(target.apply(target_params, obsv))
                 pred_obsv = predictor.apply(pred_params, obsv)
                 int_reward = jnp.square(jnp.linalg.norm((pred_obsv - tar_obsv), ord=1, axis=1))
 
@@ -319,7 +319,7 @@ def ppo_make_train(config):
 
                     def _rnd_loss(pred_params, target_params, traj_batch):
                         # RERUN NETWORK
-                        tar_obs = target.apply(target_params, traj_batch.obs)
+                        tar_obs = jax.lax.stop_gradient(target.apply(target_params, traj_batch.obs))
                         pred_obs = predictor.apply(pred_params, traj_batch.obs)
                         loss = jnp.square(jnp.linalg.norm((pred_obs - tar_obs), ord=1, axis=1))
                         return loss.mean()
@@ -484,7 +484,7 @@ if __name__ == "__main__":
         "ENV_NAME": "Empty-misc",
         "ANNEAL_LR": True,
         "DEBUG": False,
-        "INT_GAMMA": 0.999,
+        "INT_GAMMA": 0.99,
         "INT_LAMBDA": 0.005,
     }
 
