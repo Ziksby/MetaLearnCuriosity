@@ -10,6 +10,7 @@ import optax
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 
+# from MetaLearnCuriosity.utils import make_obs_gymnax_discrete
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper
@@ -130,11 +131,17 @@ def ppo_make_train(config):
         target_params = target.init(_tar_rng, init_x)
         pred_params = predictor.init(_pred_rng, init_x)
 
+        # # OBS NORM PARAMS
+        # * Coming soon to a pull request near you!
+        # random_rollout = jax.jit(make_obs_gymnax_discrete(config, env, env_params))
+        # init_obs=jnp.transpose(random_rollout(rng),(1,0,2))
+        # init_mean_obs = jnp.zeros
+
         # INT REWARD NORM PARAMS
         rewems = jnp.zeros(config["NUM_STEPS"], dtype=jnp.float32)
         count = 1e-4
-        int_mean = jnp.zeros(config["NUM_ENVS"], dtype=jnp.float64)
-        int_var = jnp.ones(config["NUM_ENVS"], dtype=jnp.float64)
+        int_mean = 0.0
+        int_var = 1.0
 
         if config["ANNEAL_LR"]:
             tx = optax.chain(
@@ -263,6 +270,7 @@ def ppo_make_train(config):
                 rewems, dis_int_reward_transpose = jax.lax.scan(
                     _update_rewems, rewems, int_reward_transpose
                 )
+
                 batch_mean = dis_int_reward_transpose.mean()
                 batch_var = jnp.var(dis_int_reward_transpose)
 
