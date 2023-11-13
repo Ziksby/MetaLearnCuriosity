@@ -192,10 +192,13 @@ def byol_make_train(config):  # noqa: C901
             params=network_params,
             tx=tx,
         )
-
-        online_state = TrainState.create(apply_fn=online.apply, params=online_params, tx=tx)
+        byol_tx = optax.chain(
+            optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+            optax.adam(config["LR"], eps=1e-5),
+        )
+        online_state = TrainState.create(apply_fn=online.apply, params=online_params, tx=byol_tx)
         predicator_state = TrainState.create(
-            apply_fn=predicator.apply, params=predicator_params, tx=tx
+            apply_fn=predicator.apply, params=predicator_params, tx=byol_tx
         )
 
         # INIT ENV
