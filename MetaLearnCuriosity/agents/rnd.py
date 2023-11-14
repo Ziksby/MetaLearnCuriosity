@@ -135,7 +135,7 @@ def ppo_make_train(config):
         # * Coming soon to a pull request near you!
         # random_rollout = jax.jit(make_obs_gymnax_discrete(config, env, env_params))
         # init_obs=jnp.transpose(random_rollout(rng),(1,0,2))
-        # init_mean_obs = jnp.zeros
+        # init_mean_obs = jnp.zeros(init_obs.shape[-1])
 
         # INT REWARD NORM PARAMS
         rewems = jnp.zeros(config["NUM_STEPS"], dtype=jnp.float32)
@@ -206,7 +206,7 @@ def ppo_make_train(config):
 
                 # INT REWARD
                 tar_obsv = jax.lax.stop_gradient(target.apply(target_params, obsv))
-                pred_obsv = predictor.apply(pred_params, obsv)
+                pred_obsv = predictor.apply(predictor_state.params, obsv)
                 int_reward = jnp.square(jnp.linalg.norm((pred_obsv - tar_obsv), ord=1, axis=1))
 
                 transition = Transition(
@@ -260,10 +260,12 @@ def ppo_make_train(config):
 
                 return count, int_mean, int_var
 
-            def _normalise_int_rewards(int_reward, count, rewems, int_mean, int_var):
+            def _normalise_int_rewards(traj_batch, count, rewems, int_mean, int_var):
                 def _update_rewems(rewems, int_reward_row):
-                    rewems = rewems + config["INT_GAMMA"] * int_reward_row
+                    rewems = rewems * config["INT_GAMMA"] + int_reward_row
                     return rewems, rewems
+
+                int_reward = traj_batch.int_reward
 
                 int_reward_transpose = jnp.transpose(int_reward)
 
@@ -282,7 +284,7 @@ def ppo_make_train(config):
 
             def _calculate_gae(traj_batch, last_val, count, rewems, int_mean, int_var):
                 norm_int_reward, count, rewems, int_mean, int_var = _normalise_int_rewards(
-                    traj_batch.int_reward, count, rewems, int_mean, int_var
+                    traj_batch, count, rewems, int_mean, int_var
                 )
                 # * I want to loop over the Transitions which is why I am making a new Transition object
                 norm_traj_batch = Transition(
@@ -479,7 +481,7 @@ def ppo_make_train(config):
 
 if __name__ == "__main__":
     config = {
-        "RUN_NAME": "rnd",
+        "RUN_NAME": "rnd_non_episodic",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -524,5 +526,5 @@ if __name__ == "__main__":
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_rnd_losses(output, config["NUM_SEEDS"])
     output["config"] = config
-    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/rnd_{config["NUM_SEEDS"]}'
+    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
     Save(path, output)
