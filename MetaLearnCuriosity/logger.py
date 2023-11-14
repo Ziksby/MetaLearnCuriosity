@@ -201,7 +201,7 @@ class WBLogger:
             for loss in range(len(output["rnd_loss"].mean(-1).reshape(-1))):
                 self.losses.log(
                     {
-                        f"rnd_loss_{self.config['ENV_NAME']}": output["byol_loss"]
+                        f"rnd_loss_{self.config['ENV_NAME']}": output["rnd_loss"]
                         .mean(-1)
                         .reshape(-1)[loss],
                     }
