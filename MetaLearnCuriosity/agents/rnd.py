@@ -261,6 +261,11 @@ def ppo_make_train(config):
                 return count, int_mean, int_var
 
             def _normalise_int_rewards(traj_batch, count, rewems, int_mean, int_var):
+
+                # def _multiply_rewems_w_dones(rewems,dones_row):
+                #     rewems = rewems * (1-dones_row)
+                #     return rewems,rewems
+
                 def _update_rewems(rewems, int_reward_row):
                     rewems = rewems * config["INT_GAMMA"] + int_reward_row
                     return rewems, rewems
@@ -268,6 +273,8 @@ def ppo_make_train(config):
                 int_reward = traj_batch.int_reward
 
                 int_reward_transpose = jnp.transpose(int_reward)
+
+                # rewems,_ = jax.lax.scan(_multiply_rewems_w_dones,rewems,jnp.transpose(traj_batch.done))
 
                 rewems, dis_int_reward_transpose = jax.lax.scan(
                     _update_rewems, rewems, int_reward_transpose
@@ -497,10 +504,10 @@ if __name__ == "__main__":
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
         "ACTIVATION": "tanh",
-        "ENV_NAME": "Empty-misc",
+        "ENV_NAME": "DeepSea-bsuite",
         "ANNEAL_LR": True,
         "DEBUG": False,
-        "INT_GAMMA": 0.99,
+        "INT_GAMMA": 0.999,
         "INT_LAMBDA": 0.001,
     }
 

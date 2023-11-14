@@ -648,11 +648,11 @@ if __name__ == "__main__":
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
         "ACTIVATION": "tanh",
-        "ENV_NAME": "Empty-misc",
+        "ENV_NAME": "DeepSea-bsuite",
         "ANNEAL_LR": True,
         "DEBUG": False,
         "EMA_PARAMETER": 0.99,
-        "REW_NORM_PARAMETER": 0.99,
+        "REW_NORM_PARAMETER": 0.999,
         "INT_LAMBDA": 0.001,
     }
     rng = jax.random.PRNGKey(config["SEED"])
@@ -676,6 +676,6 @@ if __name__ == "__main__":
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_byol_losses(output, config["NUM_SEEDS"])
     logger.log_rl_losses(output, config["NUM_SEEDS"])
-    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/byol_lite_{config["NUM_SEEDS"]}'
+    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
     output["config"] = config
     Save(path, output)
