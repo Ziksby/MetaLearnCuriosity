@@ -94,23 +94,15 @@ class BYOLActorCritic(nn.Module):
     def __call__(self, x):
 
         # THE ACTOR MEAN
-        actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
-        actor_mean = nn.tanh(actor_mean)
-        actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(
-            actor_mean
-        )
-        actor_mean = nn.tanh(actor_mean)
+
         actor_mean = nn.Dense(
             self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
-        )(actor_mean)
+        )(x)
         pi = distrax.Categorical(logits=actor_mean)
 
         # THE CRITIC
-        critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
-        critic = nn.tanh(critic)
-        critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(critic)
-        critic = nn.tanh(critic)
-        critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(critic)
+
+        critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(x)
 
         return pi, jnp.squeeze(critic, axis=-1)
 
@@ -192,10 +184,13 @@ def byol_make_train(config):  # noqa: C901
             params=network_params,
             tx=tx,
         )
-
-        online_state = TrainState.create(apply_fn=online.apply, params=online_params, tx=tx)
+        byol_tx = optax.chain(
+            optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+            optax.adam(config["LR"], eps=1e-5),
+        )
+        online_state = TrainState.create(apply_fn=online.apply, params=online_params, tx=byol_tx)
         predicator_state = TrainState.create(
-            apply_fn=predicator.apply, params=predicator_params, tx=tx
+            apply_fn=predicator.apply, params=predicator_params, tx=byol_tx
         )
 
         # INIT ENV
@@ -657,8 +652,8 @@ if __name__ == "__main__":
         "ANNEAL_LR": True,
         "DEBUG": False,
         "EMA_PARAMETER": 0.99,
-        "REW_NORM_PARAMETER": 0.99,
-        "INT_LAMBDA": 0.005,
+        "REW_NORM_PARAMETER": 0.999,
+        "INT_LAMBDA": 0.001,
     }
     rng = jax.random.PRNGKey(config["SEED"])
     if config["NUM_SEEDS"] > 1:
@@ -681,6 +676,6 @@ if __name__ == "__main__":
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_byol_losses(output, config["NUM_SEEDS"])
     logger.log_rl_losses(output, config["NUM_SEEDS"])
-    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/BYOL_{config["NUM_SEEDS"]}'
+    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
     output["config"] = config
     Save(path, output)

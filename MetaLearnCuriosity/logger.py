@@ -174,3 +174,36 @@ class WBLogger:
                     }
                 )
             self.losses.finish()
+
+    def log_rnd_losses(self, output, num_seeds):
+        self.losses = wandb.init(
+            project="MetaLearnCuriosity",
+            config=self.config,
+            group=self.group,
+            tags=self.tags,
+            notes=self.notes,
+            name=f"{self.name}_rnd_loss",
+        )
+
+        if num_seeds > 1:
+            rnd_avg = jnp.mean(output["rnd_loss"], axis=0)
+            for loss in range(len(rnd_avg.mean(-1).reshape(-1))):
+                self.losses.log(
+                    {
+                        f"rnd_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": rnd_avg.mean(
+                            -1
+                        ).reshape(-1)[loss],
+                    }
+                )
+            self.losses.finish()
+        else:
+
+            for loss in range(len(output["rnd_loss"].mean(-1).reshape(-1))):
+                self.losses.log(
+                    {
+                        f"rnd_loss_{self.config['ENV_NAME']}": output["rnd_loss"]
+                        .mean(-1)
+                        .reshape(-1)[loss],
+                    }
+                )
+            self.losses.finish()

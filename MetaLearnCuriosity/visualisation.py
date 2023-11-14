@@ -51,12 +51,12 @@ def find_best_seed_params(path, agent_type):
             performance_per_seed.append(current_mean)
         best_seed = jnp.argmax(jnp.array(performance_per_seed))
         agent_params = extract_best_seed_params(output, best_seed, 0)
-        if agent_type == "BYOL":
+        if agent_type == "BYOL-Lite":
             online_params = extract_best_seed_params(output, best_seed, 1)
         else:
             online_params = None
     else:
-        if agent_type == "BYOL":
+        if agent_type == "BYOL-Lite":
             online_params = runner_state[1]["params"]
         else:
             online_params = None
