@@ -112,14 +112,14 @@ def ppo_make_train(config):  # noqa: C901
         tot_count = count + batch_count
         delta = batch_mean - obs_mean
 
-        obs_mean = obs_mean + delta * batch_count / tot_count
+        new_obs_mean = obs_mean + delta * batch_count / tot_count
         m_a = obs_var * count
         m_b = batch_var * batch_count
         M2 = m_a + m_b + jnp.square(delta) * count * batch_count / tot_count
-        obs_var = M2 / tot_count
-        count = tot_count
+        new_obs_var = M2 / tot_count
+        new_count = tot_count
 
-        return count, obs_mean, obs_var
+        return new_count, new_obs_mean, new_obs_var
 
     def linear_schedule(count):
         frac = (
@@ -288,14 +288,14 @@ def ppo_make_train(config):  # noqa: C901
                 tot_count = count + batch_count
                 delta = batch_mean - int_mean
 
-                int_mean = int_mean + delta * batch_count / tot_count
+                new_int_mean = int_mean + delta * batch_count / tot_count
                 m_a = int_var * count
                 m_b = batch_var * batch_count
                 M2 = m_a + m_b + jnp.square(delta) * count * batch_count / tot_count
-                int_var = M2 / tot_count
-                count = tot_count
+                new_int_var = M2 / tot_count
+                new_count = tot_count
 
-                return count, int_mean, int_var
+                return new_count, new_int_mean, new_int_var
 
             def _normalise_int_rewards(traj_batch, count, rewems, int_mean, int_var):
 
