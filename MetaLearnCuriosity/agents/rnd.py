@@ -10,9 +10,9 @@ import optax
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 
-# from MetaLearnCuriosity.utils import make_obs_gymnax_discrete
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
+from MetaLearnCuriosity.utils import make_obs_gymnax_discrete
 from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper
 
 # * Consider using RELU activation function.
@@ -100,12 +100,26 @@ class Transition(NamedTuple):
     info: jnp.ndarray
 
 
-def ppo_make_train(config):
+def ppo_make_train(config):  # noqa: C901
     config["NUM_UPDATES"] = config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     config["MINIBATCH_SIZE"] = config["NUM_ENVS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
     env, env_params = gymnax.make(config["ENV_NAME"])
     env = FlattenObservationWrapper(env)
     env = LogWrapper(env)
+
+    def update_obs_norm_params(batch_mean, batch_var, count, obs_mean, obs_var):
+        batch_count = config["NUM_ENVS"]
+        tot_count = count + batch_count
+        delta = batch_mean - obs_mean
+
+        obs_mean = obs_mean + delta * batch_count / tot_count
+        m_a = obs_var * count
+        m_b = batch_var * batch_count
+        M2 = m_a + m_b + jnp.square(delta) * count * batch_count / tot_count
+        obs_var = M2 / tot_count
+        count = tot_count
+
+        return count, obs_mean, obs_var
 
     def linear_schedule(count):
         frac = (
@@ -133,9 +147,19 @@ def ppo_make_train(config):
 
         # # OBS NORM PARAMS
         # * Coming soon to a pull request near you!
-        # random_rollout = jax.jit(make_obs_gymnax_discrete(config, env, env_params))
-        # init_obs=jnp.transpose(random_rollout(rng),(1,0,2))
-        # init_mean_obs = jnp.zeros(init_obs.shape[-1])
+        random_rollout = jax.jit(make_obs_gymnax_discrete(config, env, env_params))
+        init_obs = jnp.transpose(random_rollout(rng), (1, 0, 2))
+
+        init_mean_obs = jnp.zeros(init_obs.shape[-1])
+        init_var_obs = jnp.ones(init_obs.shape[-1])
+        init_obs_count = 1e-4
+
+        obs_batch_mean = init_obs.mean((0, 1))
+        obs_batch_var = jnp.var(init_obs, (0, 1))
+
+        obs_count, obs_mean, obs_var = update_obs_norm_params(
+            obs_batch_mean, obs_batch_var, init_obs_count, init_mean_obs, init_var_obs
+        )
 
         # INT REWARD NORM PARAMS
         rewems = jnp.zeros(config["NUM_STEPS"], dtype=jnp.float32)
@@ -188,6 +212,9 @@ def ppo_make_train(config):
                     rewems,
                     int_mean,
                     int_var,
+                    obs_count,
+                    obs_mean,
+                    obs_var,
                     rng,
                 ) = runner_state
 
@@ -205,8 +232,12 @@ def ppo_make_train(config):
                 )
 
                 # INT REWARD
-                tar_obsv = jax.lax.stop_gradient(target.apply(target_params, obsv))
-                pred_obsv = predictor.apply(predictor_state.params, obsv)
+                norm_obsv = ((obsv - obs_mean[None, :]) / (jnp.sqrt(obs_var[None, :]) + 1e-8)).clip(
+                    -5, 5
+                )
+
+                tar_obsv = jax.lax.stop_gradient(target.apply(target_params, norm_obsv))
+                pred_obsv = predictor.apply(predictor_state.params, norm_obsv)
                 int_reward = jnp.square(jnp.linalg.norm((pred_obsv - tar_obsv), ord=1, axis=1))
 
                 transition = Transition(
@@ -222,6 +253,9 @@ def ppo_make_train(config):
                     rewems,
                     int_mean,
                     int_var,
+                    obs_count,
+                    obs_mean,
+                    obs_var,
                     rng,
                 )
                 return runner_state, transition
@@ -241,6 +275,9 @@ def ppo_make_train(config):
                 rewems,
                 int_mean,
                 int_var,
+                obs_count,
+                obs_mean,
+                obs_var,
                 rng,
             ) = runner_state
             _, last_val = network.apply(network_state.params, last_obs)
@@ -334,16 +371,23 @@ def ppo_make_train(config):
                 traj_batch, last_val, count, rewems, int_mean, int_var
             )
 
+            obs_batch_mean = traj_batch.obs.mean((0, 1))
+            obs_batch_var = jnp.var(traj_batch.obs, (0, 1))
+            obs_count, obs_mean, obs_var = update_obs_norm_params(
+                obs_batch_mean, obs_batch_var, obs_count, obs_mean, obs_var
+            )
+
             # UPDATE NETWORK
             def _update_epoch(update_state, unused):
                 def _update_minbatch(train_states, batch_info):
                     network_state, predictor_state, target_params = train_states
-                    traj_batch, advantages, targets = batch_info
+                    traj_batch, advantages, targets, rnd_obs = batch_info
 
-                    def _rnd_loss(pred_params, target_params, traj_batch):
+                    def _rnd_loss(pred_params, target_params, rnd_obs):
                         # RERUN NETWORK
-                        tar_obs = jax.lax.stop_gradient(target.apply(target_params, traj_batch.obs))
-                        pred_obs = predictor.apply(pred_params, traj_batch.obs)
+
+                        tar_obs = jax.lax.stop_gradient(target.apply(target_params, rnd_obs))
+                        pred_obs = predictor.apply(pred_params, rnd_obs)
                         loss = jnp.square(jnp.linalg.norm((pred_obs - tar_obs), ord=1, axis=1))
                         return loss.mean()
 
@@ -390,22 +434,36 @@ def ppo_make_train(config):
                         network_state.params, traj_batch, advantages, targets
                     )
 
-                    rnd_loss, rnd_grad = grad_rnd_fn(
-                        predictor_state.params, target_params, traj_batch
-                    )
+                    rnd_loss, rnd_grad = grad_rnd_fn(predictor_state.params, target_params, rnd_obs)
                     network_state = network_state.apply_gradients(grads=rl_grads)
                     predictor_state = predictor_state.apply_gradients(grads=rnd_grad)
                     train_states = network_state, predictor_state, target_params
                     return train_states, (total_rl_loss, rnd_loss)
 
-                train_states, traj_batch, advantages, targets, rng = update_state
+                (
+                    train_states,
+                    traj_batch,
+                    advantages,
+                    targets,
+                    obs_count,
+                    obs_mean,
+                    obs_var,
+                    rng,
+                ) = update_state
+
+                # Norm the observation
+
+                rnd_obs = (
+                    (traj_batch.obs - obs_mean[None, :]) / (jnp.sqrt(obs_var[None, :]) + 10e-8)
+                ).clip(-5, 5)
+
                 rng, _rng = jax.random.split(rng)
                 batch_size = config["MINIBATCH_SIZE"] * config["NUM_MINIBATCHES"]
                 assert (
                     batch_size == config["NUM_STEPS"] * config["NUM_ENVS"]
                 ), "batch size must be equal to number of steps * number of envs"
                 permutation = jax.random.permutation(_rng, batch_size)
-                batch = (traj_batch, advantages, targets)
+                batch = (traj_batch, advantages, targets, rnd_obs)
                 batch = jax.tree_util.tree_map(
                     lambda x: x.reshape((batch_size,) + x.shape[2:]), batch
                 )
@@ -417,11 +475,29 @@ def ppo_make_train(config):
                     shuffled_batch,
                 )
                 train_states, total_loss = jax.lax.scan(_update_minbatch, train_states, minibatches)
-                update_state = (train_states, traj_batch, advantages, targets, rng)
+                update_state = (
+                    train_states,
+                    traj_batch,
+                    advantages,
+                    targets,
+                    obs_count,
+                    obs_mean,
+                    obs_var,
+                    rng,
+                )
                 return update_state, total_loss
 
             train_states = network_state, predictor_state, target_params
-            update_state = (train_states, traj_batch, advantages, targets, rng)
+            update_state = (
+                train_states,
+                traj_batch,
+                advantages,
+                targets,
+                obs_count,
+                obs_mean,
+                obs_var,
+                rng,
+            )
             update_state, loss_info = jax.lax.scan(
                 _update_epoch, update_state, None, config["UPDATE_EPOCHS"]
             )
@@ -429,6 +505,9 @@ def ppo_make_train(config):
             int_reward = traj_batch.int_reward
             network_state, predictor_state, target_params = train_states
             metric = traj_batch.info
+            obs_count = update_state[-4]
+            obs_mean = update_state[-3]
+            obs_var = update_state[-2]
             rng = update_state[-1]
             if config.get("DEBUG"):
 
@@ -450,6 +529,9 @@ def ppo_make_train(config):
                 rewems,
                 int_mean,
                 int_var,
+                obs_count,
+                obs_mean,
+                obs_var,
                 rng,
             )
             return runner_state, (metric, loss_info, int_reward)
@@ -465,6 +547,9 @@ def ppo_make_train(config):
             rewems,
             int_mean,
             int_var,
+            obs_count,
+            obs_mean,
+            obs_var,
             _rng,
         )
         runner_state, extra_info = jax.lax.scan(
@@ -488,7 +573,7 @@ def ppo_make_train(config):
 
 if __name__ == "__main__":
     config = {
-        "RUN_NAME": "rnd_non_episodic",
+        "RUN_NAME": "rnd",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -504,7 +589,7 @@ if __name__ == "__main__":
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
         "ACTIVATION": "tanh",
-        "ENV_NAME": "DeepSea-bsuite",
+        "ENV_NAME": "Empty-misc",
         "ANNEAL_LR": True,
         "DEBUG": False,
         "INT_GAMMA": 0.999,
