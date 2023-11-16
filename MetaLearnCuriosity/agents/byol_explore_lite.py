@@ -28,13 +28,13 @@ class TargetEncoder(nn.Module):
             kernel_init=orthogonal(np.sqrt(2)),
             bias_init=constant(0.0),
         )(x)
-        encoded_obs = nn.tanh(encoded_obs)
+        encoded_obs = nn.relu(encoded_obs)
         encoded_obs = nn.Dense(
             self.encoder_layer_out_shape,
             kernel_init=orthogonal(np.sqrt(1.0)),
             bias_init=constant(0.0),
         )(encoded_obs)
-        encoded_obs = nn.tanh(encoded_obs)
+
         return encoded_obs
 
 
@@ -48,13 +48,13 @@ class OnlineEncoder(nn.Module):
             kernel_init=orthogonal(np.sqrt(2)),
             bias_init=constant(0.0),
         )(x)
-        encoded_obs = nn.tanh(encoded_obs)
+        encoded_obs = nn.relu(encoded_obs)
         encoded_obs = nn.Dense(
             self.encoder_layer_out_shape,
             kernel_init=orthogonal(np.sqrt(1.0)),
             bias_init=constant(0.0),
         )(encoded_obs)
-        encoded_obs = nn.tanh(encoded_obs)
+
         return encoded_obs
 
 
@@ -94,15 +94,17 @@ class BYOLActorCritic(nn.Module):
     def __call__(self, x):
 
         # THE ACTOR MEAN
-
+        actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
+        actor_mean = nn.tanh(actor_mean)
         actor_mean = nn.Dense(
             self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
-        )(x)
+        )(actor_mean)
         pi = distrax.Categorical(logits=actor_mean)
 
         # THE CRITIC
-
-        critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(x)
+        critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
+        critic = nn.tanh(critic)
+        critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(critic)
 
         return pi, jnp.squeeze(critic, axis=-1)
 
