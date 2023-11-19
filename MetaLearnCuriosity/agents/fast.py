@@ -481,7 +481,7 @@ if __name__ == "__main__":
         "ANNEAL_LR": True,
         "DEBUG": False,
         "INT_GAMMA": 0.999,
-        "INT_LAMBDA": 0.001,
+        "INT_LAMBDA": 0.002,
     }
 
     rng = jax.random.PRNGKey(config["SEED"])

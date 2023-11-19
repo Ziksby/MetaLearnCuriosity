@@ -28,7 +28,7 @@ class TargetEncoder(nn.Module):
             kernel_init=orthogonal(np.sqrt(2)),
             bias_init=constant(0.0),
         )(x)
-        encoded_obs = nn.relu(encoded_obs)
+        encoded_obs = nn.tanh(encoded_obs)
         encoded_obs = nn.Dense(
             self.encoder_layer_out_shape,
             kernel_init=orthogonal(np.sqrt(1.0)),
@@ -48,7 +48,7 @@ class OnlineEncoder(nn.Module):
             kernel_init=orthogonal(np.sqrt(2)),
             bias_init=constant(0.0),
         )(x)
-        encoded_obs = nn.relu(encoded_obs)
+        encoded_obs = nn.tanh(encoded_obs)
         encoded_obs = nn.Dense(
             self.encoder_layer_out_shape,
             kernel_init=orthogonal(np.sqrt(1.0)),
@@ -89,13 +89,18 @@ class OnlinePredictor(nn.Module):
 
 class BYOLActorCritic(nn.Module):
     action_dim: Sequence[int]
+    activation: str = "tanh"
 
     @nn.compact
     def __call__(self, x):
+        if self.activation == "relu":
+            activation = nn.relu
+        else:
+            activation = nn.tanh
 
         # THE ACTOR MEAN
         actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
-        actor_mean = nn.tanh(actor_mean)
+        actor_mean = activation(actor_mean)
         actor_mean = nn.Dense(
             self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
@@ -103,7 +108,7 @@ class BYOLActorCritic(nn.Module):
 
         # THE CRITIC
         critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
-        critic = nn.tanh(critic)
+        critic = activation(critic)
         critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(critic)
 
         return pi, jnp.squeeze(critic, axis=-1)
@@ -142,7 +147,7 @@ def byol_make_train(config):  # noqa: C901
         # INIT NETWORK
         action_dim = env.action_space(env_params).n
         encoder_layer_out_shape = 64
-        network = BYOLActorCritic(env.action_space(env_params).n)
+        network = BYOLActorCritic(env.action_space(env_params).n, activation=config["ACTIVATION"])
         predicator = OnlinePredictor(encoder_layer_out_shape)
         target = TargetEncoder(encoder_layer_out_shape)
         online = OnlineEncoder(encoder_layer_out_shape)
@@ -634,7 +639,7 @@ def byol_make_train(config):  # noqa: C901
 
 if __name__ == "__main__":
     config = {
-        "RUN_NAME": "BYOL_Lite",
+        "RUN_NAME": "BYOL_lite",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -650,12 +655,12 @@ if __name__ == "__main__":
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
         "ACTIVATION": "tanh",
-        "ENV_NAME": "DeepSea-bsuite",
+        "ENV_NAME": "Empty-misc",
         "ANNEAL_LR": True,
         "DEBUG": False,
         "EMA_PARAMETER": 0.99,
-        "REW_NORM_PARAMETER": 0.999,
-        "INT_LAMBDA": 0.001,
+        "REW_NORM_PARAMETER": 0.99,
+        "INT_LAMBDA": 0.002,
     }
     rng = jax.random.PRNGKey(config["SEED"])
     if config["NUM_SEEDS"] > 1:
