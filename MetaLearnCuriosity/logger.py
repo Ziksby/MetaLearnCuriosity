@@ -207,3 +207,36 @@ class WBLogger:
                     }
                 )
             self.losses.finish()
+
+    def log_fast_losses(self, output, num_seeds):
+        self.losses = wandb.init(
+            project="MetaLearnCuriosity",
+            config=self.config,
+            group=self.group,
+            tags=self.tags,
+            notes=self.notes,
+            name=f"{self.name}_fast_loss",
+        )
+
+        if num_seeds > 1:
+            fast_avg = jnp.mean(output["fast_loss"], axis=0)
+            for loss in range(len(fast_avg.mean(-1).reshape(-1))):
+                self.losses.log(
+                    {
+                        f"fast_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": fast_avg.mean(
+                            -1
+                        ).reshape(-1)[loss],
+                    }
+                )
+            self.losses.finish()
+        else:
+
+            for loss in range(len(output["fast_loss"].mean(-1).reshape(-1))):
+                self.losses.log(
+                    {
+                        f"fast_loss_{self.config['ENV_NAME']}": output["fast_loss"]
+                        .mean(-1)
+                        .reshape(-1)[loss],
+                    }
+                )
+            self.losses.finish()
