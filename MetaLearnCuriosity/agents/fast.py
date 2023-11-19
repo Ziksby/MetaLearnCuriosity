@@ -498,7 +498,7 @@ if __name__ == "__main__":
     logger = WBLogger(
         config=config,
         group=f"fast/{config['ENV_NAME']}",
-        tags=["fast"],
+        tags=["fast", config["ENV_NAME"]],
         name=config["RUN_NAME"],
     )
     logger.log_episode_return(output, config["NUM_SEEDS"])

@@ -675,7 +675,7 @@ if __name__ == "__main__":
     logger = WBLogger(
         config=config,
         group=f"byol_toy/{config['ENV_NAME']}",
-        tags=["byol_toy example"],
+        tags=["byol_lite", config["ENV_NAME"]],
         notes="gae: normed",
         name=config["RUN_NAME"],
     )

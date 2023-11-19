@@ -609,7 +609,7 @@ if __name__ == "__main__":
     logger = WBLogger(
         config=config,
         group=f"rnd/{config['ENV_NAME']}",
-        tags=["rnd"],
+        tags=["rnd", config["ENV_NAME"]],
         name=config["RUN_NAME"],
     )
     logger.log_episode_return(output, config["NUM_SEEDS"])
