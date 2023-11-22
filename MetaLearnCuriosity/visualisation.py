@@ -3,8 +3,6 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
-from gymnax.visualize import Visualizer
-from matplotlib.ticker import MaxNLocator
 
 from MetaLearnCuriosity.agents.byol_explore_lite import BYOLActorCritic, OnlineEncoder
 from MetaLearnCuriosity.agents.ppo import PPOActorCritic
@@ -116,23 +114,19 @@ def visualise_gymnax(env, path, agent_type, n_best_seed=1):
             next_obs, next_state, reward, done, info = env.step(rng_step, state, action, env_params)
             reward_seq.append(reward)
             if done:
-                print(next_state)
+                print(next_state, done)
                 break
             else:
                 obs = next_obs
                 state = next_state
 
-        cum_rewards = jnp.cumsum(jnp.array(reward_seq))
-        vis = Visualizer(env, env_params, state_seq, cum_rewards)
-        vis.animate(f"{path}/anim_{agent_type}_{seed_num}.gif")
+        # cum_rewards = jnp.cumsum(jnp.array(reward_seq))
+        # vis = Visualizer(env, env_params, state_seq, cum_rewards)
+        # vis.animate(f"{path}/anim_{agent_type}_{seed_num}.gif")
         state_seqs.append(state_seq)
         seed_num += 1
 
     return state_seqs
-
-
-path = "MLC_logs/flax_ckpt/Empty-misc/BYOL_lite_30"
-s = visualise_gymnax("Empty-misc", path, "BYOL", n_best_seed=15)
 
 
 def generate_heatmap(state_seqs, agent_type, path, grid_size=(16, 16)):
@@ -173,7 +167,9 @@ def generate_heatmap(state_seqs, agent_type, path, grid_size=(16, 16)):
     ax.set_ylabel("X Position")
     ax.legend()
 
-    plt.savefig(f"{path}/heatmap_{agent_type}.png")
+    plt.savefig(f"{path}/heatmap_{agent_type}_30.png")
 
 
-generate_heatmap(s, "BYOL", path)
+path = "MLC_logs/flax_ckpt/Empty-misc_diff_config/fast_30"
+s = visualise_gymnax("Empty-misc", path, "fast", n_best_seed=30)
+generate_heatmap(s, "fast", path)

@@ -240,3 +240,43 @@ class WBLogger:
                     }
                 )
             self.losses.finish()
+
+    def log_ccim_losses(self, output, num_seeds):
+        self.losses = wandb.init(
+            project="MetaLearnCuriosity",
+            config=self.config,
+            group=self.group,
+            tags=self.tags,
+            notes=self.notes,
+            name=f"{self.name}_ccim_loss",
+        )
+
+        if num_seeds > 1:
+            for_avg = jnp.mean(output["forward_loss"], axis=0)
+            back_avg = jnp.mean(output["backward_loss"], axis=0)
+            for loss in range(len(for_avg.mean(-1).reshape(-1))):
+                self.losses.log(
+                    {
+                        f"forward_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": for_avg.mean(
+                            -1
+                        ).reshape(-1)[loss],
+                        f"backward_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": back_avg.mean(
+                            -1
+                        ).reshape(-1)[loss],
+                    }
+                )
+            self.losses.finish()
+        else:
+
+            for loss in range(len(output["forward_loss"].mean(-1).reshape(-1))):
+                self.losses.log(
+                    {
+                        f"forward_loss_{self.config['ENV_NAME']}": output["forward_loss"]
+                        .mean(-1)
+                        .reshape(-1)[loss],
+                        f"backward_loss_{self.config['ENV_NAME']}": output["backward_loss"]
+                        .mean(-1)
+                        .reshape(-1)[loss],
+                    }
+                )
+            self.losses.finish()
