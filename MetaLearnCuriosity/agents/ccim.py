@@ -66,11 +66,32 @@ class ForwardNetwork(nn.Module):
 
     @nn.compact
     def __call__(self, x):
+
+        # RANDOM PART
         encoded_obs = nn.Dense(
             self.encoder_layer_out_shape,
             kernel_init=orthogonal(np.sqrt(2)),
             bias_init=constant(0.0),
         )(x)
+        encoded_obs = nn.relu(encoded_obs)
+        encoded_obs = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(1.0)),
+            bias_init=constant(0.0),
+        )(encoded_obs)
+
+        # FORWARD PART
+        encoded_obs = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
+        )(encoded_obs)
+        encoded_obs = nn.relu(encoded_obs)
+        encoded_obs = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
+        )(encoded_obs)
         encoded_obs = nn.relu(encoded_obs)
         encoded_obs = nn.Dense(
             self.encoder_layer_out_shape,

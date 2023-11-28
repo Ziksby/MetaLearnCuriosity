@@ -79,6 +79,7 @@ class Transition(NamedTuple):
     int_reward: jnp.ndarray
     log_prob: jnp.ndarray
     obs: jnp.ndarray
+    next_obs: jnp.ndarray
     norm_time_step: jnp.ndarray
     info: jnp.ndarray
 
@@ -190,6 +191,7 @@ def ppo_make_train(config):
                     int_reward,
                     log_prob,
                     last_obs,
+                    obsv,
                     norm_time_step,
                     info,
                 )
@@ -281,6 +283,7 @@ def ppo_make_train(config):
                     norm_int_reward,
                     traj_batch.log_prob,
                     traj_batch.obs,
+                    traj_batch.next_obs,
                     traj_batch.norm_time_step,
                     traj_batch.info,
                 )
@@ -325,7 +328,8 @@ def ppo_make_train(config):
                     def _fast_loss_fn(fast_params, traj_batch):
                         # The NLL Loss
                         fast_pi = fast.apply(fast_params, traj_batch.obs)
-                        return -fast_pi.log_prob(traj_batch.action).mean()
+                        loss = -fast_pi.log_prob(traj_batch.action)
+                        return loss.mean()
 
                     def _rl_loss_fn(params, traj_batch, gae, targets):
                         # RERUN NETWORK

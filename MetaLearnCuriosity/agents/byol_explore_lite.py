@@ -398,7 +398,6 @@ def byol_make_train(config):  # noqa: C901
                     traj_batch, advantages, targets = batch_info
 
                     def _byol_loss(predicator_params, online_params, target_params, traj_batch):
-                        # encoded_obs = online.apply(online_params, traj_batch.obs)
                         encoded_obs = online.apply(online_params, traj_batch.obs)
                         one_hot_action = jax.nn.one_hot(traj_batch.action, action_dim)
                         encoded_one_hot = jnp.concatenate((encoded_obs, one_hot_action), axis=-1)
