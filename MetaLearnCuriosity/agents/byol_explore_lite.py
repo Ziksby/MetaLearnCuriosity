@@ -28,7 +28,7 @@ class TargetEncoder(nn.Module):
             kernel_init=orthogonal(np.sqrt(2)),
             bias_init=constant(0.0),
         )(x)
-        encoded_obs = nn.tanh(encoded_obs)
+        encoded_obs = nn.relu(encoded_obs)
         encoded_obs = nn.Dense(
             self.encoder_layer_out_shape,
             kernel_init=orthogonal(np.sqrt(1.0)),
@@ -48,7 +48,7 @@ class OnlineEncoder(nn.Module):
             kernel_init=orthogonal(np.sqrt(2)),
             bias_init=constant(0.0),
         )(x)
-        encoded_obs = nn.tanh(encoded_obs)
+        encoded_obs = nn.relu(encoded_obs)
         encoded_obs = nn.Dense(
             self.encoder_layer_out_shape,
             kernel_init=orthogonal(np.sqrt(1.0)),
@@ -116,7 +116,6 @@ class BYOLActorCritic(nn.Module):
 
 # THE TRANSITION CLASS
 class Transition(NamedTuple):
-    prev_done: jnp.ndarray
     done: jnp.ndarray
     action: jnp.ndarray
     value: jnp.ndarray
@@ -124,7 +123,7 @@ class Transition(NamedTuple):
     int_reward: jnp.ndarray
     log_prob: jnp.ndarray
     obs: jnp.ndarray
-    last_obs: jnp.ndarray
+    next_obs: jnp.ndarray
     info: jnp.ndarray
 
 
@@ -204,7 +203,6 @@ def byol_make_train(config):  # noqa: C901
         rng, _rng = jax.random.split(rng)
         reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
         obsv, env_state = jax.vmap(env.reset, in_axes=(0, None))(reset_rng, env_params)
-        prev_done = jnp.zeros(config["NUM_ENVS"], dtype=jnp.bool_)
 
         # TRAIN LOOP
         def _update_step(runner_state, unused):
@@ -217,7 +215,6 @@ def byol_make_train(config):  # noqa: C901
                     target_params,
                     env_state,
                     last_obs,
-                    prev_done,
                     r_bar,
                     r_bar_sq,
                     c,
@@ -250,10 +247,9 @@ def byol_make_train(config):  # noqa: C901
                     (tar_obs) / (jnp.linalg.norm(tar_obs, axis=1)[:, None])
                 )
                 int_reward = jnp.square(jnp.linalg.norm((pred_norm - tar_norm), axis=1)) * (
-                    1 - prev_done
+                    1 - done
                 )
                 transition = Transition(
-                    prev_done,
                     done,
                     action,
                     value,
@@ -272,7 +268,6 @@ def byol_make_train(config):  # noqa: C901
                     target_params,
                     env_state,
                     obsv,
-                    done,
                     r_bar,
                     r_bar_sq,
                     c,
@@ -298,7 +293,6 @@ def byol_make_train(config):  # noqa: C901
                 target_params,
                 env_state,
                 last_obs,
-                prev_done,
                 r_bar,
                 r_bar_sq,
                 c,
@@ -347,15 +341,14 @@ def byol_make_train(config):  # noqa: C901
                 )
                 # * I want to loop over the Transitions which is why I am making a new Transition object
                 norm_traj_batch = Transition(
-                    traj_batch.prev_done,
                     traj_batch.done,
                     traj_batch.action,
                     traj_batch.value,
                     traj_batch.reward,
                     prior_norm_int_reward,
                     traj_batch.log_prob,
-                    traj_batch.last_obs,
                     traj_batch.obs,
+                    traj_batch.next_obs,
                     traj_batch.info,
                 )
 
@@ -405,24 +398,21 @@ def byol_make_train(config):  # noqa: C901
                     traj_batch, advantages, targets = batch_info
 
                     def _byol_loss(predicator_params, online_params, target_params, traj_batch):
-                        # encoded_obs = online.apply(online_params, traj_batch.obs)
-                        encoded_last_obs = online.apply(online_params, traj_batch.last_obs)
+                        encoded_obs = online.apply(online_params, traj_batch.obs)
                         one_hot_action = jax.nn.one_hot(traj_batch.action, action_dim)
-                        encoded_one_hot = jnp.concatenate(
-                            (encoded_last_obs, one_hot_action), axis=-1
-                        )
+                        encoded_one_hot = jnp.concatenate((encoded_obs, one_hot_action), axis=-1)
 
                         pred_obs = predicator.apply(
                             predicator_params,
                             encoded_one_hot,
                         )
-                        tar_obs = target.apply(target_params, traj_batch.obs)
+                        tar_obs = target.apply(target_params, traj_batch.next_obs)
                         pred_norm = (pred_obs) / (jnp.linalg.norm(pred_obs, axis=1)[:, None])
                         tar_norm = jax.lax.stop_gradient(
                             (tar_obs) / (jnp.linalg.norm(tar_obs, axis=1)[:, None])
                         )
                         loss = jnp.square(jnp.linalg.norm((pred_norm - tar_norm), axis=1)) * (
-                            1 - traj_batch.prev_done
+                            1 - traj_batch.done
                         )
                         return loss.mean()
 
@@ -593,7 +583,6 @@ def byol_make_train(config):  # noqa: C901
                 target_params,
                 env_state,
                 last_obs,
-                prev_done,
                 r_bar,
                 r_bar_sq,
                 c,
@@ -610,7 +599,6 @@ def byol_make_train(config):  # noqa: C901
             target_params,
             env_state,
             obsv,
-            prev_done,
             r_bar,
             r_bar_sq,
             c,
@@ -674,8 +662,8 @@ if __name__ == "__main__":
 
     logger = WBLogger(
         config=config,
-        group=f"byol_toy/{config['ENV_NAME']}",
-        tags=["byol_lite", config["ENV_NAME"]],
+        group=f"byol_toy/{config['ENV_NAME']}_diff_config",
+        tags=["byol_lite", f'{config["ENV_NAME"]}_diff_config'],
         notes="gae: normed",
         name=config["RUN_NAME"],
     )
@@ -683,6 +671,6 @@ if __name__ == "__main__":
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_byol_losses(output, config["NUM_SEEDS"])
     logger.log_rl_losses(output, config["NUM_SEEDS"])
-    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
+    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}_diff_config/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
     output["config"] = config
     Save(path, output)

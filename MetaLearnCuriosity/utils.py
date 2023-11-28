@@ -30,7 +30,7 @@ def make_obs_gymnax_discrete(config, env, env_params):
 
             # SELECT ACTION
             rng, _rng, act_rngs = jax.random.split(rng, 3)
-            act_rngs = jax.random.split(act_rngs, 4)
+            act_rngs = jax.random.split(act_rngs, config["NUM_ENVS"])
             action = jax.vmap(env.action_space(env_params).sample)(act_rngs)
 
             # STEP ENV

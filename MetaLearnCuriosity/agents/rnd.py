@@ -237,7 +237,7 @@ def ppo_make_train(config):  # noqa: C901
 
                 tar_obsv = jax.lax.stop_gradient(target.apply(target_params, norm_obsv))
                 pred_obsv = predictor.apply(predictor_state.params, norm_obsv)
-                int_reward = jnp.square(jnp.linalg.norm((pred_obsv - tar_obsv), ord=1, axis=1))
+                int_reward = jnp.square(jnp.linalg.norm((pred_obsv - tar_obsv), axis=1))
 
                 transition = Transition(
                     done, action, value, reward, int_reward, log_prob, last_obs, info
@@ -387,7 +387,7 @@ def ppo_make_train(config):  # noqa: C901
 
                         tar_obs = jax.lax.stop_gradient(target.apply(target_params, rnd_obs))
                         pred_obs = predictor.apply(pred_params, rnd_obs)
-                        loss = jnp.square(jnp.linalg.norm((pred_obs - tar_obs), ord=1, axis=1))
+                        loss = jnp.square(jnp.linalg.norm((pred_obs - tar_obs), axis=1))
                         return loss.mean()
 
                     def _rl_loss_fn(network_params, traj_batch, gae, targets):
