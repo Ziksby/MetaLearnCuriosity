@@ -79,19 +79,30 @@ class PPOActorCritic(nn.Module):
         )(actor_mean)
         pi = distrax.Categorical(logits=actor_mean)
 
+        # EXT CRITIC
         critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
         critic = activation(critic)
         critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(critic)
         critic = activation(critic)
         critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(critic)
 
-        return pi, jnp.squeeze(critic, axis=-1)
+        # INT CRITIC
+        int_critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
+        int_critic = activation(int_critic)
+        int_critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(
+            int_critic
+        )
+        int_critic = activation(int_critic)
+        int_critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(int_critic)
+
+        return pi, jnp.squeeze(critic, axis=-1), jnp.squeeze(int_critic, axis=-1)
 
 
 class Transition(NamedTuple):
     done: jnp.ndarray
     action: jnp.ndarray
     value: jnp.ndarray
+    int_value: jnp.ndarray
     reward: jnp.ndarray
     int_reward: jnp.ndarray
     log_prob: jnp.ndarray
@@ -219,7 +230,7 @@ def ppo_make_train(config):  # noqa: C901
 
                 # SELECT ACTION
                 rng, _rng = jax.random.split(rng)
-                pi, value = network.apply(network_state.params, last_obs)
+                pi, value, int_value = network.apply(network_state.params, last_obs)
                 action = pi.sample(seed=_rng)
                 log_prob = pi.log_prob(action)
 
@@ -240,7 +251,7 @@ def ppo_make_train(config):  # noqa: C901
                 int_reward = jnp.square(jnp.linalg.norm((pred_obsv - tar_obsv), axis=1))
 
                 transition = Transition(
-                    done, action, value, reward, int_reward, log_prob, last_obs, info
+                    done, action, int_value, value, reward, int_reward, log_prob, last_obs, info
                 )
                 runner_state = (
                     network_state,
@@ -279,7 +290,7 @@ def ppo_make_train(config):  # noqa: C901
                 obs_var,
                 rng,
             ) = runner_state
-            _, last_val = network.apply(network_state.params, last_obs)
+            _, last_val, last_int_val = network.apply(network_state.params, last_obs)
 
             def _update_int_reward_norm_params(batch_mean, batch_var, count, int_mean, int_var):
 
@@ -325,7 +336,7 @@ def ppo_make_train(config):  # noqa: C901
                 norm_int_reward = int_reward / jnp.sqrt(int_var)
                 return norm_int_reward, count, rewems, int_mean, int_var
 
-            def _calculate_gae(traj_batch, last_val, count, rewems, int_mean, int_var):
+            def _calculate_int_gae(traj_batch, last_int_val, count, rewems, int_mean, int_var):
                 norm_int_reward, count, rewems, int_mean, int_var = _normalise_int_rewards(
                     traj_batch, count, rewems, int_mean, int_var
                 )
@@ -334,6 +345,7 @@ def ppo_make_train(config):  # noqa: C901
                     traj_batch.done,
                     traj_batch.action,
                     traj_batch.value,
+                    traj_batch.int_value,
                     traj_batch.reward,
                     norm_int_reward,
                     traj_batch.log_prob,
@@ -341,34 +353,60 @@ def ppo_make_train(config):  # noqa: C901
                     traj_batch.info,
                 )
 
+                def _get_int_advantages(gae_and_next_value, transition):
+                    gae, next_value = gae_and_next_value
+                    int_value, int_reward = (
+                        transition.int_value,
+                        transition.int_reward,
+                    )
+                    delta = int_reward + config["INT_GAMMA"] * next_value - int_value
+                    gae = delta + config["INT_GAMMA"] * config["GAE_LAMBDA"] * gae
+                    return (gae, int_value), gae
+
+                _, int_advantages = jax.lax.scan(
+                    _get_int_advantages,
+                    (jnp.zeros_like(last_int_val), last_int_val),
+                    norm_traj_batch,
+                    reverse=True,
+                    unroll=16,
+                )
+                return (
+                    int_advantages,
+                    int_advantages + traj_batch.int_value,
+                    count,
+                    rewems,
+                    int_mean,
+                    int_var,
+                )
+
+            int_advantages, int_targets, count, rewems, int_mean, int_var = _calculate_int_gae(
+                traj_batch, last_int_val, count, rewems, int_mean, int_var
+            )
+
+            def _calculate_gae(traj_batch, last_val):
                 def _get_advantages(gae_and_next_value, transition):
                     gae, next_value = gae_and_next_value
-                    done, value, reward, int_reward = (
+                    done, value, reward = (
                         transition.done,
                         transition.value,
                         transition.reward,
-                        transition.int_reward,
                     )
-                    delta = (
-                        (reward + config["INT_LAMBDA"] * int_reward)
-                        + config["GAMMA"] * next_value * (1 - done)
-                        - value
-                    )
+                    delta = reward + config["GAMMA"] * next_value * (1 - done) - value
                     gae = delta + config["GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
                     return (gae, value), gae
 
                 _, advantages = jax.lax.scan(
                     _get_advantages,
                     (jnp.zeros_like(last_val), last_val),
-                    norm_traj_batch,
+                    traj_batch,
                     reverse=True,
                     unroll=16,
                 )
-                return advantages, advantages + traj_batch.value, count, rewems, int_mean, int_var
+                return advantages, advantages + traj_batch.value
 
-            advantages, targets, count, rewems, int_mean, int_var = _calculate_gae(
-                traj_batch, last_val, count, rewems, int_mean, int_var
-            )
+            advantages, targets = _calculate_gae(traj_batch, last_val)
+
+            advantages = int_advantages * config["INT_GAMMA"] + advantages * config["GAMMA"]
 
             obs_batch_mean = traj_batch.obs.mean((0, 1))
             obs_batch_var = jnp.var(traj_batch.obs, (0, 1))
@@ -380,7 +418,7 @@ def ppo_make_train(config):  # noqa: C901
             def _update_epoch(update_state, unused):
                 def _update_minbatch(train_states, batch_info):
                     network_state, predictor_state, target_params = train_states
-                    traj_batch, advantages, targets, rnd_obs = batch_info
+                    traj_batch, advantages, targets, int_targets, rnd_obs = batch_info
 
                     def _rnd_loss(pred_params, target_params, rnd_obs):
                         # RERUN NETWORK
@@ -390,9 +428,9 @@ def ppo_make_train(config):  # noqa: C901
                         loss = jnp.square(jnp.linalg.norm((pred_obs - tar_obs), axis=1))
                         return loss.mean()
 
-                    def _rl_loss_fn(network_params, traj_batch, gae, targets):
+                    def _rl_loss_fn(network_params, traj_batch, gae, targets, int_targets):
                         # RERUN NETWORK
-                        pi, value = network.apply(network_params, traj_batch.obs)
+                        pi, value, int_value = network.apply(network_params, traj_batch.obs)
                         log_prob = pi.log_prob(traj_batch.action)
 
                         # CALCULATE VALUE LOSS
@@ -402,6 +440,16 @@ def ppo_make_train(config):  # noqa: C901
                         value_losses = jnp.square(value - targets)
                         value_losses_clipped = jnp.square(value_pred_clipped - targets)
                         value_loss = 0.5 * jnp.maximum(value_losses, value_losses_clipped).mean()
+
+                        # CALCULATE INT VALUE LOSS
+                        int_value_pred_clipped = traj_batch.int_value + (
+                            int_value - traj_batch.int_value
+                        ).clip(-config["CLIP_EPS"], config["CLIP_EPS"])
+                        int_value_losses = jnp.square(int_value - int_targets)
+                        int_value_losses_clipped = jnp.square(int_value_pred_clipped - int_targets)
+                        int_value_loss = (
+                            0.5 * jnp.maximum(int_value_losses, int_value_losses_clipped).mean()
+                        )
 
                         # CALCULATE ACTOR LOSS
                         ratio = jnp.exp(log_prob - traj_batch.log_prob)
@@ -421,16 +469,16 @@ def ppo_make_train(config):  # noqa: C901
 
                         total_loss = (
                             loss_actor
-                            + config["VF_COEF"] * value_loss
+                            + config["VF_COEF"] * (value_loss + int_value_loss)
                             - config["ENT_COEF"] * entropy
                         )
-                        return total_loss, (value_loss, loss_actor, entropy)
+                        return total_loss, (value_loss, loss_actor, entropy, int_value_loss)
 
                     grad_rl_fn = jax.value_and_grad(_rl_loss_fn, has_aux=True)
                     grad_rnd_fn = jax.value_and_grad(_rnd_loss)
 
                     total_rl_loss, rl_grads = grad_rl_fn(
-                        network_state.params, traj_batch, advantages, targets
+                        network_state.params, traj_batch, advantages, targets, int_targets
                     )
 
                     rnd_loss, rnd_grad = grad_rnd_fn(predictor_state.params, target_params, rnd_obs)
@@ -444,6 +492,7 @@ def ppo_make_train(config):  # noqa: C901
                     traj_batch,
                     advantages,
                     targets,
+                    int_targets,
                     obs_count,
                     obs_mean,
                     obs_var,
@@ -462,7 +511,7 @@ def ppo_make_train(config):  # noqa: C901
                     batch_size == config["NUM_STEPS"] * config["NUM_ENVS"]
                 ), "batch size must be equal to number of steps * number of envs"
                 permutation = jax.random.permutation(_rng, batch_size)
-                batch = (traj_batch, advantages, targets, rnd_obs)
+                batch = (traj_batch, advantages, targets, int_targets, rnd_obs)
                 batch = jax.tree_util.tree_map(
                     lambda x: x.reshape((batch_size,) + x.shape[2:]), batch
                 )
@@ -479,6 +528,7 @@ def ppo_make_train(config):  # noqa: C901
                     traj_batch,
                     advantages,
                     targets,
+                    int_targets,
                     obs_count,
                     obs_mean,
                     obs_var,
@@ -492,6 +542,7 @@ def ppo_make_train(config):  # noqa: C901
                 traj_batch,
                 advantages,
                 targets,
+                int_targets,
                 obs_count,
                 obs_mean,
                 obs_var,
@@ -562,6 +613,7 @@ def ppo_make_train(config):  # noqa: C901
             "int_reward": int_reward,
             "rl_total_loss": rl_total_loss[0],
             "rl_value_loss": rl_total_loss[1][0],
+            "rl_int_value_loss": rl_total_loss[1][3],
             "rl_actor_loss": rl_total_loss[1][1],
             "rl_entrophy_loss": rl_total_loss[1][2],
             "rnd_loss": rnd_loss,
@@ -616,6 +668,7 @@ if __name__ == "__main__":
     logger.log_rl_losses(output, config["NUM_SEEDS"])
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_rnd_losses(output, config["NUM_SEEDS"])
-    output["config"] = config
-    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
-    Save(path, output)
+    logger.log_int_value_losses(output, config["NUM_SEEDS"])
+    # output["config"] = config
+    # path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
+    # Save(path, output)
