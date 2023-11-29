@@ -2,6 +2,7 @@ import datetime
 
 import jax
 import jax.numpy as jnp
+
 import wandb
 
 
@@ -291,7 +292,7 @@ class WBLogger:
         )
 
         if num_seeds > 1:
-            int_value_avg = jnp.mean(output["int_value_loss"], axis=0)
+            int_value_avg = jnp.mean(output["rl_int_value_loss"], axis=0)
             for loss in range(len(int_value_avg.mean(-1).reshape(-1))):
                 self.losses.log(
                     {
@@ -307,10 +308,10 @@ class WBLogger:
             self.losses.finish()
         else:
 
-            for loss in range(len(output["int_value_loss"].mean(-1).reshape(-1))):
+            for loss in range(len(output["rl_int_value_loss"].mean(-1).reshape(-1))):
                 self.losses.log(
                     {
-                        f"int_value_loss_{self.config['ENV_NAME']}": output["int_value_loss"]
+                        f"int_value_loss_{self.config['ENV_NAME']}": output["rl_int_value_loss"]
                         .mean(-1)
                         .reshape(-1)[loss],
                     }
