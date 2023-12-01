@@ -258,7 +258,7 @@ def ppo_make_train(config):
 
 if __name__ == "__main__":
     config = {
-        "RUN_NAME": "dis_ppo_DS",
+        "RUN_NAME": "dis_ppo",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -293,7 +293,7 @@ if __name__ == "__main__":
     logger = WBLogger(
         config=config,
         group=f"ppo_discrete/{config['ENV_NAME']}",
-        tags=["discrete_ppo"],
+        tags=["discrete_ppo", config["ENV_NAME"]],
         name=config["RUN_NAME"],
     )
     logger.log_episode_return(output, config["NUM_SEEDS"])
