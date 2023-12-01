@@ -362,12 +362,13 @@ def byol_make_train(config):  # noqa: C901
 
                 def _get_int_advantages(gae_and_next_value, transition):
                     gae, next_value = gae_and_next_value
-                    int_value, int_reward = (
+                    done, int_value, int_reward = (
+                        transition.done,
                         transition.int_value,
                         transition.int_reward,
                     )
-                    delta = int_reward + config["INT_GAMMA"] * next_value - int_value
-                    gae = delta + config["INT_GAMMA"] * config["GAE_LAMBDA"] * gae
+                    delta = int_reward + config["INT_GAMMA"] * next_value * (1 - done) - int_value
+                    gae = delta + config["INT_GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
                     return (gae, int_value), gae
 
                 # Looping over time steps in the "batch".
@@ -674,7 +675,7 @@ def byol_make_train(config):  # noqa: C901
 
 if __name__ == "__main__":
     config = {
-        "RUN_NAME": "byol_lite_2_val_empty",
+        "RUN_NAME": "byol_lite_2_val_deepsea_non_epi",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -690,7 +691,7 @@ if __name__ == "__main__":
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
         "ACTIVATION": "tanh",
-        "ENV_NAME": "Empty-misc",
+        "ENV_NAME": "DeepSea-bsuite",
         "ANNEAL_LR": True,
         "DEBUG": False,
         "EMA_PARAMETER": 0.99,

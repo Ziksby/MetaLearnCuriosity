@@ -624,7 +624,7 @@ def ppo_make_train(config):  # noqa: C901
 
 if __name__ == "__main__":
     config = {
-        "RUN_NAME": "rnd",
+        "RUN_NAME": "rnd_2val_4R",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -640,7 +640,7 @@ if __name__ == "__main__":
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
         "ACTIVATION": "tanh",
-        "ENV_NAME": "Empty-misc",
+        "ENV_NAME": "FourRooms-misc",
         "ANNEAL_LR": True,
         "DEBUG": False,
         "INT_GAMMA": 0.999,
@@ -669,6 +669,6 @@ if __name__ == "__main__":
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_rnd_losses(output, config["NUM_SEEDS"])
     logger.log_int_value_losses(output, config["NUM_SEEDS"])
-    # output["config"] = config
-    # path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
-    # Save(path, output)
+    output["config"] = config
+    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
+    Save(path, output)

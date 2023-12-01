@@ -15,30 +15,66 @@ from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper
 
 
-class FAST(nn.Module):
-
-    action_dim: Sequence[int]
+class RandomNetwork(nn.Module):
+    encoder_layer_out_shape: Sequence[int]
 
     @nn.compact
     def __call__(self, x):
-        action = nn.Dense(
-            64,
+        encoded_obs = nn.Dense(
+            self.encoder_layer_out_shape,
             kernel_init=orthogonal(np.sqrt(2)),
             bias_init=constant(0.0),
         )(x)
-        action = nn.relu(action)
-        action = nn.Dense(
-            64,
+        encoded_obs = nn.relu(encoded_obs)
+        encoded_obs = nn.Dense(
+            self.encoder_layer_out_shape,
             kernel_init=orthogonal(np.sqrt(1.0)),
             bias_init=constant(0.0),
-        )(action)
-        action = nn.relu(action)
-        action = nn.Dense(self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0))(
-            action
-        )
-        pi = distrax.Categorical(logits=action)
+        )(encoded_obs)
 
-        return pi
+        return encoded_obs
+
+
+class BackwardNetwork(nn.Module):
+    encoder_layer_out_shape: Sequence[int]
+
+    @nn.compact
+    def __call__(self, x):
+        encoded_obs = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
+        )(x)
+        encoded_obs = nn.relu(encoded_obs)
+        encoded_obs = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(1.0)),
+            bias_init=constant(0.0),
+        )(encoded_obs)
+
+        return encoded_obs
+
+
+class ForwardNetwork(nn.Module):
+    encoder_layer_out_shape: Sequence[int]
+
+    @nn.compact
+    def __call__(self, x):
+
+        # FORWARD PART
+        encoded_obs = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
+        )(x)
+        encoded_obs = nn.relu(encoded_obs)
+        encoded_obs = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(1.0)),
+            bias_init=constant(0.0),
+        )(encoded_obs)
+
+        return encoded_obs
 
 
 class PPOActorCritic(nn.Module):
@@ -68,23 +104,32 @@ class PPOActorCritic(nn.Module):
         critic = activation(critic)
         critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(critic)
 
-        return pi, jnp.squeeze(critic, axis=-1)
+        # INT CRITIC
+        int_critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
+        int_critic = activation(int_critic)
+        int_critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(
+            int_critic
+        )
+        int_critic = activation(int_critic)
+        int_critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(int_critic)
+
+        return pi, jnp.squeeze(critic, axis=-1), jnp.squeeze(int_critic, axis=-1)
 
 
 class Transition(NamedTuple):
     done: jnp.ndarray
     action: jnp.ndarray
     value: jnp.ndarray
+    int_value: jnp.ndarray
     reward: jnp.ndarray
     int_reward: jnp.ndarray
     log_prob: jnp.ndarray
     obs: jnp.ndarray
     next_obs: jnp.ndarray
-    norm_time_step: jnp.ndarray
     info: jnp.ndarray
 
 
-def ppo_make_train(config):
+def ppo_make_train(config):  # noqa: C901
     config["NUM_UPDATES"] = config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     config["MINIBATCH_SIZE"] = config["NUM_ENVS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
     env, env_params = gymnax.make(config["ENV_NAME"])
@@ -101,31 +146,24 @@ def ppo_make_train(config):
 
     def train(rng):
         # INIT NETWORK
+        encoder_layer_out_shape = 64
         network = PPOActorCritic(env.action_space(env_params).n, activation=config["ACTIVATION"])
-        fast = FAST(env.action_space(env_params).n)
+        random = RandomNetwork(encoder_layer_out_shape)
+        backward = BackwardNetwork(encoder_layer_out_shape)
+        forward = ForwardNetwork(encoder_layer_out_shape)
 
+        # THE RANDOM KEYS
         rng, _rng = jax.random.split(rng)
-        rng, _fast_rng = jax.random.split(rng)
+        rng, _rand_rng = jax.random.split(rng)
+        rng, _back_rng = jax.random.split(rng)
+        rng, _for_rng = jax.random.split(rng)
 
         init_x = jnp.zeros(env.observation_space(env_params).shape)
+        encoded_x = jnp.zeros((env.observation_space(env_params).shape[0], encoder_layer_out_shape))
         network_params = network.init(_rng, init_x)
-        fast_params = fast.init(_fast_rng, init_x)
-
-        fast_tx = optax.chain(
-            optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
-            optax.adam(config["LR"], eps=1e-5),
-        )
-        fast_state = TrainState.create(
-            apply_fn=fast.apply,
-            params=fast_params,
-            tx=fast_tx,
-        )
-
-        # INT REWARD NORM PARAMS
-        rewems = jnp.zeros(config["NUM_STEPS"], dtype=jnp.float32)
-        count = 1e-4
-        int_mean = 0.0
-        int_var = 1.0
+        random_params = random.init(_rand_rng, init_x)
+        forward_params = forward.init(_for_rng, encoded_x)
+        backward_params = backward.init(_back_rng, encoded_x)
 
         if config["ANNEAL_LR"]:
             tx = optax.chain(
@@ -137,11 +175,35 @@ def ppo_make_train(config):
                 optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
                 optax.adam(config["LR"], eps=1e-5),
             )
+        forward_tx = optax.chain(
+            optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+            optax.adam(learning_rate=linear_schedule, eps=1e-5),
+        )
+        backward_tx = optax.chain(
+            optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+            optax.adam(config["LR"], eps=1e-5),
+        )
         network_state = TrainState.create(
             apply_fn=network.apply,
             params=network_params,
             tx=tx,
         )
+        forward_state = TrainState.create(
+            apply_fn=forward.apply,
+            params=forward_params,
+            tx=forward_tx,
+        )
+        backward_state = TrainState.create(
+            apply_fn=backward.apply,
+            params=backward_params,
+            tx=backward_tx,
+        )
+
+        # INT REWARD NORM PARAMS
+        rewems = jnp.zeros(config["NUM_STEPS"], dtype=jnp.float32)
+        count = 1e-4
+        int_mean = 0.0
+        int_var = 1.0
 
         # INIT ENV
         rng, _rng = jax.random.split(rng)
@@ -154,7 +216,9 @@ def ppo_make_train(config):
             def _env_step(runner_state, unused):
                 (
                     network_state,
-                    fast_state,
+                    forward_state,
+                    backward_state,
+                    random_params,
                     env_state,
                     last_obs,
                     count,
@@ -166,7 +230,7 @@ def ppo_make_train(config):
 
                 # SELECT ACTION
                 rng, _rng = jax.random.split(rng)
-                pi, value = network.apply(network_state.params, last_obs)
+                pi, value, int_value = network.apply(network_state.params, last_obs)
                 action = pi.sample(seed=_rng)
                 log_prob = pi.log_prob(action)
 
@@ -176,28 +240,33 @@ def ppo_make_train(config):
                 obsv, env_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None))(
                     rng_step, env_state, action, env_params
                 )
-                # NORM TIME STEP
-                norm_time_step = env_state.env_state.time / env_params.max_steps_in_episode
-                # INTRINSIC REWARD
-                fast_pi_st = fast.apply(fast_state.params, last_obs)
-                fast_pi_st_1 = fast.apply(fast_state.params, obsv)
-                int_reward = jnp.linalg.norm((fast_pi_st_1.logits - fast_pi_st.logits), axis=1)
+
+                # INT REWARD
+                rand_last_obs = random.apply(random_params, last_obs)
+                rand_obs = random.apply(random_params, obsv)
+                for_last_obs = forward.apply(forward_state.params, rand_last_obs)
+                back_obs = backward.apply(backward_state.params, rand_obs)
+                loss_forward = jnp.square(jnp.linalg.norm((for_last_obs - rand_obs), axis=1))
+                loss_backward = jnp.square(jnp.linalg.norm((back_obs - rand_last_obs), axis=1))
+                int_reward = (loss_forward + loss_backward) * (1 - done)
 
                 transition = Transition(
                     done,
                     action,
                     value,
+                    int_value,
                     reward,
                     int_reward,
                     log_prob,
                     last_obs,
                     obsv,
-                    norm_time_step,
                     info,
                 )
                 runner_state = (
                     network_state,
-                    fast_state,
+                    forward_state,
+                    backward_state,
+                    random_params,
                     env_state,
                     obsv,
                     count,
@@ -215,7 +284,9 @@ def ppo_make_train(config):
             # CALCULATE ADVANTAGE
             (
                 network_state,
-                fast_state,
+                forward_state,
+                backward_state,
+                random_params,
                 env_state,
                 last_obs,
                 count,
@@ -224,7 +295,7 @@ def ppo_make_train(config):
                 int_var,
                 rng,
             ) = runner_state
-            _, last_val = network.apply(network_state.params, last_obs)
+            _, last_val, last_int_val = network.apply(network_state.params, last_obs)
 
             def _update_int_reward_norm_params(batch_mean, batch_var, count, int_mean, int_var):
 
@@ -270,7 +341,7 @@ def ppo_make_train(config):
                 norm_int_reward = int_reward / jnp.sqrt(int_var)
                 return norm_int_reward, count, rewems, int_mean, int_var
 
-            def _calculate_gae(traj_batch, last_val, count, rewems, int_mean, int_var):
+            def _calculate_int_gae(traj_batch, last_int_val, count, rewems, int_mean, int_var):
                 norm_int_reward, count, rewems, int_mean, int_var = _normalise_int_rewards(
                     traj_batch, count, rewems, int_mean, int_var
                 )
@@ -279,61 +350,98 @@ def ppo_make_train(config):
                     traj_batch.done,
                     traj_batch.action,
                     traj_batch.value,
+                    traj_batch.int_value,
                     traj_batch.reward,
                     norm_int_reward,
                     traj_batch.log_prob,
                     traj_batch.obs,
                     traj_batch.next_obs,
-                    traj_batch.norm_time_step,
                     traj_batch.info,
                 )
 
+                def _get_int_advantages(gae_and_next_value, transition):
+                    gae, next_value = gae_and_next_value
+                    int_value, int_reward = (
+                        transition.int_value,
+                        transition.int_reward,
+                    )
+                    delta = int_reward + config["INT_GAMMA"] * next_value - int_value
+                    gae = delta + config["INT_GAMMA"] * config["GAE_LAMBDA"] * gae
+                    return (gae, int_value), gae
+
+                _, int_advantages = jax.lax.scan(
+                    _get_int_advantages,
+                    (jnp.zeros_like(last_int_val), last_int_val),
+                    norm_traj_batch,
+                    reverse=True,
+                    unroll=16,
+                )
+                return (
+                    int_advantages,
+                    int_advantages + traj_batch.int_value,
+                    count,
+                    rewems,
+                    int_mean,
+                    int_var,
+                )
+
+            int_advantages, int_targets, count, rewems, int_mean, int_var = _calculate_int_gae(
+                traj_batch, last_int_val, count, rewems, int_mean, int_var
+            )
+
+            def _calculate_gae(traj_batch, last_val):
                 def _get_advantages(gae_and_next_value, transition):
                     gae, next_value = gae_and_next_value
-                    done, value, reward, int_reward = (
+                    done, value, reward = (
                         transition.done,
                         transition.value,
                         transition.reward,
-                        transition.int_reward,
                     )
-                    # total_reward = (1 + int_reward - norm_time_step) * int_reward + (
-                    #     norm_time_step * reward
-                    # )
-                    total_reward = (
-                        reward + config["INT_LAMBDA"] * int_reward
-                    )  # total_reward / (1 + int_reward)
-                    delta = total_reward + config["GAMMA"] * next_value * (1 - done) - value
+                    delta = reward + config["GAMMA"] * next_value * (1 - done) - value
                     gae = delta + config["GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
                     return (gae, value), gae
 
                 _, advantages = jax.lax.scan(
                     _get_advantages,
                     (jnp.zeros_like(last_val), last_val),
-                    norm_traj_batch,
+                    traj_batch,
                     reverse=True,
                     unroll=16,
                 )
-                return advantages, advantages + traj_batch.value, count, rewems, int_mean, int_var
+                return advantages, advantages + traj_batch.value
 
-            advantages, targets, count, rewems, int_mean, int_var = _calculate_gae(
-                traj_batch, last_val, count, rewems, int_mean, int_var
-            )
+            advantages, targets = _calculate_gae(traj_batch, last_val)
+
+            advantages = int_advantages * config["INT_GAMMA"] + advantages * config["GAMMA"]
 
             # UPDATE NETWORK
             def _update_epoch(update_state, unused):
                 def _update_minbatch(train_states, batch_info):
-                    traj_batch, advantages, targets = batch_info
-                    network_state, fast_state = train_states
+                    traj_batch, advantages, targets, int_targets = batch_info
+                    network_state, forward_state, backward_state, random_params = train_states
 
-                    def _fast_loss_fn(fast_params, traj_batch):
-                        # The NLL Loss
-                        fast_pi = fast.apply(fast_params, traj_batch.obs)
-                        loss = -fast_pi.log_prob(traj_batch.action)
+                    def _forward_loss(forward_params, random_params, traj_batch):
+                        rand_last_obs = random.apply(random_params, traj_batch.obs)
+                        rand_obs = random.apply(random_params, traj_batch.next_obs)
+                        for_last_obs = forward.apply(forward_params, rand_last_obs)
+                        loss = jnp.square(jnp.linalg.norm((for_last_obs - rand_obs), axis=1)) * (
+                            1 - traj_batch.done
+                        )
+
                         return loss.mean()
 
-                    def _rl_loss_fn(params, traj_batch, gae, targets):
+                    def _backward_loss(backward_params, random_params, traj_batch):
+                        rand_last_obs = random.apply(random_params, traj_batch.obs)
+                        rand_obs = random.apply(random_params, traj_batch.next_obs)
+                        back_obs = backward.apply(backward_params, rand_obs)
+                        loss = jnp.square(jnp.linalg.norm((back_obs - rand_last_obs), axis=1)) * (
+                            1 - traj_batch.done
+                        )
+                        return loss.mean()
+
+                    def _loss_fn(params, traj_batch, gae, targets):
                         # RERUN NETWORK
-                        pi, value = network.apply(params, traj_batch.obs)
+                        pi, value, int_value = network.apply(params, traj_batch.obs)
                         log_prob = pi.log_prob(traj_batch.action)
 
                         # CALCULATE VALUE LOSS
@@ -343,6 +451,16 @@ def ppo_make_train(config):
                         value_losses = jnp.square(value - targets)
                         value_losses_clipped = jnp.square(value_pred_clipped - targets)
                         value_loss = 0.5 * jnp.maximum(value_losses, value_losses_clipped).mean()
+
+                        # CALCULATE INT VALUE LOSS
+                        int_value_pred_clipped = traj_batch.int_value + (
+                            int_value - traj_batch.int_value
+                        ).clip(-config["CLIP_EPS"], config["CLIP_EPS"])
+                        int_value_losses = jnp.square(int_value - int_targets)
+                        int_value_losses_clipped = jnp.square(int_value_pred_clipped - int_targets)
+                        int_value_loss = (
+                            0.5 * jnp.maximum(int_value_losses, int_value_losses_clipped).mean()
+                        )
 
                         # CALCULATE ACTOR LOSS
                         ratio = jnp.exp(log_prob - traj_batch.log_prob)
@@ -362,29 +480,41 @@ def ppo_make_train(config):
 
                         total_loss = (
                             loss_actor
-                            + config["VF_COEF"] * value_loss
+                            + config["VF_COEF"] * (value_loss + int_value_loss)
                             - config["ENT_COEF"] * entropy
                         )
-                        return total_loss, (value_loss, loss_actor, entropy)
+                        return total_loss, (value_loss, loss_actor, entropy, int_value_loss)
 
-                    rl_grad_fn = jax.value_and_grad(_rl_loss_fn, has_aux=True)
-                    fast_grad_fn = jax.value_and_grad(_fast_loss_fn)
-                    total_loss, rl_grads = rl_grad_fn(
+                    rl_grad_fn = jax.value_and_grad(_loss_fn, has_aux=True)
+                    forward_grad_fn = jax.value_and_grad(_forward_loss)
+                    backward_grad_fn = jax.value_and_grad(_backward_loss)
+
+                    for_loss, for_grads = forward_grad_fn(
+                        forward_state.params, random_params, traj_batch
+                    )
+                    back_loss, back_grads = backward_grad_fn(
+                        backward_state.params, random_params, traj_batch
+                    )
+                    total_rl_loss, rl_grads = rl_grad_fn(
                         network_state.params, traj_batch, advantages, targets
                     )
-                    fast_loss, fast_grads = fast_grad_fn(fast_state.params, traj_batch)
-                    network_state = network_state.apply_gradients(grads=rl_grads)
-                    fast_state = fast_state.apply_gradients(grads=fast_grads)
-                    return (network_state, fast_state), (total_loss, fast_loss)
 
-                train_states, traj_batch, advantages, targets, rng = update_state
+                    network_state = network_state.apply_gradients(grads=rl_grads)
+                    forward_state = forward_state.apply_gradients(grads=for_grads)
+                    backward_state = backward_state.apply_gradients(grads=back_grads)
+
+                    train_states = (network_state, forward_state, backward_state, random_params)
+                    total_loss = (total_rl_loss, back_loss, for_loss)
+                    return train_states, total_loss
+
+                train_states, traj_batch, advantages, targets, int_targets, rng = update_state
                 rng, _rng = jax.random.split(rng)
                 batch_size = config["MINIBATCH_SIZE"] * config["NUM_MINIBATCHES"]
                 assert (
                     batch_size == config["NUM_STEPS"] * config["NUM_ENVS"]
                 ), "batch size must be equal to number of steps * number of envs"
                 permutation = jax.random.permutation(_rng, batch_size)
-                batch = (traj_batch, advantages, targets)
+                batch = (traj_batch, advantages, targets, int_targets)
                 batch = jax.tree_util.tree_map(
                     lambda x: x.reshape((batch_size,) + x.shape[2:]), batch
                 )
@@ -396,16 +526,16 @@ def ppo_make_train(config):
                     shuffled_batch,
                 )
                 train_states, total_loss = jax.lax.scan(_update_minbatch, train_states, minibatches)
-                update_state = (train_states, traj_batch, advantages, targets, rng)
+                update_state = (train_states, traj_batch, advantages, targets, int_targets, rng)
                 return update_state, total_loss
 
-            train_states = (network_state, fast_state)
-            update_state = (train_states, traj_batch, advantages, targets, rng)
+            train_states = (network_state, forward_state, backward_state, random_params)
+            update_state = (train_states, traj_batch, advantages, targets, int_targets, rng)
             update_state, loss_info = jax.lax.scan(
                 _update_epoch, update_state, None, config["UPDATE_EPOCHS"]
             )
             train_states = update_state[0]
-            network_state, fast_state = train_states
+            network_state, forward_state, backward_state, random_params = train_states
             metric = traj_batch.info
             int_reward = traj_batch.int_reward
             rng = update_state[-1]
@@ -421,7 +551,9 @@ def ppo_make_train(config):
 
             runner_state = (
                 network_state,
-                fast_state,
+                forward_state,
+                backward_state,
+                random_params,
                 env_state,
                 last_obs,
                 count,
@@ -435,7 +567,9 @@ def ppo_make_train(config):
         rng, _rng = jax.random.split(rng)
         runner_state = (
             network_state,
-            fast_state,
+            forward_state,
+            backward_state,
+            random_params,
             env_state,
             obsv,
             count,
@@ -448,16 +582,19 @@ def ppo_make_train(config):
             _update_step, runner_state, None, config["NUM_UPDATES"]
         )
         metric, total_loss, int_reward = extra_info
-        rl_total_loss, fast_loss = total_loss
+        rl_total_loss, for_loss, back_loss = total_loss
+
         return {
             "runner_state": runner_state,
             "metrics": metric,
             "rl_total_loss": rl_total_loss[0],
             "rl_value_loss": rl_total_loss[1][0],
             "rl_actor_loss": rl_total_loss[1][1],
+            "rl_int_value_loss": rl_total_loss[1][3],
             "rl_entrophy_loss": rl_total_loss[1][2],
             "int_reward": int_reward,
-            "fast_loss": fast_loss,
+            "forward_loss": for_loss,
+            "backward_loss": back_loss,
         }
 
     return train
@@ -465,7 +602,7 @@ def ppo_make_train(config):
 
 if __name__ == "__main__":
     config = {
-        "RUN_NAME": "fast",
+        "RUN_NAME": "ccim_slimmed_2val_meta",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -481,7 +618,7 @@ if __name__ == "__main__":
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
         "ACTIVATION": "tanh",
-        "ENV_NAME": "Empty-misc",
+        "ENV_NAME": "MetaMaze-misc",
         "ANNEAL_LR": True,
         "DEBUG": False,
         "INT_GAMMA": 0.999,
@@ -501,14 +638,15 @@ if __name__ == "__main__":
 
     logger = WBLogger(
         config=config,
-        group=f"fast/{config['ENV_NAME']}",
-        tags=["fast", config["ENV_NAME"]],
+        group=f"ccim/{config['ENV_NAME']}",
+        tags=["ccim", f"{config['ENV_NAME']}"],
         name=config["RUN_NAME"],
     )
     logger.log_episode_return(output, config["NUM_SEEDS"])
     logger.log_rl_losses(output, config["NUM_SEEDS"])
-    logger.log_fast_losses(output, config["NUM_SEEDS"])
     logger.log_int_rewards(output, config["NUM_SEEDS"])
+    logger.log_ccim_losses(output, config["NUM_SEEDS"])
+    logger.log_int_value_losses(output, config["NUM_SEEDS"])
     output["config"] = config
-    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
+    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}_diff_config/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
     Save(path, output)
