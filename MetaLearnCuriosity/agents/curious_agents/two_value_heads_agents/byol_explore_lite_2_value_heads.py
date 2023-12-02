@@ -662,7 +662,7 @@ def byol_make_train(config):  # noqa: C901
             "int_reward": int_reward,
             "rl_total_loss": rl_total_loss[0],
             "rl_value_loss": rl_total_loss[1][0],
-            "rl_int_value_loss": rl_total_loss[0][-1],
+            "rl_int_value_loss": rl_total_loss[1][-1],
             "rl_actor_loss": rl_total_loss[1][1],
             "rl_entrophy_loss": rl_total_loss[1][2],
             "byol_loss": byol_loss,
@@ -694,7 +694,7 @@ if __name__ == "__main__":
         "ANNEAL_LR": True,
         "DEBUG": False,
         "EMA_PARAMETER": 0.99,
-        "REW_NORM_PARAMETER": 0.99,
+        "REW_NORM_PARAMETER": 0.999,
         "INT_GAMMA": 0.999,
     }
     rng = jax.random.PRNGKey(config["SEED"])
@@ -718,6 +718,7 @@ if __name__ == "__main__":
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_byol_losses(output, config["NUM_SEEDS"])
     logger.log_rl_losses(output, config["NUM_SEEDS"])
+    logger.log_int_value_losses(output, config["NUM_SEEDS"])
     path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
     output["config"] = config
     Save(path, output)

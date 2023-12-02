@@ -26,13 +26,13 @@ class FAST(nn.Module):
             kernel_init=orthogonal(np.sqrt(2)),
             bias_init=constant(0.0),
         )(x)
-        action = nn.tanh(action)
+        action = nn.relu(action)
         action = nn.Dense(
             64,
             kernel_init=orthogonal(np.sqrt(1.0)),
             bias_init=constant(0.0),
         )(action)
-        action = nn.tanh(action)
+        action = nn.relu(action)
         action = nn.Dense(self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0))(
             action
         )
@@ -181,7 +181,6 @@ def ppo_make_train(config):
                 # INTRINSIC REWARD
                 fast_pi_st = fast.apply(fast_state.params, last_obs)
                 fast_pi_st_1 = fast.apply(fast_state.params, obsv)
-                # int_reward = -fast_pi_st.log_prob(action)
                 int_reward = jnp.linalg.norm((fast_pi_st_1.logits - fast_pi_st.logits), axis=1)
 
                 transition = Transition(
@@ -291,18 +290,17 @@ def ppo_make_train(config):
 
                 def _get_advantages(gae_and_next_value, transition):
                     gae, next_value = gae_and_next_value
-                    done, value, reward, int_reward, norm_time_step = (
+                    done, value, reward, int_reward = (
                         transition.done,
                         transition.value,
                         transition.reward,
                         transition.int_reward,
-                        transition.norm_time_step,
                     )
-                    total_reward = (1 + int_reward - norm_time_step) * int_reward + (
-                        norm_time_step * reward
-                    )
-                    total_reward /= 1 + int_reward
-                    # total_reward = reward + config["INT_LAMBDA"] * int_reward
+                    # total_reward = (1 + int_reward - norm_time_step) * int_reward + (
+                    #     norm_time_step * reward
+                    # )
+                    # total_reward /= 1 + int_reward
+                    total_reward = reward + config["INT_LAMBDA"] * int_reward
                     delta = total_reward + config["GAMMA"] * next_value * (1 - done) - value
                     gae = delta + config["GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
                     return (gae, value), gae
@@ -466,7 +464,7 @@ def ppo_make_train(config):
 
 if __name__ == "__main__":
     config = {
-        "RUN_NAME": "fast_2_but_one",
+        "RUN_NAME": "fast_deepsea",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -482,11 +480,11 @@ if __name__ == "__main__":
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
         "ACTIVATION": "tanh",
-        "ENV_NAME": "Empty-misc",
+        "ENV_NAME": "DeepSea-bsuite",
         "ANNEAL_LR": True,
         "DEBUG": False,
         "INT_GAMMA": 0.999,
-        "INT_LAMBDA": 0.002,
+        "INT_LAMBDA": 0.08,
     }
 
     rng = jax.random.PRNGKey(config["SEED"])
@@ -510,6 +508,6 @@ if __name__ == "__main__":
     logger.log_rl_losses(output, config["NUM_SEEDS"])
     logger.log_fast_losses(output, config["NUM_SEEDS"])
     logger.log_int_rewards(output, config["NUM_SEEDS"])
-    # output["config"] = config
-    # path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
-    # Save(path, output)
+    output["config"] = config
+    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
+    Save(path, output)

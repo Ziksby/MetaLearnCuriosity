@@ -572,7 +572,7 @@ def ppo_make_train(config):  # noqa: C901
 
 if __name__ == "__main__":
     config = {
-        "RUN_NAME": "rnd",
+        "RUN_NAME": "rnd_empty",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -592,7 +592,7 @@ if __name__ == "__main__":
         "ANNEAL_LR": True,
         "DEBUG": False,
         "INT_GAMMA": 0.999,
-        "INT_LAMBDA": 0.01,
+        "INT_LAMBDA": 0.08,
     }
 
     rng = jax.random.PRNGKey(config["SEED"])

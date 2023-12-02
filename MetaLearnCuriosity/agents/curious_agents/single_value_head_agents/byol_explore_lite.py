@@ -627,7 +627,7 @@ def byol_make_train(config):  # noqa: C901
 
 if __name__ == "__main__":
     config = {
-        "RUN_NAME": "BYOL_lite",
+        "RUN_NAME": "byol_lite_empty",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -648,7 +648,7 @@ if __name__ == "__main__":
         "DEBUG": False,
         "EMA_PARAMETER": 0.99,
         "REW_NORM_PARAMETER": 0.99,
-        "INT_LAMBDA": 0.002,
+        "INT_LAMBDA": 0.006,
     }
     rng = jax.random.PRNGKey(config["SEED"])
     if config["NUM_SEEDS"] > 1:
@@ -671,6 +671,6 @@ if __name__ == "__main__":
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_byol_losses(output, config["NUM_SEEDS"])
     logger.log_rl_losses(output, config["NUM_SEEDS"])
-    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}_diff_config/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
+    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
     output["config"] = config
     Save(path, output)
