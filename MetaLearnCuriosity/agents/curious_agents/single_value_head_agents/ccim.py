@@ -317,10 +317,9 @@ def ppo_make_train(config):  # noqa: C901
                 return new_count, new_int_mean, new_int_var
 
             def _normalise_int_rewards(traj_batch, count, rewems, int_mean, int_var):
-
-                # def _multiply_rewems_w_dones(rewems,dones_row):
-                #     rewems = rewems * (1-dones_row)
-                #     return rewems,rewems
+                def _multiply_rewems_w_dones(rewems, dones_row):
+                    rewems = rewems * (1 - dones_row)
+                    return rewems, rewems
 
                 def _update_rewems(rewems, int_reward_row):
                     rewems = rewems * config["INT_GAMMA"] + int_reward_row
@@ -330,7 +329,9 @@ def ppo_make_train(config):  # noqa: C901
 
                 int_reward_transpose = jnp.transpose(int_reward)
 
-                # rewems,_ = jax.lax.scan(_multiply_rewems_w_dones,rewems,jnp.transpose(traj_batch.done))
+                rewems, _ = jax.lax.scan(
+                    _multiply_rewems_w_dones, rewems, jnp.transpose(traj_batch.done)
+                )
 
                 rewems, dis_int_reward_transpose = jax.lax.scan(
                     _update_rewems, rewems, int_reward_transpose
@@ -342,7 +343,7 @@ def ppo_make_train(config):  # noqa: C901
                 count, int_mean, int_var = _update_int_reward_norm_params(
                     batch_mean, batch_var, count, int_mean, int_var
                 )
-                norm_int_reward = int_reward / jnp.sqrt(int_var)
+                norm_int_reward = int_reward / jnp.sqrt(int_var + 1e-8)
                 return norm_int_reward, count, rewems, int_mean, int_var
 
             def _calculate_gae(traj_batch, last_val, count, rewems, int_mean, int_var):
@@ -603,8 +604,8 @@ if __name__ == "__main__":
 
     logger = WBLogger(
         config=config,
-        group=f"ccim/{config['ENV_NAME']}_diff_config",
-        tags=["ccim", f"{config['ENV_NAME']}_diff_config"],
+        group=f"ccim/{config['ENV_NAME']}",
+        tags=["ccim", f"{config['ENV_NAME']}", "N=10"],
         name=config["RUN_NAME"],
     )
     logger.log_episode_return(output, config["NUM_SEEDS"])

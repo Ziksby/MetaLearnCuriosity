@@ -3,8 +3,12 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
+from gymnax.visualize import Visualizer
 
-from MetaLearnCuriosity.agents.byol_explore_lite import BYOLActorCritic, OnlineEncoder
+from MetaLearnCuriosity.agents.curious_agents.single_value_head_agents.byol_explore_lite import (
+    BYOLActorCritic,
+    OnlineEncoder,
+)
 from MetaLearnCuriosity.agents.ppo import PPOActorCritic
 from MetaLearnCuriosity.checkpoints import Restore
 from MetaLearnCuriosity.wrappers import FlattenObservationWrapper
@@ -114,15 +118,14 @@ def visualise_gymnax(env, path, agent_type, n_best_seed=1):
             next_obs, next_state, reward, done, info = env.step(rng_step, state, action, env_params)
             reward_seq.append(reward)
             if done:
-                print(next_state, done)
                 break
             else:
                 obs = next_obs
                 state = next_state
 
-        # cum_rewards = jnp.cumsum(jnp.array(reward_seq))
-        # vis = Visualizer(env, env_params, state_seq, cum_rewards)
-        # vis.animate(f"{path}/anim_{agent_type}_{seed_num}.gif")
+        cum_rewards = jnp.cumsum(jnp.array(reward_seq))
+        vis = Visualizer(env, env_params, state_seq, cum_rewards)
+        vis.animate(f"{path}/anim_{agent_type}_{seed_num}.gif")
         state_seqs.append(state_seq)
         seed_num += 1
 
@@ -160,16 +163,18 @@ def generate_heatmap(state_seqs, agent_type, path, grid_size=(16, 16)):
     # Mark the goal position with a green triangle
     plt.scatter(goal_pos[1], goal_pos[0], color="green", marker="^", s=100, label="Goal Position")
 
-    # plt.title('Agent\'s Visited States Heatmap')
-    _ = ax.figure.colorbar(im, ax=ax)
+    cbar = ax.figure.colorbar(im, ax=ax)
+    cbar.set_label("Visit Frequency")
 
-    ax.set_xlabel("Y Position")
-    ax.set_ylabel("X Position")
+    ax.set_xlabel("X Position")
+    ax.set_ylabel("Y Position")
     ax.legend()
 
     plt.savefig(f"{path}/heatmap_{agent_type}_30.png")
 
 
-path = "MLC_logs/flax_ckpt/Empty-misc_diff_config/fast_30"
-s = visualise_gymnax("Empty-misc", path, "fast", n_best_seed=30)
-generate_heatmap(s, "fast", path)
+name = "dis_ppo"
+
+path = "MLC_logs/flax_ckpt/Empty-misc/dis_ppo_empty_30"
+s = visualise_gymnax("Empty-misc", path, name, n_best_seed=10)
+generate_heatmap(s, name, path)

@@ -84,7 +84,7 @@ class Transition(NamedTuple):
     info: jnp.ndarray
 
 
-def ppo_make_train(config):
+def ppo_make_train(config):  # # noqa: C901
     config["NUM_UPDATES"] = config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     config["MINIBATCH_SIZE"] = config["NUM_ENVS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
     env, env_params = gymnax.make(config["ENV_NAME"])
@@ -242,10 +242,9 @@ def ppo_make_train(config):
                 return new_count, new_int_mean, new_int_var
 
             def _normalise_int_rewards(traj_batch, count, rewems, int_mean, int_var):
-
-                # def _multiply_rewems_w_dones(rewems,dones_row):
-                #     rewems = rewems * (1-dones_row)
-                #     return rewems,rewems
+                def _multiply_rewems_w_dones(rewems, dones_row):
+                    rewems = rewems * (1 - dones_row)
+                    return rewems, rewems
 
                 def _update_rewems(rewems, int_reward_row):
                     rewems = rewems * config["INT_GAMMA"] + int_reward_row
@@ -255,7 +254,9 @@ def ppo_make_train(config):
 
                 int_reward_transpose = jnp.transpose(int_reward)
 
-                # rewems,_ = jax.lax.scan(_multiply_rewems_w_dones,rewems,jnp.transpose(traj_batch.done))
+                rewems, _ = jax.lax.scan(
+                    _multiply_rewems_w_dones, rewems, jnp.transpose(traj_batch.done)
+                )
 
                 rewems, dis_int_reward_transpose = jax.lax.scan(
                     _update_rewems, rewems, int_reward_transpose
@@ -267,7 +268,7 @@ def ppo_make_train(config):
                 count, int_mean, int_var = _update_int_reward_norm_params(
                     batch_mean, batch_var, count, int_mean, int_var
                 )
-                norm_int_reward = int_reward / jnp.sqrt(int_var)
+                norm_int_reward = int_reward / jnp.sqrt(int_var + 1e-8)
                 return norm_int_reward, count, rewems, int_mean, int_var
 
             def _calculate_gae(traj_batch, last_val, count, rewems, int_mean, int_var):
@@ -464,7 +465,7 @@ def ppo_make_train(config):
 
 if __name__ == "__main__":
     config = {
-        "RUN_NAME": "fast_deepsea",
+        "RUN_NAME": "fast_deepsea_non_fully",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -484,7 +485,7 @@ if __name__ == "__main__":
         "ANNEAL_LR": True,
         "DEBUG": False,
         "INT_GAMMA": 0.999,
-        "INT_LAMBDA": 0.004,
+        "INT_LAMBDA": 0.001,
     }
 
     rng = jax.random.PRNGKey(config["SEED"])
@@ -505,9 +506,9 @@ if __name__ == "__main__":
         name=config["RUN_NAME"],
     )
     logger.log_episode_return(output, config["NUM_SEEDS"])
-    logger.log_rl_losses(output, config["NUM_SEEDS"])
-    logger.log_fast_losses(output, config["NUM_SEEDS"])
-    logger.log_int_rewards(output, config["NUM_SEEDS"])
-    output["config"] = config
-    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
-    Save(path, output)
+    # logger.log_rl_losses(output, config["NUM_SEEDS"])
+    # logger.log_fast_losses(output, config["NUM_SEEDS"])
+    # logger.log_int_rewards(output, config["NUM_SEEDS"])
+    # output["config"] = config
+    # path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
+    # Save(path, output)
