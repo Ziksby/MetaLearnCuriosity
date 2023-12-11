@@ -33,7 +33,7 @@ glfw==2.6.2
 grpcio==1.59.0
 gym==0.26.2
 gym-notices==0.0.8
-gymnax @ git+https://github.com/Ziksby/gymnax.git@4c32ee77ec2d2b27e5e50e997e2ae6a31a91d2b6
+gymnax @ git+https://github.com/Ziksby/gymnax.git@d6a2117736dcdfe743878390a66b7977623bd962
 identify==2.5.30
 idna==3.4
 importlib-metadata==6.8.0

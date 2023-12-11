@@ -258,7 +258,7 @@ def ppo_make_train(config):
 
 if __name__ == "__main__":
     config = {
-        "RUN_NAME": "dis_ppo_DS",
+        "RUN_NAME": "dis_ppo_meta",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -274,7 +274,7 @@ if __name__ == "__main__":
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
         "ACTIVATION": "tanh",
-        "ENV_NAME": "DeepSea-bsuite",
+        "ENV_NAME": "MetaMaze-misc",
         "ANNEAL_LR": True,
         "DEBUG": False,
     }
@@ -293,7 +293,7 @@ if __name__ == "__main__":
     logger = WBLogger(
         config=config,
         group=f"ppo_discrete/{config['ENV_NAME']}",
-        tags=["discrete_ppo"],
+        tags=["discrete_ppo", config["ENV_NAME"]],
         name=config["RUN_NAME"],
     )
     logger.log_episode_return(output, config["NUM_SEEDS"])
