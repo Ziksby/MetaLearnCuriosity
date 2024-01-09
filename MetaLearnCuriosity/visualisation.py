@@ -61,7 +61,7 @@ def find_best_seed_params(path, agent_type, n_best_seed=1):
         top_n_seeds = jnp.argsort(jnp.array(performance_per_seed))[::-1][:n_best_seed]
         for seed in top_n_seeds:
             agent_param = extract_seed_params(output, seed, 0)
-            if agent_type == "BYOL":
+            if agent_type == "byol_lite":
                 online_param = extract_seed_params(output, seed, 1)
             else:
                 online_param = None
@@ -69,7 +69,7 @@ def find_best_seed_params(path, agent_type, n_best_seed=1):
             online_params.append(online_param)
     else:
         assert n_best_seed == 1, "n_seed must be equal to 1 when NUM_SEEDS is 1."
-        if agent_type == "BYOL":
+        if agent_type == "byol_lite":
             online_params.append(runner_state[1]["params"])
         else:
             online_params.append(None)
@@ -100,7 +100,7 @@ def visualise_gymnax(env, path, agent_type, n_best_seed=1):
     for agent_param, online_param in zip(agent_params, online_params):
         state_seq, reward_seq = [], []
 
-        if agent_type == "BYOL":
+        if agent_type == "byol_lite":
             agent = BYOLActorCritic(action_dim)
         else:
             agent = PPOActorCritic(action_dim)
@@ -109,7 +109,7 @@ def visualise_gymnax(env, path, agent_type, n_best_seed=1):
         while True:
             state_seq.append(state)
             rng, rng_step = jax.random.split(rng, 2)
-            if agent_type == "BYOL":
+            if agent_type == "byol_lite":
                 encoded_obs = online.apply(online_param, obs)
             else:
                 encoded_obs = obs
@@ -171,10 +171,3 @@ def generate_heatmap(state_seqs, agent_type, path, grid_size=(16, 16)):
     ax.legend()
 
     plt.savefig(f"{path}/heatmap_{agent_type}_30.png")
-
-
-name = "dis_ppo"
-
-path = "MLC_logs/flax_ckpt/Empty-misc/dis_ppo_empty_30"
-s = visualise_gymnax("Empty-misc", path, name, n_best_seed=10)
-generate_heatmap(s, name, path)

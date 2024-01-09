@@ -593,7 +593,7 @@ if __name__ == "__main__":
         "ANNEAL_LR": True,
         "DEBUG": False,
         "INT_GAMMA": 0.999,
-        "INT_LAMBDA": 0.08,
+        "INT_LAMBDA": 0.2,
     }
 
     rng = jax.random.PRNGKey(config["SEED"])
@@ -610,7 +610,7 @@ if __name__ == "__main__":
     logger = WBLogger(
         config=config,
         group=f"rnd/{config['ENV_NAME']}",
-        tags=["rnd", config["ENV_NAME"]],
+        tags=["rnd", config["ENV_NAME"], "N=10"],
         name=config["RUN_NAME"],
     )
     logger.log_episode_return(output, config["NUM_SEEDS"])
@@ -618,5 +618,7 @@ if __name__ == "__main__":
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_rnd_losses(output, config["NUM_SEEDS"])
     output["config"] = config
-    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
+    path = (
+        f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}_diff/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
+    )
     Save(path, output)

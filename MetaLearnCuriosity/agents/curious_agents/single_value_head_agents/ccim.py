@@ -568,7 +568,7 @@ def ppo_make_train(config):  # noqa: C901
 
 if __name__ == "__main__":
     config = {
-        "RUN_NAME": "ccim_deep",
+        "RUN_NAME": "ccim_empty",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -584,11 +584,11 @@ if __name__ == "__main__":
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
         "ACTIVATION": "tanh",
-        "ENV_NAME": "DeepSea-bsuite",
-        "ANNEAL_LR": True,
+        "ENV_NAME": "Empty-misc",
+        "ANNEAL_LR": False,
         "DEBUG": False,
         "INT_GAMMA": 0.999,
-        "INT_LAMBDA": 0.002,
+        "INT_LAMBDA": 0.003,
     }
 
     rng = jax.random.PRNGKey(config["SEED"])
@@ -605,7 +605,7 @@ if __name__ == "__main__":
     logger = WBLogger(
         config=config,
         group=f"ccim/{config['ENV_NAME']}",
-        tags=["ccim", f"{config['ENV_NAME']}", "N=10"],
+        tags=["ccim", f"{config['ENV_NAME']}"],
         name=config["RUN_NAME"],
     )
     logger.log_episode_return(output, config["NUM_SEEDS"])
@@ -613,5 +613,7 @@ if __name__ == "__main__":
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_ccim_losses(output, config["NUM_SEEDS"])
     output["config"] = config
-    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
+    path = (
+        f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}_diff/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
+    )
     Save(path, output)

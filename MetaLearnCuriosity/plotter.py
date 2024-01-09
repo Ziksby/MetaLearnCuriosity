@@ -58,55 +58,80 @@ def plot_distribution(agent_type, path):
     plt.savefig(f"{path}/{agent_type}_histogram_{output['config']['NUM_SEEDS']}.png")
 
 
-# agent_type= "byol"
-# plot_distribution(agent_type,path)
-
-
-def plot_w_bootstrapped_CI(path):
-    output = Restore(path)
-    metric = output["metrics"]["returned_episode_returns"]
-    # avg among the num of evns
-    metric = jnp.mean(metric, axis=-1)
-
-    # A 2d array of shape num_seeds, update step
-    metric = metric.reshape(metric.shape[0], -1)
-
-    # Transpose to make it (update steps, num_seeds)
-    metric = metric.T
-
+def plot_CI(names, labels, alphas):
+    plt.figure(figsize=(8, 6))
     means = []
-    lows = []
-    highs = []
+    ci_lows = []
+    ci_highs = []
+    for name, label, alpha in zip(names, labels, alphas):
+        path = f"MLC_logs/flax_ckpt/Empty-misc/{name}_empty_30"
+        output = Restore(path)
+        metric = output["metrics"]["returned_episode_returns"]
+        env_name = output["config"]["ENV_NAME"]
+        # avg among the num of evns
+        metric = jnp.mean(metric, axis=-1)
 
-    for i in range(len(metric)):
-        timestep_values = (metric[i],)
-        means.append(jnp.mean(metric[i]))
+        # A 2d array of shape num_seeds, update step
+        metric = metric.reshape(metric.shape[0], -1)
+
+        # Transpose to make it (update steps, num_seeds)
+        metric = metric.T
+
+        timestep_values = (metric[-1],)
+        means.append(jnp.mean(metric[-1]))
         ci = bootstrap(
-            timestep_values, jnp.mean, confidence_level=0.95, method="percentile", n_resamples=1000
+            timestep_values,
+            jnp.mean,
+            confidence_level=0.95,
+            method="percentile",
         )
-        lows.append(ci.confidence_interval.low)
-        highs.append(ci.confidence_interval.high)
+        ci_lows.append(ci.confidence_interval.low)
+        ci_highs.append(ci.confidence_interval.high)
 
-    # Use Seaborn for a better style
-    sns.set(style="whitegrid")
+    means = np.array(means)
+    ci_highs = np.array(ci_highs)
+    ci_lows = np.array(ci_lows)
 
-    # Create a Matplotlib figure and axis
-    plt.figure(figsize=(10, 6))
-
-    # Plot the mean values
-    plt.plot(means, label="Mean Values")
-
-    # Fill between the confidence intervals
-    plt.fill_between(range(len(means)), lows, highs, alpha=0.2, label="95% CI")
-
-    # Add labels and title
-    plt.xlabel("Update Step")
+    error_bar = np.array([means - ci_lows, ci_highs - means])
+    plt.errorbar(labels, means, yerr=error_bar, fmt="o", capsize=5, label="Mean Episode Return")
+    plt.xlabel("RL Agent")
     plt.ylabel("Mean Episode Return")
 
-    # Show the plot
-    plt.legend()
-    plt.savefig(f"{path}/mean_seeds.png")
+    plt.legend(loc="upper center", bbox_to_anchor=(0.5, 1.15))
+    plt.grid()
+    plt.xticks(rotation=45, ha="right")
+    plt.tight_layout()
+    plt.savefig(f"{env_name}_mean_seeds_CI.png")
 
 
-path = "MLC_logs/flax_ckpt/Empty-misc/byol_lite_empty_30"
-plot_w_bootstrapped_CI(path)
+def plot_sample_std(names, labels, alphas):
+    """
+    This function plots the sample std during training for each algorithm
+    """
+    plt.figure(figsize=(8, 6))
+    for name, label, alpha in zip(names, labels, alphas):
+        sample_std = []
+        path = f"MLC_logs/flax_ckpt/Empty-misc/{name}_empty_30"
+        output = Restore(path)
+        metric = output["metrics"]["returned_episode_returns"]
+        env_name = output["config"]["ENV_NAME"]
+        # avg among the num of evns
+        metric = jnp.mean(metric, axis=-1)
+
+        # A 2d array of shape num_seeds, update step
+        metric = metric.reshape(metric.shape[0], -1)
+
+        # Transpose to make it (update steps, num_seeds)
+        metric = metric.T
+
+        for i in range(len(metric)):
+            sample_std.append(jnp.std(metric[i], ddof=1))
+
+        sample_std = jnp.array(sample_std)
+        plt.plot(sample_std, label=label, alpha=alpha)
+
+    plt.xlabel("Update Step")
+    plt.ylabel("The Sample Standard Deviation")
+    plt.legend(loc="upper center", bbox_to_anchor=(0.5, 1.15), ncols=len(names))
+    plt.grid()
+    plt.savefig(f"{env_name}_mean_seeds_std.png")

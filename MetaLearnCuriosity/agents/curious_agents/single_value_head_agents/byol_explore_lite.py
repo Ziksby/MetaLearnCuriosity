@@ -629,7 +629,7 @@ if __name__ == "__main__":
     config = {
         "RUN_NAME": "byol_lite_empty",
         "SEED": 42,
-        "NUM_SEEDS": 256,
+        "NUM_SEEDS": 30,
         "LR": 2.5e-4,
         "NUM_ENVS": 4,
         "NUM_STEPS": 128,
@@ -644,7 +644,7 @@ if __name__ == "__main__":
         "MAX_GRAD_NORM": 0.5,
         "ACTIVATION": "tanh",
         "ENV_NAME": "Empty-misc",
-        "ANNEAL_LR": True,
+        "ANNEAL_LR": False,
         "DEBUG": False,
         "EMA_PARAMETER": 0.99,
         "REW_NORM_PARAMETER": 0.99,
@@ -662,8 +662,8 @@ if __name__ == "__main__":
 
     logger = WBLogger(
         config=config,
-        group=f"byol_toy/{config['ENV_NAME']}_diff_config",
-        tags=["byol_lite", f'{config["ENV_NAME"]}_diff_config'],
+        group=f"byol_toy/{config['ENV_NAME']}",
+        tags=["byol_lite", f'{config["ENV_NAME"]}'],
         notes="gae: normed",
         name=config["RUN_NAME"],
     )
@@ -671,6 +671,8 @@ if __name__ == "__main__":
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_byol_losses(output, config["NUM_SEEDS"])
     logger.log_rl_losses(output, config["NUM_SEEDS"])
-    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
+    path = (
+        f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}_diff/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
+    )
     output["config"] = config
     Save(path, output)
