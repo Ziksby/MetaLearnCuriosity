@@ -1,6 +1,3 @@
-import datetime
-
-import jax
 import jax.numpy as jnp
 
 import wandb
@@ -275,6 +272,43 @@ class WBLogger:
                         .mean(-1)
                         .reshape(-1)[loss],
                         f"backward_loss_{self.config['ENV_NAME']}": output["backward_loss"]
+                        .mean(-1)
+                        .reshape(-1)[loss],
+                    }
+                )
+            self.losses.finish()
+
+    def log_int_value_losses(self, output, num_seeds):
+        self.losses = wandb.init(
+            project="MetaLearnCuriosity",
+            config=self.config,
+            group=self.group,
+            tags=self.tags,
+            notes=self.notes,
+            name=f"{self.name}_int_value_loss",
+        )
+
+        if num_seeds > 1:
+            int_value_avg = jnp.mean(output["rl_int_value_loss"], axis=0)
+            for loss in range(len(int_value_avg.mean(-1).reshape(-1))):
+                self.losses.log(
+                    {
+                        f"int_value_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": int_value_avg.mean(
+                            -1
+                        ).reshape(
+                            -1
+                        )[
+                            loss
+                        ]
+                    }
+                )
+            self.losses.finish()
+        else:
+
+            for loss in range(len(output["rl_int_value_loss"].mean(-1).reshape(-1))):
+                self.losses.log(
+                    {
+                        f"int_value_loss_{self.config['ENV_NAME']}": output["rl_int_value_loss"]
                         .mean(-1)
                         .reshape(-1)[loss],
                     }

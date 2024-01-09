@@ -3,8 +3,12 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
+from gymnax.visualize import Visualizer
 
-from MetaLearnCuriosity.agents.byol_explore_lite import BYOLActorCritic, OnlineEncoder
+from MetaLearnCuriosity.agents.curious_agents.single_value_head_agents.byol_explore_lite import (
+    BYOLActorCritic,
+    OnlineEncoder,
+)
 from MetaLearnCuriosity.agents.ppo import PPOActorCritic
 from MetaLearnCuriosity.checkpoints import Restore
 from MetaLearnCuriosity.wrappers import FlattenObservationWrapper
@@ -57,7 +61,7 @@ def find_best_seed_params(path, agent_type, n_best_seed=1):
         top_n_seeds = jnp.argsort(jnp.array(performance_per_seed))[::-1][:n_best_seed]
         for seed in top_n_seeds:
             agent_param = extract_seed_params(output, seed, 0)
-            if agent_type == "BYOL":
+            if agent_type == "byol_lite":
                 online_param = extract_seed_params(output, seed, 1)
             else:
                 online_param = None
@@ -65,7 +69,7 @@ def find_best_seed_params(path, agent_type, n_best_seed=1):
             online_params.append(online_param)
     else:
         assert n_best_seed == 1, "n_seed must be equal to 1 when NUM_SEEDS is 1."
-        if agent_type == "BYOL":
+        if agent_type == "byol_lite":
             online_params.append(runner_state[1]["params"])
         else:
             online_params.append(None)
@@ -96,7 +100,7 @@ def visualise_gymnax(env, path, agent_type, n_best_seed=1):
     for agent_param, online_param in zip(agent_params, online_params):
         state_seq, reward_seq = [], []
 
-        if agent_type == "BYOL":
+        if agent_type == "byol_lite":
             agent = BYOLActorCritic(action_dim)
         else:
             agent = PPOActorCritic(action_dim)
@@ -105,7 +109,7 @@ def visualise_gymnax(env, path, agent_type, n_best_seed=1):
         while True:
             state_seq.append(state)
             rng, rng_step = jax.random.split(rng, 2)
-            if agent_type == "BYOL":
+            if agent_type == "byol_lite":
                 encoded_obs = online.apply(online_param, obs)
             else:
                 encoded_obs = obs
@@ -114,15 +118,14 @@ def visualise_gymnax(env, path, agent_type, n_best_seed=1):
             next_obs, next_state, reward, done, info = env.step(rng_step, state, action, env_params)
             reward_seq.append(reward)
             if done:
-                print(next_state, done)
                 break
             else:
                 obs = next_obs
                 state = next_state
 
-        # cum_rewards = jnp.cumsum(jnp.array(reward_seq))
-        # vis = Visualizer(env, env_params, state_seq, cum_rewards)
-        # vis.animate(f"{path}/anim_{agent_type}_{seed_num}.gif")
+        cum_rewards = jnp.cumsum(jnp.array(reward_seq))
+        vis = Visualizer(env, env_params, state_seq, cum_rewards)
+        vis.animate(f"{path}/anim_{agent_type}_{seed_num}.gif")
         state_seqs.append(state_seq)
         seed_num += 1
 
@@ -160,16 +163,11 @@ def generate_heatmap(state_seqs, agent_type, path, grid_size=(16, 16)):
     # Mark the goal position with a green triangle
     plt.scatter(goal_pos[1], goal_pos[0], color="green", marker="^", s=100, label="Goal Position")
 
-    # plt.title('Agent\'s Visited States Heatmap')
-    _ = ax.figure.colorbar(im, ax=ax)
+    cbar = ax.figure.colorbar(im, ax=ax)
+    cbar.set_label("Visit Frequency")
 
-    ax.set_xlabel("Y Position")
-    ax.set_ylabel("X Position")
+    ax.set_xlabel("X Position")
+    ax.set_ylabel("Y Position")
     ax.legend()
 
     plt.savefig(f"{path}/heatmap_{agent_type}_30.png")
-
-
-path = "MLC_logs/flax_ckpt/Empty-misc_diff_config/fast_30"
-s = visualise_gymnax("Empty-misc", path, "fast", n_best_seed=30)
-generate_heatmap(s, "fast", path)
