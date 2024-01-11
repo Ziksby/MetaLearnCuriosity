@@ -28,7 +28,7 @@ flax==0.7.2
 fonttools==4.43.0
 gast==0.5.4
 gitdb==4.0.10
-GitPython==3.1.37
+GitPython==3.1.41
 glfw==2.6.2
 grpcio==1.59.0
 gym==0.26.2
