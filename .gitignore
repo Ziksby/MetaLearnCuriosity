@@ -10,4 +10,4 @@ MLC_logs/
 # Ignore Hyperparameters
 MetaLearnCuriosity/agents/hyperparameter_versions/
 # Ignore notebooks
-notebooks/
+*.ipynb
