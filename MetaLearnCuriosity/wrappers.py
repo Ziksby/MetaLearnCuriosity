@@ -317,3 +317,35 @@ class NormalizeVecReward(GymnaxWrapper):
             env_state=env_state,
         )
         return obs, state, reward / jnp.sqrt(state.var + 1e-8), done, info
+
+
+@struct.dataclass
+class DelayedRewardEnvState:
+    delayed_reward: float
+    env_state: environment.EnvState
+
+
+class DelayedReward(GymnaxWrapper):
+    def __init__(self, env, step_interval):
+        super().__init__(env)
+        self.step_interval = step_interval
+
+    def reset(self, key, params=None):
+        obs, state = self._env.reset(key, params)
+        state = DelayedRewardEnvState(delayed_reward=0.0, env_state=state)
+        return obs, state
+
+    def step(self, key, state, action, params=None):
+        obs, env_state, reward, done, info = self._env.step(key, state.env_state, action, params)
+        new_delayed_reward = state.delayed_reward + reward
+        sparse_reward = 0
+        steps = env_state.env_state.info["steps"]  # changed now
+        interval = steps % self.step_interval == 0
+        reset_delayed_rewards = steps == 1
+
+        delayed_reward = jax.lax.cond(reset_delayed_rewards, lambda: 0, lambda: new_delayed_reward)
+        returned_reward = jax.lax.cond(interval, lambda: delayed_reward, lambda: sparse_reward)
+
+        state = DelayedRewardEnvState(delayed_reward=delayed_reward, env_state=env_state)
+
+        return obs, state, returned_reward, done, info
