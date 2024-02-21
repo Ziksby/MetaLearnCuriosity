@@ -338,12 +338,14 @@ class DelayedReward(GymnaxWrapper):
     def step(self, key, state, action, params=None):
         obs, env_state, reward, done, info = self._env.step(key, state.env_state, action, params)
         new_delayed_reward = state.delayed_reward + reward
-        sparse_reward = 0
+        sparse_reward = 0.0
         steps = env_state.env_state.info["steps"]  # changed now
         interval = steps % self.step_interval == 0
         reset_delayed_rewards = steps == 1
 
-        delayed_reward = jax.lax.cond(reset_delayed_rewards, lambda: 0, lambda: new_delayed_reward)
+        delayed_reward = jax.lax.cond(
+            reset_delayed_rewards, lambda: 0.0, lambda: new_delayed_reward
+        )
         returned_reward = jax.lax.cond(interval, lambda: delayed_reward, lambda: sparse_reward)
 
         state = DelayedRewardEnvState(delayed_reward=delayed_reward, env_state=env_state)
