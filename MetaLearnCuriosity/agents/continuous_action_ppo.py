@@ -14,6 +14,7 @@ from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.wrappers import (
     BraxGymnaxWrapper,
     ClipAction,
+    DelayedReward,
     LogWrapper,
     NormalizeVecObservation,
     NormalizeVecReward,
@@ -69,6 +70,8 @@ def make_train(config):
     env = LogWrapper(env)
     env = ClipAction(env)
     env = VecEnv(env)
+    if config["DELAY_REWARDS"]:
+        env = DelayedReward(env, config["STEP_INTERVAL"])
     if config["NORMALIZE_ENV"]:
         env = NormalizeVecObservation(env)
         env = NormalizeVecReward(env, config["GAMMA"])
@@ -290,6 +293,8 @@ if __name__ == "__main__":
         "ENV_NAME": "hopper",
         "ANNEAL_LR": False,
         "NORMALIZE_ENV": True,
+        "DELAY_REWARDS": True,
+        "STEP_INTERVAL": 10,
         "DEBUG": True,
     }
     rng = jax.random.PRNGKey(config["SEED"])
