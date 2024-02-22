@@ -12,7 +12,7 @@ from flax.training.train_state import TrainState
 
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
-from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper
+from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper, VecEnv
 
 
 class FAST(nn.Module):
@@ -146,7 +146,7 @@ def ppo_make_train(config):  # # noqa: C901
         # INIT ENV
         rng, _rng = jax.random.split(rng)
         reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
-        obsv, env_state = jax.vmap(env.reset, in_axes=(0, None))(reset_rng, env_params)
+        obsv, env_state = env.reset(reset_rng, env_params)
 
         # TRAIN LOOP
         def _update_step(runner_state, unused):
@@ -175,7 +175,7 @@ def ppo_make_train(config):  # # noqa: C901
                 rng_step = jax.random.split(_rng, config["NUM_ENVS"])
                 # NORM TIME STEP
                 norm_time_step = env_state.env_state.time / env_params.max_steps_in_episode
-                obsv, env_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None))(
+                obsv, env_state, reward, done, info = env.step(
                     rng_step, env_state, action, env_params
                 )
                 # INTRINSIC REWARD
