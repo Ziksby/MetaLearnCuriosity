@@ -12,7 +12,7 @@ from flax.training.train_state import TrainState
 
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
-from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper
+from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper, VecEnv
 
 
 class RandomNetwork(nn.Module):
@@ -150,6 +150,7 @@ def ppo_make_train(config):  # noqa: C901
     env, env_params = gymnax.make(config["ENV_NAME"])
     env = FlattenObservationWrapper(env)
     env = LogWrapper(env)
+    env = VecEnv(env)
 
     def linear_schedule(count):
         frac = (
@@ -223,7 +224,7 @@ def ppo_make_train(config):  # noqa: C901
         # INIT ENV
         rng, _rng = jax.random.split(rng)
         reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
-        obsv, env_state = jax.vmap(env.reset, in_axes=(0, None))(reset_rng, env_params)
+        obsv, env_state = env.reset(reset_rng, env_params)
 
         # TRAIN LOOP
         def _update_step(runner_state, unused):
@@ -252,7 +253,7 @@ def ppo_make_train(config):  # noqa: C901
                 # STEP ENV
                 rng, _rng = jax.random.split(rng)
                 rng_step = jax.random.split(_rng, config["NUM_ENVS"])
-                obsv, env_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None))(
+                obsv, env_state, reward, done, info = env.step(
                     rng_step, env_state, action, env_params
                 )
 
