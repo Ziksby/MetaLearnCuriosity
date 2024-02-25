@@ -89,11 +89,12 @@ tensorflow-probability==0.23.0
 tensorstore==0.1.53
 toolz==0.12.1
 tornado==6.4
+tqdm==4.66.2
 traitlets==5.14.1
 trimesh==4.1.4
 typing_extensions==4.9.0
 virtualenv==20.25.1
 wcwidth==0.2.13
 Werkzeug==3.0.1
-xminigrid @ git+https://github.com/corl-team/xland-minigrid.git@9315444bafe1eb046cb14aa294a21740957d96e8
+xminigrid==0.6.0
 zipp==3.17.0
