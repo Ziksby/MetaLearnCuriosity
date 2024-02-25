@@ -7,10 +7,12 @@ import chex
 import jax
 import jax.numpy as jnp
 import numpy as np
+import xminigrid
 from brax import envs
 from brax.envs.wrappers.training import AutoResetWrapper, EpisodeWrapper
 from flax import struct
 from gymnax.environments import environment, spaces
+from xminigrid.wrappers import GymAutoResetWrapper
 
 
 class GymnaxWrapper(object):
@@ -351,3 +353,19 @@ class DelayedReward(GymnaxWrapper):
         state = DelayedRewardEnvState(delayed_reward=delayed_reward, env_state=env_state)
 
         return obs, state, returned_reward, done, info
+
+
+class MiniGridGymnax:
+    def __init__(self, env_name):
+        env, env_params = xminigrid.make(env_name)
+        env = GymAutoResetWrapper(env)
+        self._env = env
+        self._env_params = env_params
+
+    def reset(self, key, env_params):
+        timestep = self._env.reset(env_params, key)
+        return timestep.observation, timestep
+
+    def step(self, key, state, action, env_params):
+        timestep = self._env.step(env_params, state, action)
+        return timestep.observation, timestep, timestep.reward, timestep.last(), {}
