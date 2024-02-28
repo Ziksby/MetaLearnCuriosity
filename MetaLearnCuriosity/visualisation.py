@@ -94,6 +94,7 @@ def visualise_gymnax(env, path, agent_type, n_best_seed=1):
     agent_params, online_params = find_best_seed_params(path, agent_type, n_best_seed)
     env, env_params = gymnax.make(env)
     env = FlattenObservationWrapper(env)
+    reset_fn, step_fn = jax.jit(env.reset), jax.jit(env.step)
     action_dim = env.action_space(env_params).n
     online = OnlineEncoder(64)
     seed_num = 0
@@ -104,18 +105,21 @@ def visualise_gymnax(env, path, agent_type, n_best_seed=1):
             agent = BYOLActorCritic(action_dim)
         else:
             agent = PPOActorCritic(action_dim)
-        obs, state = env.reset(rng_reset, env_params)
+        obs, state = reset_fn(rng_reset, env_params)
+
+        agent_apply = jax.jit(agent.apply)
+        online_apply = jax.jit(online.apply)
 
         while True:
             state_seq.append(state)
             rng, rng_step = jax.random.split(rng, 2)
             if agent_type == "byol_lite":
-                encoded_obs = online.apply(online_param, obs)
+                encoded_obs = online_apply(online_param, obs)
             else:
                 encoded_obs = obs
-            pi, _ = agent.apply(agent_param, encoded_obs)
+            pi, _ = agent_apply(agent_param, encoded_obs)
             action = pi.sample(seed=rng)
-            next_obs, next_state, reward, done, info = env.step(rng_step, state, action, env_params)
+            next_obs, next_state, reward, done, info = step_fn(rng_step, state, action, env_params)
             reward_seq.append(reward)
             if done:
                 break
@@ -171,3 +175,7 @@ def generate_heatmap(state_seqs, agent_type, path, grid_size=(16, 16)):
     ax.legend()
 
     plt.savefig(f"{path}/heatmap_{agent_type}_30.png")
+
+
+def visualise_xminigrid(env, path, agent_type, n_best_seed=1):
+    pass
