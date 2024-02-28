@@ -4,6 +4,7 @@ from functools import partial
 from typing import Any, Optional, Tuple, Union
 
 import chex
+import gymnax
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -24,6 +25,26 @@ class GymnaxWrapper(object):
     # provide proxy access to regular attributes of wrapped object
     def __getattr__(self, name):
         return getattr(self._env, name)
+
+
+class TimeLimitGymnax:
+    def __init__(self, env_name):
+        env, env_params = gymnax.make(env_name)
+        self._env = env
+        self._env_params = env_params
+        self.time_limit = env_params.max_steps_in_episode
+
+    def reset(self, key, env_params):
+        return self._env.reset(key, env_params)
+
+    def step(self, key, state, action, env_params):
+        return self._env.step(key, state, action, env_params)
+
+    def observation_space(self, env_params):
+        return self._env.observation_space(env_params)
+
+    def action_space(self, env_params):
+        return self._env.action_space(env_params)
 
 
 class FlattenObservationWrapper(GymnaxWrapper):
@@ -71,6 +92,7 @@ class LogEnvState:
     episode_lengths: int
     returned_episode_returns: float
     returned_episode_lengths: int
+    lifetime_returns: float
     timestep: int
 
 
@@ -85,7 +107,7 @@ class LogWrapper(GymnaxWrapper):
         self, key: chex.PRNGKey, params: Optional[environment.EnvParams] = None
     ) -> Tuple[chex.Array, environment.EnvState]:
         obs, env_state = self._env.reset(key, params)
-        state = LogEnvState(env_state, 0, 0, 0, 0, 0)
+        state = LogEnvState(env_state, 0, 0, 0, 0, 0, 0)
         return obs, state
 
     @partial(jax.jit, static_argnums=(0,))
@@ -107,12 +129,14 @@ class LogWrapper(GymnaxWrapper):
             + new_episode_return * done,
             returned_episode_lengths=state.returned_episode_lengths * (1 - done)
             + new_episode_length * done,
+            lifetime_returns=state.lifetime_returns + reward,
             timestep=state.timestep + 1,
         )
         info["returned_episode_returns"] = state.returned_episode_returns
         info["returned_episode_lengths"] = state.returned_episode_lengths
         info["timestep"] = state.timestep
         info["returned_episode"] = done
+        info["lifetime_returns"] = state.lifetime_returns
         return obs, state, reward, done, info
 
 
@@ -124,6 +148,7 @@ class BraxGymnaxWrapper:
         self._env = env
         self.action_size = env.action_size
         self.observation_size = (env.observation_size,)
+        self.time_limit = 1000
 
     def reset(self, key, params=None):
         state = self._env.reset(key)
@@ -361,11 +386,22 @@ class MiniGridGymnax:
         env = GymAutoResetWrapper(env)
         self._env = env
         self._env_params = env_params
+        self.time_limit = env.time_limit(env_params)
 
     def reset(self, key, env_params):
         timestep = self._env.reset(env_params, key)
-        return timestep.observation, timestep
+        return timestep.observation.flatten(), timestep
 
     def step(self, key, state, action, env_params):
         timestep = self._env.step(env_params, state, action)
-        return timestep.observation, timestep, timestep.reward, timestep.last(), {}
+        return timestep.observation.flatten(), timestep, timestep.reward, timestep.last(), {}
+
+    def observation_space(self, env_params):
+        return spaces.Box(
+            low=jnp.array([0, 0]),
+            high=jnp.array([14, 13]),
+            shape=(self._env.observation_shape(env_params),),
+        )
+
+    def action_space(self, env_params):
+        return spaces.Discrete(6)
