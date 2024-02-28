@@ -1,5 +1,5 @@
 # Ignore virtual environment
-Curiosax_env/
+curiosax/
 # Ignore compiled files
 *.pyc
 __pycache__/
@@ -11,3 +11,5 @@ MLC_logs/
 MetaLearnCuriosity/agents/hyperparameter_versions/
 # Ignore notebooks
 *.ipynb
+# Ignore get-pip.py
+get-pip.py

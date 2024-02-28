@@ -12,7 +12,12 @@ from flax.training.train_state import TrainState
 
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
-from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper, VecEnv
+from MetaLearnCuriosity.wrappers import (
+    FlattenObservationWrapper,
+    LogWrapper,
+    TimeLimitGymnax,
+    VecEnv,
+)
 
 
 class PPOActorCritic(nn.Module):
@@ -58,7 +63,8 @@ class Transition(NamedTuple):
 def ppo_make_train(config):
     config["NUM_UPDATES"] = config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     config["MINIBATCH_SIZE"] = config["NUM_ENVS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
-    env, env_params = gymnax.make(config["ENV_NAME"])
+    env = TimeLimitGymnax(config["ENV_NAME"])
+    env_params = env._env_params
     env = FlattenObservationWrapper(env)
     env = LogWrapper(env)
     env = VecEnv(env)
