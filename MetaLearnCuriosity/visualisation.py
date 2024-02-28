@@ -1,4 +1,5 @@
 import gymnax
+import imageio
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -11,7 +12,11 @@ from MetaLearnCuriosity.agents.curious_agents.single_value_head_agents.byol_expl
 )
 from MetaLearnCuriosity.agents.ppo import PPOActorCritic
 from MetaLearnCuriosity.checkpoints import Restore
-from MetaLearnCuriosity.wrappers import FlattenObservationWrapper
+from MetaLearnCuriosity.wrappers import (
+    FlattenObservationWrapper,
+    MiniGridGymnax,
+    TimeLimitGymnax,
+)
 
 
 def extract_seed_params(output, seed, index):
@@ -78,7 +83,7 @@ def find_best_seed_params(path, agent_type, n_best_seed=1):
     return agent_params, online_params
 
 
-def visualise_gymnax(env, path, agent_type, n_best_seed=1):
+def visualise_gymnax(env_name, path, agent_type, n_best_seed=1):
     """
     Visualize the performance of an RL agent in a gymnax environment and create an animation.
 
@@ -92,7 +97,8 @@ def visualise_gymnax(env, path, agent_type, n_best_seed=1):
     rng, rng_reset = jax.random.split(rng)
     state_seqs = []
     agent_params, online_params = find_best_seed_params(path, agent_type, n_best_seed)
-    env, env_params = gymnax.make(env)
+    env = TimeLimitGymnax(env_name)
+    env_params = env._env_params
     env = FlattenObservationWrapper(env)
     reset_fn, step_fn = jax.jit(env.reset), jax.jit(env.step)
     action_dim = env.action_space(env_params).n
@@ -177,5 +183,46 @@ def generate_heatmap(state_seqs, agent_type, path, grid_size=(16, 16)):
     plt.savefig(f"{path}/heatmap_{agent_type}_30.png")
 
 
-def visualise_xminigrid(env, path, agent_type, n_best_seed=1):
+def visualise_xminigrid(env_name, path, agent_type, n_best_seed=1):
+    rng = jax.random.PRNGKey(0)
+    rng, rng_reset = jax.random.split(rng)
+    agent_params, online_params = find_best_seed_params(path, agent_type, n_best_seed)
+    env = MiniGridGymnax(env_name)
+    env_params = env._env_params
+    env = FlattenObservationWrapper(env)
+    reset_fn, step_fn = jax.jit(env.reset), jax.jit(env.step)
+    action_dim = env.action_space(env_params).n
+    online = OnlineEncoder(64)
+    seed_num = 0
+    for agent_param, online_param in zip(agent_params, online_params):
+        total_reward = 0
+        rendered_imgs = []
+
+        if agent_type == "byol_lite":
+            agent = BYOLActorCritic(action_dim)
+        else:
+            agent = PPOActorCritic(action_dim)
+        obs, state = reset_fn(rng_reset, env_params)
+
+        agent_apply = jax.jit(agent.apply)
+        online_apply = jax.jit(online.apply)
+
+        while not state.state.last():
+            rng, rng_step = jax.random.split(rng, 2)
+            if agent_type == "byol_lite":
+                encoded_obs = online_apply(online_param, obs)
+            else:
+                encoded_obs = obs
+            pi, _ = agent_apply(agent_param, encoded_obs)
+            action = pi.sample(seed=rng)
+            next_obs, next_state, reward, done, info = step_fn(rng_step, state, action, env_params)
+            total_reward += next_state.state.reward.item()
+            rendered_imgs.append(env.render(env_params, next_state.state))
+
+        print("Reward:", total_reward)
+        seed_num += 1
+        imageio.mimsave(f"eval_rollout{seed_num}.mp4", rendered_imgs, fps=16, format="mp4")
+
+
+def visualise_brax(env, path, agent_type, n_best_seed=1):
     pass
