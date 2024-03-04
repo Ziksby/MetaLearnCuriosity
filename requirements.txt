@@ -23,6 +23,7 @@ dm-env==1.6
 dm-tree==0.1.8
 docker-pycreds==0.4.0
 etils==1.5.2
+evosax==0.1.5
 exceptiongroup==1.2.0
 executing==2.0.1
 filelock==3.13.1
