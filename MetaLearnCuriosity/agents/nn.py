@@ -9,6 +9,7 @@ import flax
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+import numpy as np
 from flax.linen.initializers import constant, glorot_normal, orthogonal, zeros_init
 
 
@@ -79,7 +80,7 @@ class MiniGridActorCriticRNN(nn.Module):
     rnn_hidden_dim: int = 64
     rnn_num_layers: int = 1
     head_hidden_dim: int = 64
-    use_cnns: bool = True
+    use_cnns: bool = False
 
     @nn.compact
     def __call__(
@@ -87,8 +88,8 @@ class MiniGridActorCriticRNN(nn.Module):
     ) -> tuple[distrax.Categorical, jax.Array, jax.Array]:
 
         # encoder from https://github.com/lcswillems/rl-starter-files/blob/master/model.py
+        B, S = inputs["observation"].shape[:2]
         if self.use_cnns:
-            B, S = inputs["observation"].shape[:2]
             img_encoder = nn.Sequential(
                 [
                     nn.Conv(16, (2, 2), padding="VALID", kernel_init=orthogonal(math.sqrt(2))),
@@ -101,17 +102,17 @@ class MiniGridActorCriticRNN(nn.Module):
                     nn.relu,
                 ]
             )
+
             obs_emb = img_encoder(inputs["observation"]).reshape(B, S, -1)
         else:
             mlp_encoder = nn.Sequential(
                 [
                     nn.Dense(256, kernel_init=orthogonal(jnp.sqrt(2)), bias_init=constant(0.0)),
                     nn.relu,
-                    # rnn_in = (embedding, dones),
-                    # hidden, embedding = ScannedRNN()(hidden, rnn_in),
                 ]
             )
-            obs_emb = mlp_encoder(inputs["observation"])
+            obs_emb = mlp_encoder(inputs["observation"]).reshape(B, S, -1)
+        print(B, S)
         action_encoder = nn.Embed(self.num_actions, self.action_emb_dim)
 
         rnn_core = MiniGridBatchedRNNModel(self.rnn_hidden_dim, self.rnn_num_layers)
@@ -144,3 +145,21 @@ class MiniGridActorCriticRNN(nn.Module):
 
     def initialize_carry(self, batch_size):
         return jnp.zeros((batch_size, self.rnn_num_layers, self.rnn_hidden_dim))
+
+
+class RewardCombiner(nn.Module):
+    @nn.compact
+    def __call__(self, x):
+
+        proxy_reward = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
+        proxy_reward = nn.relu(proxy_reward)
+        proxy_reward = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(
+            proxy_reward
+        )
+        proxy_reward = nn.relu(proxy_reward)
+        proxy_reward = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(
+            proxy_reward
+        )
+        proxy_reward = nn.tanh(proxy_reward)
+
+        return jnp.squeeze(proxy_reward, axis=-1)
