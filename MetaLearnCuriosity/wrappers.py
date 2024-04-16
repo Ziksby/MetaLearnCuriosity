@@ -1,7 +1,7 @@
 # Taken from here: https://github.com/luchris429/purejaxrl/blob/main/purejaxrl/wrappers.py
 
 from functools import partial
-from typing import Any, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import chex
 import gymnax
@@ -38,7 +38,9 @@ class TimeLimitGymnax:
         return self._env.reset(key, env_params)
 
     def step(self, key, state, action, env_params):
-        return self._env.step(key, state, action, env_params)
+        obsv, env_state, reward, done, info = self._env.step(key, state, action, env_params)
+        norm_time_step = env_state.time / self.time_limit
+        return obsv, env_state, reward, norm_time_step, done, info
 
     def observation_space(self, env_params):
         return self._env.observation_space(env_params)
@@ -80,9 +82,9 @@ class FlattenObservationWrapper(GymnaxWrapper):
         action: Union[int, float],
         params: Optional[environment.EnvParams] = None,
     ) -> Tuple[chex.Array, environment.EnvState, float, bool, dict]:
-        obs, state, reward, done, info = self._env.step(key, state, action, params)
+        obs, state, reward, done, norm_time_step, info = self._env.step(key, state, action, params)
         obs = jnp.reshape(obs, (-1,))
-        return obs, state, reward, done, info
+        return obs, state, reward, done, norm_time_step, info
 
 
 @struct.dataclass
@@ -118,7 +120,9 @@ class LogWrapper(GymnaxWrapper):
         action: Union[int, float],
         params: Optional[environment.EnvParams] = None,
     ) -> Tuple[chex.Array, environment.EnvState, float, bool, dict]:
-        obs, env_state, reward, done, info = self._env.step(key, state.env_state, action, params)
+        obs, env_state, reward, done, norm_time_step, info = self._env.step(
+            key, state.env_state, action, params
+        )
         new_episode_return = state.episode_returns + reward
         new_episode_length = state.episode_lengths + 1
         state = LogEnvState(
@@ -129,15 +133,15 @@ class LogWrapper(GymnaxWrapper):
             + new_episode_return * done,
             returned_episode_lengths=state.returned_episode_lengths * (1 - done)
             + new_episode_length * done,
-            lifetime_returns=state.lifetime_returns + reward,
             timestep=state.timestep + 1,
+            lifetime_rewards=(state.lifetime_rewards) + reward,
         )
         info["returned_episode_returns"] = state.returned_episode_returns
         info["returned_episode_lengths"] = state.returned_episode_lengths
         info["timestep"] = state.timestep
         info["returned_episode"] = done
         info["lifetime_returns"] = state.lifetime_returns
-        return obs, state, reward, done, info
+        return obs, state, reward, done, norm_time_step, info
 
 
 class BraxGymnaxWrapper:
@@ -156,7 +160,15 @@ class BraxGymnaxWrapper:
 
     def step(self, key, state, action, params=None):
         next_state = self._env.step(state, action)
-        return next_state.obs, next_state, next_state.reward, next_state.done > 0.5, {}
+        norm_time_step = next_state.info["steps"] / 1000
+        return (
+            next_state.obs,
+            next_state,
+            next_state.reward,
+            next_state.done > 0.5,
+            norm_time_step,
+            {},
+        )
 
     def observation_space(self, params):
         return spaces.Box(
@@ -390,11 +402,12 @@ class MiniGridGymnax:
 
     def reset(self, key, env_params):
         timestep = self._env.reset(env_params, key)
-        return timestep.observation.flatten(), timestep
+        return timestep.observation, timestep
 
     def step(self, key, state, action, env_params):
         timestep = self._env.step(env_params, state, action)
-        return timestep.observation.flatten(), timestep, timestep.reward, timestep.last(), {}
+        norm_time_step = timestep.state.step_num / self.time_limit
+        return timestep.observation, timestep, timestep.reward, timestep.last(), norm_time_step, {}
 
     def observation_space(self, env_params):
         return spaces.Box(

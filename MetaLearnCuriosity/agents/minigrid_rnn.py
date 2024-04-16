@@ -10,7 +10,7 @@ import xminigrid
 from flax.training.train_state import TrainState
 from nn import MiniGridActorCriticRNN
 from utils import MiniGridTransition as Transition
-from utils import calculate_gae, minigrid_ppo_update_networks, rollout
+from utils import calculate_gae, minigrid_ppo_update_networks, rnn_rollout
 
 import wandb
 from MetaLearnCuriosity.checkpoints import Save
@@ -249,7 +249,7 @@ def make_train(config):
             eval_rng = jax.random.split(_rng, num=config["EVAL_EPISODES_PER_DEVICE"])
 
             # vmap only on rngs
-            eval_stats = jax.vmap(rollout, in_axes=(0, None, None, None, None, None))(
+            eval_stats = jax.vmap(rnn_rollout, in_axes=(0, None, None, None, None, None))(
                 eval_rng,
                 env_eval,
                 env_params,
