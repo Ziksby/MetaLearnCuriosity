@@ -248,3 +248,16 @@ def ppo_rollout(
 
     final_carry = jax.lax.while_loop(_cond_fn, _body_fn, init_val=init_carry)
     return final_carry[1]
+
+
+def lifetime_return(life_rewards, lifetime_gamma, reverse=True):
+    life_rewards = life_rewards.reshape(-1, life_rewards.shape[2])
+
+    def returns_cal(returns, reward):
+        returns = returns * lifetime_gamma + reward
+        return returns, returns
+
+    single_return, _ = jax.lax.scan(
+        returns_cal, jnp.zeros(life_rewards.shape[-1]), life_rewards, reverse=reverse
+    )
+    return single_return

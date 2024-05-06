@@ -128,7 +128,7 @@ def make_train(config):
                 # STEP ENV
                 rng, _rng = jax.random.split(rng)
                 rng_step = jax.random.split(_rng, config["NUM_ENVS"])
-                obsv, env_state, reward, done, info = env.step(
+                obsv, env_state, reward, _, done, info = env.step(
                     rng_step, env_state, action, env_params
                 )
                 transition = Transition(done, action, value, reward, log_prob, last_obs, info)
@@ -276,7 +276,7 @@ if __name__ == "__main__":
     config = {
         "RUN_NAME": "cts_ppo",
         "SEED": 42,
-        "NUM_SEEDS": 30,
+        "NUM_SEEDS": 1,
         "LR": 3e-4,
         "NUM_ENVS": 2048,
         "NUM_STEPS": 10,

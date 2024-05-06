@@ -151,15 +151,13 @@ class RewardCombiner(nn.Module):
     @nn.compact
     def __call__(self, x):
 
-        proxy_reward = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
-        proxy_reward = nn.relu(proxy_reward)
-        proxy_reward = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(
-            proxy_reward
+        int_lambda = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
+        int_lambda = nn.relu(int_lambda)
+        int_lambda = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(
+            int_lambda
         )
-        proxy_reward = nn.relu(proxy_reward)
-        proxy_reward = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(
-            proxy_reward
-        )
-        proxy_reward = nn.tanh(proxy_reward)
+        int_lambda = nn.relu(int_lambda)
+        int_lambda = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(int_lambda)
+        # int_lambda = nn.tanh(int_lambda)
 
-        return jnp.squeeze(proxy_reward, axis=-1)
+        return jnp.squeeze(int_lambda, axis=-1)

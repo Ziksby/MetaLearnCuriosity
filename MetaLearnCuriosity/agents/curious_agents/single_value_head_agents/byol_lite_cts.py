@@ -1,11 +1,10 @@
+import os
 from typing import Any, NamedTuple, Sequence
 
 import distrax
 import flax.linen as nn
-import gymnax
 import jax
 import jax.numpy as jnp
-import jax.tree_util
 import numpy as np
 import optax
 from flax.linen.initializers import constant, orthogonal
@@ -14,15 +13,46 @@ from flax.training.train_state import TrainState
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.wrappers import (
-    FlattenObservationWrapper,
+    BraxGymnaxWrapper,
+    ClipAction,
+    DelayedReward,
     LogWrapper,
-    MiniGridGymnax,
-    TimeLimitGymnax,
+    NormalizeVecObservation,
+    NormalizeVecReward,
     VecEnv,
 )
 
-# THE NETWORKS
 jax.config.update("jax_enable_x64", True)
+
+# PPo network
+
+
+class ActorCritic(nn.Module):
+    action_dim: Sequence[int]
+    activation: str = "tanh"
+
+    @nn.compact
+    def __call__(self, x):
+        if self.activation == "relu":
+            activation = nn.relu
+        else:
+            activation = nn.tanh
+        actor_mean = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
+        actor_mean = activation(actor_mean)
+        actor_mean = nn.Dense(
+            self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
+        )(actor_mean)
+        actor_logtstd = self.param("log_std", nn.initializers.zeros, (self.action_dim,))
+        pi = distrax.MultivariateNormalDiag(actor_mean, jnp.exp(actor_logtstd))
+
+        critic = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
+        critic = activation(critic)
+        critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(critic)
+
+        return pi, jnp.squeeze(critic, axis=-1)
+
+
+# BYOL Explore network
 
 
 class TargetEncoder(nn.Module):
@@ -94,33 +124,6 @@ class OnlinePredictor(nn.Module):
         return layer_out
 
 
-class BYOLActorCritic(nn.Module):
-    action_dim: Sequence[int]
-    activation: str = "tanh"
-
-    @nn.compact
-    def __call__(self, x):
-        if self.activation == "relu":
-            activation = nn.relu
-        else:
-            activation = nn.tanh
-
-        # THE ACTOR MEAN
-        actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
-        actor_mean = activation(actor_mean)
-        actor_mean = nn.Dense(
-            self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
-        )(actor_mean)
-        pi = distrax.Categorical(logits=actor_mean)
-
-        # THE CRITIC
-        critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
-        critic = activation(critic)
-        critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(critic)
-
-        return pi, jnp.squeeze(critic, axis=-1)
-
-
 # THE TRANSITION CLASS
 class Transition(NamedTuple):
     done: jnp.ndarray
@@ -134,14 +137,21 @@ class Transition(NamedTuple):
     info: jnp.ndarray
 
 
-def byol_make_train(config):  # noqa: C901
+# Training functions
+
+
+def make_train(config):  # noqa: C901
     config["NUM_UPDATES"] = config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     config["MINIBATCH_SIZE"] = config["NUM_ENVS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
-    env = TimeLimitGymnax(config["ENV_NAME"])
-    env_params = env._env_params
-    env = FlattenObservationWrapper(env)
+    env, env_params = BraxGymnaxWrapper(config["ENV_NAME"]), None
     env = LogWrapper(env)
+    env = ClipAction(env)
+    if config["DELAY_REWARDS"]:
+        env = DelayedReward(env, config["STEP_INTERVAL"])
     env = VecEnv(env)
+    if config["NORMALIZE_ENV"]:
+        env = NormalizeVecObservation(env)
+        env = NormalizeVecReward(env, config["GAMMA"])
 
     def linear_schedule(count):
         frac = (
@@ -153,9 +163,9 @@ def byol_make_train(config):  # noqa: C901
 
     def train(rng):
         # INIT NETWORK
-        action_dim = env.action_space(env_params).n
-        encoder_layer_out_shape = 64
-        network = BYOLActorCritic(env.action_space(env_params).n, activation=config["ACTIVATION"])
+        encoder_layer_out_shape = 256
+        action_dim = env.action_space(env_params).shape[0]
+        network = ActorCritic(action_dim, activation=config["ACTIVATION"])
         predicator = OnlinePredictor(encoder_layer_out_shape)
         target = TargetEncoder(encoder_layer_out_shape)
         online = OnlineEncoder(encoder_layer_out_shape)
@@ -166,8 +176,8 @@ def byol_make_train(config):  # noqa: C901
         rng, _network_rng = jax.random.split(rng)
 
         init_x = jnp.zeros(env.observation_space(env_params).shape)
-
         encoded_x = jnp.zeros((env.observation_space(env_params).shape[0], encoder_layer_out_shape))
+
         one_hot_encoded = jnp.zeros(
             (
                 env.observation_space(env_params).shape[0],
@@ -175,10 +185,10 @@ def byol_make_train(config):  # noqa: C901
             )
         )
 
+        network_params = network.init(_network_rng, encoded_x)
         target_params = target.init(_target_rng, init_x)
         online_params = online.init(_online_rng, init_x)
         predicator_params = predicator.init(_predicator_rng, one_hot_encoded)
-        network_params = network.init(_network_rng, encoded_x)
 
         r_bar = 0
         r_bar_sq = 0
@@ -206,6 +216,26 @@ def byol_make_train(config):  # noqa: C901
         online_state = TrainState.create(apply_fn=online.apply, params=online_params, tx=byol_tx)
         predicator_state = TrainState.create(
             apply_fn=predicator.apply, params=predicator_params, tx=byol_tx
+        )
+
+        # INIT ENV
+        rng, _rng = jax.random.split(rng)
+        reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
+
+        if config["ANNEAL_LR"]:
+            tx = optax.chain(
+                optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+                optax.adam(learning_rate=linear_schedule, eps=1e-5),
+            )
+        else:
+            tx = optax.chain(
+                optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+                optax.adam(config["LR"], eps=1e-5),
+            )
+        network_state = TrainState.create(
+            apply_fn=network.apply,
+            params=network_params,
+            tx=tx,
         )
 
         # INIT ENV
@@ -245,8 +275,7 @@ def byol_make_train(config):  # noqa: C901
                     rng_step, env_state, action, env_params
                 )
                 # WORLD MODEL PREDICATION AND TARGET PREDICATION
-                one_hot_action = jax.nn.one_hot(action, action_dim)
-                encoded_one_hot = jnp.concatenate((encoded_last_obs, one_hot_action), axis=-1)
+                encoded_one_hot = jnp.concatenate((encoded_last_obs, action), axis=-1)
                 pred_obs = predicator.apply(predicator_state.params, encoded_one_hot)
                 tar_obs = target.apply(target_params, obsv)
 
@@ -258,6 +287,7 @@ def byol_make_train(config):  # noqa: C901
                 int_reward = jnp.square(jnp.linalg.norm((pred_norm - tar_norm), axis=1)) * (
                     1 - done
                 )
+
                 transition = Transition(
                     done,
                     action,
@@ -408,8 +438,7 @@ def byol_make_train(config):  # noqa: C901
 
                     def _byol_loss(predicator_params, online_params, target_params, traj_batch):
                         encoded_obs = online.apply(online_params, traj_batch.obs)
-                        one_hot_action = jax.nn.one_hot(traj_batch.action, action_dim)
-                        encoded_one_hot = jnp.concatenate((encoded_obs, one_hot_action), axis=-1)
+                        encoded_one_hot = jnp.concatenate((encoded_obs, traj_batch.action), axis=-1)
 
                         pred_obs = predicator.apply(
                             predicator_params,
@@ -634,46 +663,47 @@ def byol_make_train(config):  # noqa: C901
     return train
 
 
-if __name__ == "__main__":
-    config = {
-        "RUN_NAME": "byol_lite_4R",
-        "SEED": 42,
-        "NUM_SEEDS": 30,
-        "LR": 2.5e-4,
-        "NUM_ENVS": 4,
-        "NUM_STEPS": 128,
-        "TOTAL_TIMESTEPS": 5e5 // 5,
-        "UPDATE_EPOCHS": 4,
-        "NUM_MINIBATCHES": 4,
-        "GAMMA": 0.99,
-        "GAE_LAMBDA": 0.95,
-        "CLIP_EPS": 0.2,
-        "ENT_COEF": 0.01,
-        "VF_COEF": 0.5,
-        "MAX_GRAD_NORM": 0.5,
-        "ACTIVATION": "tanh",
-        "ENV_NAME": "DeepSea-bsuite",
-        "ANNEAL_LR": True,
-        "DEBUG": False,
-        "EMA_PARAMETER": 0.99,
-        "REW_NORM_PARAMETER": 0.99,
-        "INT_LAMBDA": 0.006,
-    }
-    rng = jax.random.PRNGKey(config["SEED"])
-    if config["NUM_SEEDS"] > 1:
-        rngs = jax.random.split(rng, config["NUM_SEEDS"])
-        train_vjit = jax.jit(jax.vmap(byol_make_train(config)))
-        output = train_vjit(rngs)
+config = {
+    "RUN_NAME": "byol_cts_hopper_delayed",
+    "SEED": 42,
+    "NUM_SEEDS": 1,
+    "LR": 3e-4,
+    "NUM_ENVS": 2048,
+    "NUM_STEPS": 10,
+    "TOTAL_TIMESTEPS": 5e7,
+    "UPDATE_EPOCHS": 4,
+    "NUM_MINIBATCHES": 32,
+    "GAMMA": 0.99,
+    "GAE_LAMBDA": 0.95,
+    "CLIP_EPS": 0.2,
+    "ENT_COEF": 0.0,
+    "VF_COEF": 0.5,
+    "MAX_GRAD_NORM": 0.5,
+    "ACTIVATION": "tanh",
+    "ENV_NAME": "hopper",
+    "ANNEAL_LR": False,
+    "NORMALIZE_ENV": True,
+    "DELAY_REWARDS": True,
+    "STEP_INTERVAL": 10,
+    "EMA_PARAMETER": 0.99,
+    "REW_NORM_PARAMETER": 0.99,
+    "INT_LAMBDA": 0.01,
+    "DEBUG": False,
+}
+rng = jax.random.PRNGKey(config["SEED"])
+if config["NUM_SEEDS"] > 1:
+    rngs = jax.random.split(rng, config["NUM_SEEDS"])
+    train_vjit = jax.jit(jax.vmap(make_train(config)))
+    output = train_vjit(rngs)
 
-    else:
-        train_jit = jax.jit(byol_make_train(config))
-        output = train_jit(rng)
+else:
+    train_jit = jax.jit(make_train(config))
+    output = train_jit(rng)
 
     logger = WBLogger(
         config=config,
-        group=f"byol_toy/{config['ENV_NAME']}",
-        tags=["byol_lite", f'{config["ENV_NAME"]}'],
-        notes="gae: normed",
+        group=f"byol_toy_rc/{config['ENV_NAME']}",
+        tags=["byol_lite_rc", f'{config["ENV_NAME"]}', "Brax"],
         name=config["RUN_NAME"],
     )
     logger.log_episode_return(output, config["NUM_SEEDS"])
@@ -681,7 +711,8 @@ if __name__ == "__main__":
     # logger.log_byol_losses(output, config["NUM_SEEDS"])
     # logger.log_rl_losses(output, config["NUM_SEEDS"])
     # path = (
-    #     f'/home/batsi/Documents/Masters/MetaLearnCuriosity/MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
+    #     f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
     # )
+    # path = os.path.abspath(path)
     # output["config"] = config
     # Save(path, output)
