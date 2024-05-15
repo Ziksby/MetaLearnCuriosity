@@ -351,3 +351,40 @@ class WBLogger:
                     }
                 )
             self.int_lambdas.finish()
+
+    def log_total_reward(self, output, num_seeds):
+        self.total_reward = wandb.init(
+            project="MetaLearnCuriosity",
+            config=self.config,
+            group=self.group,
+            tags=self.tags,
+            notes=self.notes,
+            name=f"{self.name}_total_reward",
+        )
+
+        if num_seeds > 1:
+            total_reward_avg = jnp.mean(output["total_reward"], axis=0)
+            for total_rew in range(len(total_reward_avg.mean(-1).reshape(-1))):
+                self.total_reward.log(
+                    {
+                        f"total_reward_{self.config['ENV_NAME']}_{num_seeds}_seeds": total_reward_avg.mean(
+                            -1
+                        ).reshape(
+                            -1
+                        )[
+                            total_rew
+                        ]
+                    }
+                )
+            self.total_reward.finish()
+        else:
+
+            for total_rew in range(len(output["total_reward"].mean(-1).reshape(-1))):
+                self.total_reward.log(
+                    {
+                        f"total_reward_{self.config['ENV_NAME']}": output["total_reward"]
+                        .mean(-1)
+                        .reshape(-1)[total_rew],
+                    }
+                )
+            self.total_reward.finish()

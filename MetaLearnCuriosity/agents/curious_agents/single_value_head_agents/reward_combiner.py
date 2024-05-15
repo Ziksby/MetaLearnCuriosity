@@ -14,7 +14,7 @@ from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 
 import wandb
-from MetaLearnCuriosity.agents.nn import RewardCombiner
+from MetaLearnCuriosity.agents.nn import TemporalRewardCombiner
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import lifetime_return
@@ -371,16 +371,18 @@ def byol_make_train(config):  # noqa: C901
 
                 def _get_advantages(gae_and_next_value, transition):
                     gae, next_value = gae_and_next_value
-                    done, value, reward, int_reward = (
+                    done, value, reward, int_reward, norm_time_step = (
                         transition.done,
                         transition.value,
                         transition.reward,
                         transition.int_reward,
-                        # transition.norm_time_step,
+                        transition.norm_time_step,
                     )
-                    rc_input = jnp.concatenate((reward[:, None], int_reward[:, None]), axis=-1)
-                    int_lambda = reward_combiner_network.apply(rc_params, rc_input)
-                    total_reward = reward + (int_lambda * int_reward)
+                    rc_input = jnp.concatenate(
+                        (reward[:, None], int_reward[:, None], norm_time_step[:, None]), axis=-1
+                    )
+                    total_reward = reward_combiner_network.apply(rc_params, rc_input)
+                    # total_reward = reward + (int_lambda * int_reward)
                     delta = total_reward + config["GAMMA"] * next_value * (1 - done) - value
                     gae = delta + config["GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
                     return (gae, value), gae
@@ -648,7 +650,7 @@ def byol_make_train(config):  # noqa: C901
 
 if __name__ == "__main__":
     config = {
-        "RUN_NAME": "sim_rc_empty_lifetime_return",
+        "RUN_NAME": "temp_rc_relu_ds_lifetime_return",
         "PPO_SEED": 42,
         "RC_SEED": 43,
         "ES_SEED": 69,
@@ -656,7 +658,7 @@ if __name__ == "__main__":
         "LR": 2.5e-4,
         "NUM_ENVS": 4,
         "NUM_STEPS": 64,
-        "TOTAL_TIMESTEPS": 5e5,
+        "TOTAL_TIMESTEPS": 5e5 // 5,
         "UPDATE_EPOCHS": 4,
         "NUM_MINIBATCHES": 4,
         "GAMMA": 0.99,
@@ -666,7 +668,7 @@ if __name__ == "__main__":
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
         "ACTIVATION": "tanh",
-        "ENV_NAME": "Empty-misc",
+        "ENV_NAME": "DeepSea-bsuite",
         "ANNEAL_LR": True,
         "DEBUG": False,
         "EMA_PARAMETER": 0.99,
@@ -693,9 +695,9 @@ if __name__ == "__main__":
     rollout = jax.jit(jax.vmap(vmap_rollout, in_axes=(None, 0)))
 
     # Set up OpenES
-    reward_combiner_network = RewardCombiner()
+    reward_combiner_network = TemporalRewardCombiner()
     rc_params_pholder = reward_combiner_network.init(
-        jax.random.PRNGKey(config["RC_SEED"]), jnp.zeros((1, 2))
+        jax.random.PRNGKey(config["RC_SEED"]), jnp.zeros((1, 3))
     )
     rng = jax.random.PRNGKey(config["ES_SEED"])
     rng, rng_init = jax.random.split(rng)

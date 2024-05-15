@@ -143,7 +143,7 @@ class Transition(NamedTuple):
 def byol_make_train(config):  # noqa: C901
     config["NUM_UPDATES"] = config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     config["MINIBATCH_SIZE"] = config["NUM_ENVS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
-    path = "/home/batsi/Documents/Masters/MetaLearnCuriosity/MLC_logs/flax_ckpt/Empty-misc/sim_rc_empty_lifetime_return"
+    path = "/home/batsi/Documents/Masters/MetaLearnCuriosity/MLC_logs/flax_ckpt/DeepSea-bsuite/temp_rc_relu_ds_lifetime_return"
 
     output_rc = Restore(path)
     rc_params = output_rc["rc_params"]
@@ -376,39 +376,42 @@ def byol_make_train(config):  # noqa: C901
 
                 def _get_advantages(gae_and_next_value, transition):
                     gae, next_value = gae_and_next_value
-                    done, value, reward, int_reward = (
+                    done, value, reward, int_reward, norm_time_step = (
                         transition.done,
                         transition.value,
                         transition.reward,
                         transition.int_reward,
+                        transition.norm_time_step,
                     )
-                    rc_input = jnp.concatenate((reward[:, None], int_reward[:, None]), axis=-1)
-                    int_lambda = reward_combiner_network.apply(rc_params, rc_input)
-                    total_reward = reward + (int_lambda * int_reward)
+                    rc_input = jnp.concatenate(
+                        (reward[:, None], int_reward[:, None], norm_time_step[:, None]), axis=-1
+                    )
+                    total_reward = reward_combiner_network.apply(rc_params, rc_input)
+                    # total_reward = reward + (int_lambda * int_reward)
                     delta = total_reward + config["GAMMA"] * next_value * (1 - done) - value
                     gae = delta + config["GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
-                    return (gae, value), (gae, int_lambda)
+                    return (gae, value), (gae, total_reward)
 
                 # Looping over time steps in the "batch".
-                _, advantages_and_int_lambdas = jax.lax.scan(
+                _, advantages_and_total_reward = jax.lax.scan(
                     _get_advantages,
                     (jnp.zeros_like(last_val), last_val),
                     norm_traj_batch,
                     reverse=True,
                     unroll=16,
                 )
-                advantages, int_lambdas = advantages_and_int_lambdas
+                advantages, total_reward = advantages_and_total_reward
                 return (
                     advantages,
                     advantages + norm_traj_batch.value,
-                    int_lambdas,
+                    total_reward,
                     r_bar,
                     r_bar_sq,
                     c,
                     mu_l,
                 )
 
-            advantages, targets, int_lambdas, r_bar, r_bar_sq, c, mu_l = _calculate_gae(
+            advantages, targets, total_reward, r_bar, r_bar_sq, c, mu_l = _calculate_gae(
                 traj_batch, last_val, r_bar, r_bar_sq, c, mu_l
             )
 
@@ -615,7 +618,7 @@ def byol_make_train(config):  # noqa: C901
                 mu_l,
                 rng,
             )
-            return runner_state, (metric, loss_info, int_reward, traj_batch, int_lambdas)
+            return runner_state, (metric, loss_info, int_reward, traj_batch, total_reward)
 
         rng, _rng = jax.random.split(rng)
         runner_state = (
@@ -634,7 +637,7 @@ def byol_make_train(config):  # noqa: C901
         runner_state, extra_info = jax.lax.scan(
             _update_step, runner_state, None, config["NUM_UPDATES"]
         )
-        metric, loss_info, int_reward, traj_batch, int_lambdas = extra_info
+        metric, loss_info, int_reward, traj_batch, total_reward = extra_info
         rl_total_loss, byol_loss, encoder_loss = loss_info
         return {
             "runner_state": runner_state,
@@ -647,7 +650,7 @@ def byol_make_train(config):  # noqa: C901
             "byol_loss": byol_loss,
             "encoder_loss": encoder_loss,
             "traj_batch": traj_batch,
-            "int_lambdas": int_lambdas,
+            "total_reward": total_reward,
         }
 
     return train
@@ -655,7 +658,7 @@ def byol_make_train(config):  # noqa: C901
 
 if __name__ == "__main__":
     config = {
-        "RUN_NAME": "bl_rc_sim_empty_ds",
+        "RUN_NAME": "bl_rc_temp_relu_ds_ds",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -698,8 +701,8 @@ if __name__ == "__main__":
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     # logger.log_byol_losses(output, config["NUM_SEEDS"])
     # logger.log_rl_losses(output, config["NUM_SEEDS"])
-    logger.log_int_lambdas(output, config["NUM_SEEDS"])
-    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
-    path = os.path.abspath(path)
-    output["config"] = config
-    Save(path, output)
+    logger.log_total_reward(output, config["NUM_SEEDS"])
+    # path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
+    # path = os.path.abspath(path)
+    # output["config"] = config
+    # Save(path, output)
