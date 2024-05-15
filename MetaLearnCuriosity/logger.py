@@ -314,3 +314,77 @@ class WBLogger:
                     }
                 )
             self.losses.finish()
+
+    def log_int_lambdas(self, output, num_seeds):
+        self.int_lambdas = wandb.init(
+            project="MetaLearnCuriosity",
+            config=self.config,
+            group=self.group,
+            tags=self.tags,
+            notes=self.notes,
+            name=f"{self.name}_int_lambdas",
+        )
+
+        if num_seeds > 1:
+            int_value_avg = jnp.mean(output["int_lambdas"], axis=0)
+            for int_lambda in range(len(int_value_avg.mean(-1).reshape(-1))):
+                self.int_lambdas.log(
+                    {
+                        f"int_lambdas_{self.config['ENV_NAME']}_{num_seeds}_seeds": int_value_avg.mean(
+                            -1
+                        ).reshape(
+                            -1
+                        )[
+                            int_lambda
+                        ]
+                    }
+                )
+            self.int_lambdas.finish()
+        else:
+
+            for int_lambda in range(len(output["int_lambdas"].mean(-1).reshape(-1))):
+                self.int_lambdas.log(
+                    {
+                        f"int_lambdas_{self.config['ENV_NAME']}": output["int_lambdas"]
+                        .mean(-1)
+                        .reshape(-1)[int_lambda],
+                    }
+                )
+            self.int_lambdas.finish()
+
+    def log_total_reward(self, output, num_seeds):
+        self.total_reward = wandb.init(
+            project="MetaLearnCuriosity",
+            config=self.config,
+            group=self.group,
+            tags=self.tags,
+            notes=self.notes,
+            name=f"{self.name}_total_reward",
+        )
+
+        if num_seeds > 1:
+            total_reward_avg = jnp.mean(output["total_reward"], axis=0)
+            for total_rew in range(len(total_reward_avg.mean(-1).reshape(-1))):
+                self.total_reward.log(
+                    {
+                        f"total_reward_{self.config['ENV_NAME']}_{num_seeds}_seeds": total_reward_avg.mean(
+                            -1
+                        ).reshape(
+                            -1
+                        )[
+                            total_rew
+                        ]
+                    }
+                )
+            self.total_reward.finish()
+        else:
+
+            for total_rew in range(len(output["total_reward"].mean(-1).reshape(-1))):
+                self.total_reward.log(
+                    {
+                        f"total_reward_{self.config['ENV_NAME']}": output["total_reward"]
+                        .mean(-1)
+                        .reshape(-1)[total_rew],
+                    }
+                )
+            self.total_reward.finish()

@@ -13,7 +13,12 @@ from flax.training.train_state import TrainState
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import make_obs_gymnax_discrete
-from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper, VecEnv
+from MetaLearnCuriosity.wrappers import (
+    FlattenObservationWrapper,
+    LogWrapper,
+    TimeLimitGymnax,
+    VecEnv,
+)
 
 # * Consider using RELU activation function.
 
@@ -102,7 +107,8 @@ class Transition(NamedTuple):
 def ppo_make_train(config):  # noqa: C901
     config["NUM_UPDATES"] = config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     config["MINIBATCH_SIZE"] = config["NUM_ENVS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
-    env, env_params = gymnax.make(config["ENV_NAME"])
+    env = TimeLimitGymnax(config["ENV_NAME"])
+    env_params = env._env_params
     env = FlattenObservationWrapper(env)
     env = LogWrapper(env)
 
@@ -226,7 +232,7 @@ def ppo_make_train(config):  # noqa: C901
                 # STEP ENV
                 rng, _rng = jax.random.split(rng)
                 rng_step = jax.random.split(_rng, config["NUM_ENVS"])
-                obsv, env_state, reward, done, info = env.step(
+                obsv, env_state, reward, _, done, info = env.step(
                     rng_step, env_state, action, env_params
                 )
 

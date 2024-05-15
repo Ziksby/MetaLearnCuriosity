@@ -1,16 +1,19 @@
 # Taken from here: https://github.com/luchris429/purejaxrl/blob/main/purejaxrl/wrappers.py
 
 from functools import partial
-from typing import Any, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import chex
+import gymnax
 import jax
 import jax.numpy as jnp
 import numpy as np
+import xminigrid
 from brax import envs
 from brax.envs.wrappers.training import AutoResetWrapper, EpisodeWrapper
 from flax import struct
 from gymnax.environments import environment, spaces
+from xminigrid.wrappers import GymAutoResetWrapper
 
 
 class GymnaxWrapper(object):
@@ -22,6 +25,28 @@ class GymnaxWrapper(object):
     # provide proxy access to regular attributes of wrapped object
     def __getattr__(self, name):
         return getattr(self._env, name)
+
+
+class TimeLimitGymnax:
+    def __init__(self, env_name):
+        env, env_params = gymnax.make(env_name)
+        self._env = env
+        self._env_params = env_params
+        self.time_limit = env_params.max_steps_in_episode
+
+    def reset(self, key, env_params):
+        return self._env.reset(key, env_params)
+
+    def step(self, key, state, action, env_params):
+        obsv, env_state, reward, done, info = self._env.step(key, state, action, env_params)
+        norm_time_step = env_state.time / self.time_limit
+        return obsv, env_state, reward, norm_time_step, done, info
+
+    def observation_space(self, env_params):
+        return self._env.observation_space(env_params)
+
+    def action_space(self, env_params):
+        return self._env.action_space(env_params)
 
 
 class FlattenObservationWrapper(GymnaxWrapper):
@@ -57,9 +82,9 @@ class FlattenObservationWrapper(GymnaxWrapper):
         action: Union[int, float],
         params: Optional[environment.EnvParams] = None,
     ) -> Tuple[chex.Array, environment.EnvState, float, bool, dict]:
-        obs, state, reward, done, info = self._env.step(key, state, action, params)
+        obs, state, reward, norm_time_step, done, info = self._env.step(key, state, action, params)
         obs = jnp.reshape(obs, (-1,))
-        return obs, state, reward, done, info
+        return obs, state, reward, norm_time_step, done, info
 
 
 @struct.dataclass
@@ -93,8 +118,10 @@ class LogWrapper(GymnaxWrapper):
         state: environment.EnvState,
         action: Union[int, float],
         params: Optional[environment.EnvParams] = None,
-    ) -> Tuple[chex.Array, environment.EnvState, float, bool, dict]:
-        obs, env_state, reward, done, info = self._env.step(key, state.env_state, action, params)
+    ) -> Tuple[chex.Array, environment.EnvState, float, bool, float, dict]:
+        obs, env_state, reward, norm_time_step, done, info = self._env.step(
+            key, state.env_state, action, params
+        )
         new_episode_return = state.episode_returns + reward
         new_episode_length = state.episode_lengths + 1
         state = LogEnvState(
@@ -111,7 +138,7 @@ class LogWrapper(GymnaxWrapper):
         info["returned_episode_lengths"] = state.returned_episode_lengths
         info["timestep"] = state.timestep
         info["returned_episode"] = done
-        return obs, state, reward, done, info
+        return obs, state, reward, norm_time_step, done, info
 
 
 class BraxGymnaxWrapper:
@@ -122,6 +149,7 @@ class BraxGymnaxWrapper:
         self._env = env
         self.action_size = env.action_size
         self.observation_size = (env.observation_size,)
+        self.time_limit = 1000
 
     def reset(self, key, params=None):
         state = self._env.reset(key)
@@ -129,7 +157,15 @@ class BraxGymnaxWrapper:
 
     def step(self, key, state, action, params=None):
         next_state = self._env.step(state, action)
-        return next_state.obs, next_state, next_state.reward, next_state.done > 0.5, {}
+        norm_time_step = next_state.info["steps"] / 1000
+        return (
+            next_state.obs,
+            next_state,
+            next_state.reward,
+            norm_time_step,
+            next_state.done > 0.5,
+            {},
+        )
 
     def observation_space(self, params):
         return spaces.Box(
@@ -234,7 +270,9 @@ class NormalizeVecObservation(GymnaxWrapper):
         return (obs - state.mean) / jnp.sqrt(state.var + 1e-8), state
 
     def step(self, key, state, action, params=None):
-        obs, env_state, reward, done, info = self._env.step(key, state.env_state, action, params)
+        obs, env_state, reward, norm_time_step, done, info = self._env.step(
+            key, state.env_state, action, params
+        )
 
         batch_mean = jnp.mean(obs, axis=0)
         batch_var = jnp.var(obs, axis=0)
@@ -260,6 +298,7 @@ class NormalizeVecObservation(GymnaxWrapper):
             (obs - state.mean) / jnp.sqrt(state.var + 1e-8),
             state,
             reward,
+            norm_time_step,
             done,
             info,
         )
@@ -292,7 +331,9 @@ class NormalizeVecReward(GymnaxWrapper):
         return obs, state
 
     def step(self, key, state, action, params=None):
-        obs, env_state, reward, done, info = self._env.step(key, state.env_state, action, params)
+        obs, env_state, reward, norm_time_step, done, info = self._env.step(
+            key, state.env_state, action, params
+        )
         return_val = state.return_val * self.gamma * (1 - done) + reward
 
         batch_mean = jnp.mean(return_val, axis=0)
@@ -316,7 +357,7 @@ class NormalizeVecReward(GymnaxWrapper):
             return_val=return_val,
             env_state=env_state,
         )
-        return obs, state, reward / jnp.sqrt(state.var + 1e-8), done, info
+        return obs, state, reward / jnp.sqrt(state.var + 1e-8), norm_time_step, done, info
 
 
 @struct.dataclass
@@ -336,10 +377,12 @@ class DelayedReward(GymnaxWrapper):
         return obs, state
 
     def step(self, key, state, action, params=None):
-        obs, env_state, reward, done, info = self._env.step(key, state.env_state, action, params)
+        obs, env_state, reward, norm_time_step, done, info = self._env.step(
+            key, state.env_state, action, params
+        )
         new_delayed_reward = state.delayed_reward + reward
         sparse_reward = 0.0
-        steps = env_state.env_state.info["steps"]  # changed now
+        steps = env_state.env_state.info["steps"]
         interval = steps % self.step_interval == 0
         reset_delayed_rewards = steps == 1
 
@@ -350,4 +393,32 @@ class DelayedReward(GymnaxWrapper):
 
         state = DelayedRewardEnvState(delayed_reward=delayed_reward, env_state=env_state)
 
-        return obs, state, returned_reward, done, info
+        return obs, state, returned_reward, norm_time_step, done, info
+
+
+class MiniGridGymnax:
+    def __init__(self, env_name):
+        env, env_params = xminigrid.make(env_name)
+        env = GymAutoResetWrapper(env)
+        self._env = env
+        self._env_params = env_params
+        self.time_limit = env.time_limit(env_params)
+
+    def reset(self, key, env_params):
+        timestep = self._env.reset(env_params, key)
+        return timestep.observation, timestep
+
+    def step(self, key, state, action, env_params):
+        timestep = self._env.step(env_params, state, action)
+        norm_time_step = timestep.state.step_num / self.time_limit
+        return timestep.observation, timestep, timestep.reward, norm_time_step, timestep.last(), {}
+
+    def observation_space(self, env_params):
+        return spaces.Box(
+            low=jnp.array([0, 0]),
+            high=jnp.array([14, 13]),
+            shape=(self._env.observation_shape(env_params),),
+        )
+
+    def action_space(self, env_params):
+        return spaces.Discrete(6)

@@ -1,3 +1,4 @@
+import os
 from typing import Any, NamedTuple, Sequence
 
 import distrax
@@ -11,7 +12,9 @@ import optax
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 
-from MetaLearnCuriosity.checkpoints import Save
+import wandb
+from MetaLearnCuriosity.agents.nn import RewardCombiner
+from MetaLearnCuriosity.checkpoints import Restore, Save
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.wrappers import (
     FlattenObservationWrapper,
@@ -21,7 +24,9 @@ from MetaLearnCuriosity.wrappers import (
     VecEnv,
 )
 
+# from jax.config import config as con
 # THE NETWORKS
+
 jax.config.update("jax_enable_x64", True)
 
 
@@ -131,12 +136,17 @@ class Transition(NamedTuple):
     log_prob: jnp.ndarray
     obs: jnp.ndarray
     next_obs: jnp.ndarray
+    norm_time_step: jnp.ndarray
     info: jnp.ndarray
 
 
 def byol_make_train(config):  # noqa: C901
     config["NUM_UPDATES"] = config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     config["MINIBATCH_SIZE"] = config["NUM_ENVS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
+    path = "/home/batsi/Documents/Masters/MetaLearnCuriosity/MLC_logs/flax_ckpt/DeepSea-bsuite/temp_rc_relu_ds_lifetime_return"
+
+    output_rc = Restore(path)
+    rc_params = output_rc["rc_params"]
     env = TimeLimitGymnax(config["ENV_NAME"])
     env_params = env._env_params
     env = FlattenObservationWrapper(env)
@@ -156,6 +166,7 @@ def byol_make_train(config):  # noqa: C901
         action_dim = env.action_space(env_params).n
         encoder_layer_out_shape = 64
         network = BYOLActorCritic(env.action_space(env_params).n, activation=config["ACTIVATION"])
+        reward_combiner_network = RewardCombiner()
         predicator = OnlinePredictor(encoder_layer_out_shape)
         target = TargetEncoder(encoder_layer_out_shape)
         online = OnlineEncoder(encoder_layer_out_shape)
@@ -241,7 +252,7 @@ def byol_make_train(config):  # noqa: C901
                 # STEP ENV
                 rng, _rng = jax.random.split(rng)
                 rng_step = jax.random.split(_rng, config["NUM_ENVS"])
-                obsv, env_state, reward, _, done, info = env.step(
+                obsv, env_state, reward, norm_time_step, done, info = env.step(
                     rng_step, env_state, action, env_params
                 )
                 # WORLD MODEL PREDICATION AND TARGET PREDICATION
@@ -267,6 +278,7 @@ def byol_make_train(config):  # noqa: C901
                     log_prob,
                     last_obs,
                     obsv,
+                    norm_time_step,
                     info,
                 )
 
@@ -358,40 +370,48 @@ def byol_make_train(config):  # noqa: C901
                     traj_batch.log_prob,
                     traj_batch.obs,
                     traj_batch.next_obs,
+                    traj_batch.norm_time_step,
                     traj_batch.info,
                 )
 
                 def _get_advantages(gae_and_next_value, transition):
                     gae, next_value = gae_and_next_value
-                    done, value, reward, int_reward = (
+                    done, value, reward, int_reward, norm_time_step = (
                         transition.done,
                         transition.value,
                         transition.reward,
                         transition.int_reward,
+                        transition.norm_time_step,
                     )
-                    total_reward = reward + (config["INT_LAMBDA"] * int_reward)
+                    rc_input = jnp.concatenate(
+                        (reward[:, None], int_reward[:, None], norm_time_step[:, None]), axis=-1
+                    )
+                    total_reward = reward_combiner_network.apply(rc_params, rc_input)
+                    # total_reward = reward + (int_lambda * int_reward)
                     delta = total_reward + config["GAMMA"] * next_value * (1 - done) - value
                     gae = delta + config["GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
-                    return (gae, value), gae
+                    return (gae, value), (gae, total_reward)
 
                 # Looping over time steps in the "batch".
-                _, advantages = jax.lax.scan(
+                _, advantages_and_total_reward = jax.lax.scan(
                     _get_advantages,
                     (jnp.zeros_like(last_val), last_val),
                     norm_traj_batch,
                     reverse=True,
                     unroll=16,
                 )
+                advantages, total_reward = advantages_and_total_reward
                 return (
                     advantages,
                     advantages + norm_traj_batch.value,
+                    total_reward,
                     r_bar,
                     r_bar_sq,
                     c,
                     mu_l,
                 )
 
-            advantages, targets, r_bar, r_bar_sq, c, mu_l = _calculate_gae(
+            advantages, targets, total_reward, r_bar, r_bar_sq, c, mu_l = _calculate_gae(
                 traj_batch, last_val, r_bar, r_bar_sq, c, mu_l
             )
 
@@ -598,7 +618,7 @@ def byol_make_train(config):  # noqa: C901
                 mu_l,
                 rng,
             )
-            return runner_state, (metric, loss_info, int_reward)
+            return runner_state, (metric, loss_info, int_reward, traj_batch, total_reward)
 
         rng, _rng = jax.random.split(rng)
         runner_state = (
@@ -617,7 +637,7 @@ def byol_make_train(config):  # noqa: C901
         runner_state, extra_info = jax.lax.scan(
             _update_step, runner_state, None, config["NUM_UPDATES"]
         )
-        metric, loss_info, int_reward = extra_info
+        metric, loss_info, int_reward, traj_batch, total_reward = extra_info
         rl_total_loss, byol_loss, encoder_loss = loss_info
         return {
             "runner_state": runner_state,
@@ -629,6 +649,8 @@ def byol_make_train(config):  # noqa: C901
             "rl_entrophy_loss": rl_total_loss[1][2],
             "byol_loss": byol_loss,
             "encoder_loss": encoder_loss,
+            "traj_batch": traj_batch,
+            "total_reward": total_reward,
         }
 
     return train
@@ -636,7 +658,7 @@ def byol_make_train(config):  # noqa: C901
 
 if __name__ == "__main__":
     config = {
-        "RUN_NAME": "byol_lite_4R",
+        "RUN_NAME": "bl_rc_temp_relu_ds_ds",
         "SEED": 42,
         "NUM_SEEDS": 30,
         "LR": 2.5e-4,
@@ -657,9 +679,9 @@ if __name__ == "__main__":
         "DEBUG": False,
         "EMA_PARAMETER": 0.99,
         "REW_NORM_PARAMETER": 0.99,
-        "INT_LAMBDA": 0.006,
     }
     rng = jax.random.PRNGKey(config["SEED"])
+
     if config["NUM_SEEDS"] > 1:
         rngs = jax.random.split(rng, config["NUM_SEEDS"])
         train_vjit = jax.jit(jax.vmap(byol_make_train(config)))
@@ -671,17 +693,16 @@ if __name__ == "__main__":
 
     logger = WBLogger(
         config=config,
-        group=f"byol_toy/{config['ENV_NAME']}",
-        tags=["byol_lite", f'{config["ENV_NAME"]}'],
-        notes="gae: normed",
+        group=f"byol_toy_rc/{config['ENV_NAME']}",
+        tags=["byol_lite_rc", f'{config["ENV_NAME"]}'],
         name=config["RUN_NAME"],
     )
     logger.log_episode_return(output, config["NUM_SEEDS"])
-    # logger.log_int_rewards(output, config["NUM_SEEDS"])
+    logger.log_int_rewards(output, config["NUM_SEEDS"])
     # logger.log_byol_losses(output, config["NUM_SEEDS"])
     # logger.log_rl_losses(output, config["NUM_SEEDS"])
-    # path = (
-    #     f'/home/batsi/Documents/Masters/MetaLearnCuriosity/MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
-    # )
+    logger.log_total_reward(output, config["NUM_SEEDS"])
+    # path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
+    # path = os.path.abspath(path)
     # output["config"] = config
     # Save(path, output)

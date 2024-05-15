@@ -1,3 +1,4 @@
+import os
 from typing import Any, NamedTuple, Sequence
 
 import distrax
@@ -8,11 +9,15 @@ import jax.numpy as jnp
 import jax.tree_util
 import numpy as np
 import optax
+from evosax import OpenES
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 
+import wandb
+from MetaLearnCuriosity.agents.nn import TemporalRewardCombiner
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
+from MetaLearnCuriosity.utils import lifetime_return
 from MetaLearnCuriosity.wrappers import (
     FlattenObservationWrapper,
     LogWrapper,
@@ -22,7 +27,6 @@ from MetaLearnCuriosity.wrappers import (
 )
 
 # THE NETWORKS
-jax.config.update("jax_enable_x64", True)
 
 
 class TargetEncoder(nn.Module):
@@ -131,6 +135,7 @@ class Transition(NamedTuple):
     log_prob: jnp.ndarray
     obs: jnp.ndarray
     next_obs: jnp.ndarray
+    norm_time_step: jnp.ndarray
     info: jnp.ndarray
 
 
@@ -138,6 +143,7 @@ def byol_make_train(config):  # noqa: C901
     config["NUM_UPDATES"] = config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     config["MINIBATCH_SIZE"] = config["NUM_ENVS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
     env = TimeLimitGymnax(config["ENV_NAME"])
+    # env=MiniGridGymnax(config["ENV_NAME"])
     env_params = env._env_params
     env = FlattenObservationWrapper(env)
     env = LogWrapper(env)
@@ -151,7 +157,7 @@ def byol_make_train(config):  # noqa: C901
         )
         return config["LR"] * frac
 
-    def train(rng):
+    def train(rng, rc_params):
         # INIT NETWORK
         action_dim = env.action_space(env_params).n
         encoder_layer_out_shape = 64
@@ -241,7 +247,7 @@ def byol_make_train(config):  # noqa: C901
                 # STEP ENV
                 rng, _rng = jax.random.split(rng)
                 rng_step = jax.random.split(_rng, config["NUM_ENVS"])
-                obsv, env_state, reward, _, done, info = env.step(
+                obsv, env_state, reward, norm_time_step, done, info = env.step(
                     rng_step, env_state, action, env_params
                 )
                 # WORLD MODEL PREDICATION AND TARGET PREDICATION
@@ -267,6 +273,7 @@ def byol_make_train(config):  # noqa: C901
                     log_prob,
                     last_obs,
                     obsv,
+                    norm_time_step,
                     info,
                 )
 
@@ -358,18 +365,24 @@ def byol_make_train(config):  # noqa: C901
                     traj_batch.log_prob,
                     traj_batch.obs,
                     traj_batch.next_obs,
+                    traj_batch.norm_time_step,
                     traj_batch.info,
                 )
 
                 def _get_advantages(gae_and_next_value, transition):
                     gae, next_value = gae_and_next_value
-                    done, value, reward, int_reward = (
+                    done, value, reward, int_reward, norm_time_step = (
                         transition.done,
                         transition.value,
                         transition.reward,
                         transition.int_reward,
+                        transition.norm_time_step,
                     )
-                    total_reward = reward + (config["INT_LAMBDA"] * int_reward)
+                    rc_input = jnp.concatenate(
+                        (reward[:, None], int_reward[:, None], norm_time_step[:, None]), axis=-1
+                    )
+                    total_reward = reward_combiner_network.apply(rc_params, rc_input)
+                    # total_reward = reward + (int_lambda * int_reward)
                     delta = total_reward + config["GAMMA"] * next_value * (1 - done) - value
                     gae = delta + config["GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
                     return (gae, value), gae
@@ -598,7 +611,7 @@ def byol_make_train(config):  # noqa: C901
                 mu_l,
                 rng,
             )
-            return runner_state, (metric, loss_info, int_reward)
+            return runner_state, (metric, loss_info, int_reward, traj_batch)
 
         rng, _rng = jax.random.split(rng)
         runner_state = (
@@ -617,7 +630,7 @@ def byol_make_train(config):  # noqa: C901
         runner_state, extra_info = jax.lax.scan(
             _update_step, runner_state, None, config["NUM_UPDATES"]
         )
-        metric, loss_info, int_reward = extra_info
+        metric, loss_info, int_reward, traj_batch = extra_info
         rl_total_loss, byol_loss, encoder_loss = loss_info
         return {
             "runner_state": runner_state,
@@ -629,6 +642,7 @@ def byol_make_train(config):  # noqa: C901
             "rl_entrophy_loss": rl_total_loss[1][2],
             "byol_loss": byol_loss,
             "encoder_loss": encoder_loss,
+            "traj_batch": traj_batch,
         }
 
     return train
@@ -636,12 +650,14 @@ def byol_make_train(config):  # noqa: C901
 
 if __name__ == "__main__":
     config = {
-        "RUN_NAME": "byol_lite_4R",
-        "SEED": 42,
-        "NUM_SEEDS": 30,
+        "RUN_NAME": "temp_rc_relu_ds_lifetime_return",
+        "PPO_SEED": 42,
+        "RC_SEED": 43,
+        "ES_SEED": 69,
+        "NUM_SEEDS": 1,
         "LR": 2.5e-4,
         "NUM_ENVS": 4,
-        "NUM_STEPS": 128,
+        "NUM_STEPS": 64,
         "TOTAL_TIMESTEPS": 5e5 // 5,
         "UPDATE_EPOCHS": 4,
         "NUM_MINIBATCHES": 4,
@@ -657,31 +673,77 @@ if __name__ == "__main__":
         "DEBUG": False,
         "EMA_PARAMETER": 0.99,
         "REW_NORM_PARAMETER": 0.99,
-        "INT_LAMBDA": 0.006,
+        "LIFETIME_GAMMA": 1,
+        "POP_SIZE": 128,
+        "NUM_GENERATIONS": 64,
+        "NUM_ROLLOUTS": 2,
     }
-    rng = jax.random.PRNGKey(config["SEED"])
-    if config["NUM_SEEDS"] > 1:
-        rngs = jax.random.split(rng, config["NUM_SEEDS"])
-        train_vjit = jax.jit(jax.vmap(byol_make_train(config)))
-        output = train_vjit(rngs)
+    rng = jax.random.PRNGKey(config["PPO_SEED"])
 
-    else:
-        train_jit = jax.jit(byol_make_train(config))
-        output = train_jit(rng)
+    # Set up fitness function
 
-    logger = WBLogger(
-        config=config,
-        group=f"byol_toy/{config['ENV_NAME']}",
-        tags=["byol_lite", f'{config["ENV_NAME"]}'],
-        notes="gae: normed",
-        name=config["RUN_NAME"],
+    train_fn = byol_make_train(config)
+
+    def single_rollout(rng_input, rc_params):
+        output = train_fn(rng_input, rc_params)
+        rewards = output["traj_batch"].reward
+        lifetime_returns = lifetime_return(rewards, config["LIFETIME_GAMMA"], True)
+        return lifetime_returns.mean()
+        # return output["metrics"]["returned_episode_returns"].mean()
+
+    vmap_rollout = jax.vmap(single_rollout, in_axes=(0, None))
+    rollout = jax.jit(jax.vmap(vmap_rollout, in_axes=(None, 0)))
+
+    # Set up OpenES
+    reward_combiner_network = TemporalRewardCombiner()
+    rc_params_pholder = reward_combiner_network.init(
+        jax.random.PRNGKey(config["RC_SEED"]), jnp.zeros((1, 3))
     )
-    logger.log_episode_return(output, config["NUM_SEEDS"])
-    # logger.log_int_rewards(output, config["NUM_SEEDS"])
-    # logger.log_byol_losses(output, config["NUM_SEEDS"])
-    # logger.log_rl_losses(output, config["NUM_SEEDS"])
-    # path = (
-    #     f'/home/batsi/Documents/Masters/MetaLearnCuriosity/MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
-    # )
-    # output["config"] = config
-    # Save(path, output)
+    rng = jax.random.PRNGKey(config["ES_SEED"])
+    rng, rng_init = jax.random.split(rng)
+    strategy = OpenES(
+        popsize=config["POP_SIZE"],
+        pholder_params=rc_params_pholder,
+        opt_name="adam",
+        lrate_init=2e-4,
+        centered_rank=True,
+        maximize=True,
+    )
+    state = strategy.initialize(rng_init)
+
+    fitness_log = wandb.init(
+        project="MetaLearnCuriosity",
+        name=f"{config['RUN_NAME']}_fitness",
+        config=config,
+        group=f"reward_combiner_single_task/{config['ENV_NAME']}",
+        tags=["reward_combiner", f'{config["ENV_NAME"]}'],
+        notes="Not reversed return",
+    )
+
+    # Run Meta-Evolution
+    for gen in range(config["NUM_GENERATIONS"]):
+        # 1. SAMPLE: Get new set of meta params
+        rng, rng_ask, rng_eval = jax.random.split(rng, 3)
+        x, state = jax.jit(strategy.ask)(rng_ask, state)
+        # 2. EVALUATE: Eval meta params inner loop PPO trainings
+        batch_rng = jax.random.split(rng_eval, config["NUM_ROLLOUTS"])
+        fitness = rollout(batch_rng, x).mean(axis=1)
+        # 3. UPDATE: Update the ES with the evaluation info
+        state = jax.jit(strategy.tell)(x, fitness, state)
+        fitness = jax.block_until_ready(fitness)
+        fitness_log.log(
+            {
+                f"fitness_mean_{config['ENV_NAME']}": fitness.mean(),
+                f"best_fitness_{config['ENV_NAME']}": state.best_fitness,
+            }
+        )
+    print(f"the fitness shape: {fitness.shape}")
+    # Define the directory for saving the checkpoint
+    checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
+
+    # Get the absolute path of the directory
+    path = os.path.abspath(checkpoint_directory)
+
+    fitness_log.finish()
+    output = {"rc_params": strategy.get_eval_params(state), "config": config}
+    Save(path, output)
