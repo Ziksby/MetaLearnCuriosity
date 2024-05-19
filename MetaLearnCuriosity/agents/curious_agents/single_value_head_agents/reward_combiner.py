@@ -1,6 +1,7 @@
 import os
 from typing import Any, NamedTuple, Sequence
 
+# from evosax import ParameterReshaper
 import distrax
 import flax.linen as nn
 import gymnax
@@ -18,13 +19,7 @@ from MetaLearnCuriosity.agents.nn import TemporalRewardCombiner
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import lifetime_return
-from MetaLearnCuriosity.wrappers import (
-    FlattenObservationWrapper,
-    LogWrapper,
-    MiniGridGymnax,
-    TimeLimitGymnax,
-    VecEnv,
-)
+from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper, VecEnv
 
 # THE NETWORKS
 
@@ -142,9 +137,8 @@ class Transition(NamedTuple):
 def byol_make_train(config):  # noqa: C901
     config["NUM_UPDATES"] = config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     config["MINIBATCH_SIZE"] = config["NUM_ENVS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
-    env = TimeLimitGymnax(config["ENV_NAME"])
-    # env=MiniGridGymnax(config["ENV_NAME"])
-    env_params = env._env_params
+    config["TRAINING_HORIZON"] = config["TOTAL_TIMESTEPS"] // config["NUM_ENVS"]
+    env, env_params = gymnax.make(config["ENV_NAME"])
     env = FlattenObservationWrapper(env)
     env = LogWrapper(env)
     env = VecEnv(env)
@@ -247,7 +241,7 @@ def byol_make_train(config):  # noqa: C901
                 # STEP ENV
                 rng, _rng = jax.random.split(rng)
                 rng_step = jax.random.split(_rng, config["NUM_ENVS"])
-                obsv, env_state, reward, norm_time_step, done, info = env.step(
+                obsv, env_state, reward, time_step, done, info = env.step(
                     rng_step, env_state, action, env_params
                 )
                 # WORLD MODEL PREDICATION AND TARGET PREDICATION
@@ -264,6 +258,10 @@ def byol_make_train(config):  # noqa: C901
                 int_reward = jnp.square(jnp.linalg.norm((pred_norm - tar_norm), axis=1)) * (
                     1 - done
                 )
+
+                # normalise time step
+                norm_time_step = time_step / config["TRAINING_HORIZON"]
+
                 transition = Transition(
                     done,
                     action,
@@ -650,15 +648,15 @@ def byol_make_train(config):  # noqa: C901
 
 if __name__ == "__main__":
     config = {
-        "RUN_NAME": "temp_rc_relu_ds_lifetime_return",
+        "RUN_NAME": "temp_rc_lifetime_return",
         "PPO_SEED": 42,
         "RC_SEED": 43,
         "ES_SEED": 69,
         "NUM_SEEDS": 1,
         "LR": 2.5e-4,
-        "NUM_ENVS": 4,
+        "NUM_ENVS": 4 * 4,
         "NUM_STEPS": 64,
-        "TOTAL_TIMESTEPS": 5e5 // 5,
+        "TOTAL_TIMESTEPS": 5e5,
         "UPDATE_EPOCHS": 4,
         "NUM_MINIBATCHES": 4,
         "GAMMA": 0.99,
@@ -668,7 +666,7 @@ if __name__ == "__main__":
         "VF_COEF": 0.5,
         "MAX_GRAD_NORM": 0.5,
         "ACTIVATION": "tanh",
-        "ENV_NAME": "DeepSea-bsuite",
+        "ENV_NAME": "Empty-misc",
         "ANNEAL_LR": True,
         "DEBUG": False,
         "EMA_PARAMETER": 0.99,
