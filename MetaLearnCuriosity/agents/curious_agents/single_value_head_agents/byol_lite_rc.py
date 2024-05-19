@@ -704,10 +704,10 @@ if __name__ == "__main__":
     )
     logger.log_episode_return(output, config["NUM_SEEDS"])
     logger.log_int_rewards(output, config["NUM_SEEDS"])
-    # logger.log_byol_losses(output, config["NUM_SEEDS"])
-    # logger.log_rl_losses(output, config["NUM_SEEDS"])
+    logger.log_byol_losses(output, config["NUM_SEEDS"])
+    logger.log_rl_losses(output, config["NUM_SEEDS"])
     logger.log_total_reward(output, config["NUM_SEEDS"])
-    # path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
-    # path = os.path.abspath(path)
-    # output["config"] = config
-    # Save(path, output)
+    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
+    path = os.path.abspath(path)
+    output["config"] = config
+    Save(path, output)
