@@ -143,6 +143,7 @@ class Transition(NamedTuple):
 def byol_make_train(config):  # noqa: C901
     config["NUM_UPDATES"] = config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     config["MINIBATCH_SIZE"] = config["NUM_ENVS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
+    config["TRAINING_HORIZON"] = config["TOTAL_TIMESTEPS"] // config["NUM_ENVS"]
     path = "/home/batsi/Documents/Masters/MetaLearnCuriosity/MLC_logs/flax_ckpt/DeepSea-bsuite/temp_rc_relu_ds_lifetime_return"
 
     output_rc = Restore(path)
@@ -252,7 +253,7 @@ def byol_make_train(config):  # noqa: C901
                 # STEP ENV
                 rng, _rng = jax.random.split(rng)
                 rng_step = jax.random.split(_rng, config["NUM_ENVS"])
-                obsv, env_state, reward, norm_time_step, done, info = env.step(
+                obsv, env_state, reward, time_step, done, info = env.step(
                     rng_step, env_state, action, env_params
                 )
                 # WORLD MODEL PREDICATION AND TARGET PREDICATION
@@ -269,6 +270,10 @@ def byol_make_train(config):  # noqa: C901
                 int_reward = jnp.square(jnp.linalg.norm((pred_norm - tar_norm), axis=1)) * (
                     1 - done
                 )
+
+                # normalise time step
+                norm_time_step = time_step / config["TRAINING_HORIZON"]
+
                 transition = Transition(
                     done,
                     action,
@@ -699,10 +704,10 @@ if __name__ == "__main__":
     )
     logger.log_episode_return(output, config["NUM_SEEDS"])
     logger.log_int_rewards(output, config["NUM_SEEDS"])
-    # logger.log_byol_losses(output, config["NUM_SEEDS"])
-    # logger.log_rl_losses(output, config["NUM_SEEDS"])
+    logger.log_byol_losses(output, config["NUM_SEEDS"])
+    logger.log_rl_losses(output, config["NUM_SEEDS"])
     logger.log_total_reward(output, config["NUM_SEEDS"])
-    # path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
-    # path = os.path.abspath(path)
-    # output["config"] = config
-    # Save(path, output)
+    path = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}_{config["NUM_SEEDS"]}'
+    path = os.path.abspath(path)
+    output["config"] = config
+    Save(path, output)
