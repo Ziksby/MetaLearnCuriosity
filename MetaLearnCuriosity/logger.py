@@ -388,3 +388,60 @@ class WBLogger:
                     }
                 )
             self.total_reward.finish()
+
+    def log_rl_loss_minigrid(self,output,num_seeds):
+        self.minigrid_losses = wandb.init(
+            project="MetaLearnCuriosity",
+            config=self.config,
+            group=self.group,
+            tags=self.tags,
+            notes=self.notes,
+            name=f"{self.name}_rl_minigrid_loss",
+        )
+
+        if num_seeds==1:
+            for loss in range(len(output["rl_total_loss"])):
+                self.minigrid_losses.log(
+                    {
+                        f"rl_total_loss_{self.config['ENV_NAME']}": output["rl_total_loss"][loss],
+                        f"rl_value_loss_{self.config['ENV_NAME']}": output["rl_value_loss"][loss],
+                        f"rl_actor_loss_{self.config['ENV_NAME']}": output["rl_actor_loss"][loss],
+                        f"rl_entrophy_loss_{self.config['ENV_NAME']}": output["rl_entrophy_loss"][loss],
+                    }
+                )
+            self.minigrid_losses.finish()
+
+        else:
+            for loss in range(len(output["rl_total_loss"].mean(0))):
+                self.minigrid_losses.log(
+                    {
+                        f"rl_total_loss_{self.config['ENV_NAME']}": output["rl_total_loss"].mean(0)[loss],
+                        f"rl_value_loss_{self.config['ENV_NAME']}": output["rl_value_loss"].mean(0)[loss],
+                        f"rl_actor_loss_{self.config['ENV_NAME']}": output["rl_actor_loss"].mean(0)[loss],
+                        f"rl_entrophy_loss_{self.config['ENV_NAME']}": output["rl_entrophy_loss"].mean(0)[loss],
+                    }
+                )
+            self.minigrid_losses.finish()
+
+    def save_artifact(self,path,type='dataset'):
+        self.artifact = wandb.init(
+            project="MetaLearnCuriosity",
+            config=self.config,
+            group=self.group,
+            tags=self.tags,
+            notes=self.notes,
+            name=f"{self.name}_artifact",
+        )
+        # Create a new artifact
+        artifact = wandb.Artifact(f'{self.name}_flax-checkpoints', type=type)
+
+        # Add the checkpoint folder to the artifact
+        artifact.add_dir(path)
+
+        # Log the artifact to W&B
+        self.artifact.log_artifact(artifact)
+
+        # Finish the run
+        self.artifact.finish()
+
+

@@ -112,7 +112,6 @@ class MiniGridActorCriticRNN(nn.Module):
                 ]
             )
             obs_emb = mlp_encoder(inputs["observation"]).reshape(B, S, -1)
-        print(B, S)
         action_encoder = nn.Embed(self.num_actions, self.action_emb_dim)
 
         rnn_core = MiniGridBatchedRNNModel(self.rnn_hidden_dim, self.rnn_num_layers)

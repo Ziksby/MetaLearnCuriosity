@@ -21,6 +21,10 @@ from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import lifetime_return
 from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper, VecEnv
 
+import os
+os.environ["JAX_TRACEBACK_FILTERING"] = "off"
+
+
 # THE NETWORKS
 
 
@@ -654,7 +658,7 @@ if __name__ == "__main__":
         "ES_SEED": 69,
         "NUM_SEEDS": 1,
         "LR": 2.5e-4,
-        "NUM_ENVS": 4 * 4,
+        "NUM_ENVS": 4 ,
         "NUM_STEPS": 64,
         "TOTAL_TIMESTEPS": 5e5,
         "UPDATE_EPOCHS": 4,
@@ -673,7 +677,7 @@ if __name__ == "__main__":
         "REW_NORM_PARAMETER": 0.99,
         "LIFETIME_GAMMA": 1,
         "POP_SIZE": 128,
-        "NUM_GENERATIONS": 64,
+        "NUM_GENERATIONS": 512,
         "NUM_ROLLOUTS": 2,
     }
     rng = jax.random.PRNGKey(config["PPO_SEED"])
@@ -689,7 +693,7 @@ if __name__ == "__main__":
         return lifetime_returns.mean()
         # return output["metrics"]["returned_episode_returns"].mean()
 
-    vmap_rollout = jax.vmap(single_rollout, in_axes=(0, None))
+    vmap_rollout = jax.map(single_rollout, in_axes=(0, None))
     rollout = jax.jit(jax.vmap(vmap_rollout, in_axes=(None, 0)))
 
     # Set up OpenES
@@ -709,14 +713,14 @@ if __name__ == "__main__":
     )
     state = strategy.initialize(rng_init)
 
-    fitness_log = wandb.init(
-        project="MetaLearnCuriosity",
-        name=f"{config['RUN_NAME']}_fitness",
-        config=config,
-        group=f"reward_combiner_single_task/{config['ENV_NAME']}",
-        tags=["reward_combiner", f'{config["ENV_NAME"]}'],
-        notes="Not reversed return",
-    )
+    # fitness_log = wandb.init(
+    #     project="MetaLearnCuriosity",
+    #     name=f"{config['RUN_NAME']}_fitness",
+    #     config=config,
+    #     group=f"reward_combiner_single_task/{config['ENV_NAME']}",
+    #     tags=["reward_combiner", f'{config["ENV_NAME"]}'],
+    #     notes="Not reversed return",
+    # )
 
     # Run Meta-Evolution
     for gen in range(config["NUM_GENERATIONS"]):
@@ -729,19 +733,19 @@ if __name__ == "__main__":
         # 3. UPDATE: Update the ES with the evaluation info
         state = jax.jit(strategy.tell)(x, fitness, state)
         fitness = jax.block_until_ready(fitness)
-        fitness_log.log(
-            {
-                f"fitness_mean_{config['ENV_NAME']}": fitness.mean(),
-                f"best_fitness_{config['ENV_NAME']}": state.best_fitness,
-            }
-        )
-    print(f"the fitness shape: {fitness.shape}")
-    # Define the directory for saving the checkpoint
-    checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
+        # fitness_log.log(
+        #     {
+        #         f"fitness_mean_{config['ENV_NAME']}": fitness.mean(),
+        #         f"best_fitness_{config['ENV_NAME']}": state.best_fitness,
+        #     }
+        # )
+    # print(f"the fitness shape: {fitness.shape}")
+    # # Define the directory for saving the checkpoint
+    # checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
-    # Get the absolute path of the directory
-    path = os.path.abspath(checkpoint_directory)
+    # # Get the absolute path of the directory
+    # path = os.path.abspath(checkpoint_directory)
 
-    fitness_log.finish()
-    output = {"rc_params": strategy.get_eval_params(state), "config": config}
-    Save(path, output)
+    # fitness_log.finish()
+    # output = {"rc_params": strategy.get_eval_params(state), "config": config}
+    # Save(path, output)
