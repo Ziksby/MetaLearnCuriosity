@@ -2,18 +2,24 @@
 # https://github.com/corl-team/xland-minigrid/blob/main/training/train_single_task.py
 
 import os
+
 import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
 import optax
-import wandb
-from flax.training.train_state import TrainState
-from MetaLearnCuriosity.agents.nn import MiniGridActorCriticRNN
-from MetaLearnCuriosity.utils import MiniGridTransition as Transition
-from MetaLearnCuriosity.utils import calculate_gae, minigrid_ppo_update_networks, rnn_rollout
 from flax.jax_utils import replicate, unreplicate
+from flax.training.train_state import TrainState
+
+import wandb
+from MetaLearnCuriosity.agents.nn import MiniGridActorCriticRNN
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
+from MetaLearnCuriosity.utils import MiniGridTransition as Transition
+from MetaLearnCuriosity.utils import (
+    calculate_gae,
+    minigrid_ppo_update_networks,
+    rnn_rollout,
+)
 from MetaLearnCuriosity.wrappers import (
     FlattenObservationWrapper,
     LogWrapper,
@@ -79,6 +85,7 @@ config["NUM_UPDATES"] = (
 )
 print(f"Num devices: {num_devices}, Num updates: {config['NUM_UPDATES']}")
 
+
 def make_train(rng):
     rng, _rng = jax.random.split(rng)
 
@@ -107,27 +114,24 @@ def make_train(rng):
         "prev_reward": jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1)),
     }
     init_hstate = network.initialize_carry(batch_size=config["NUM_ENVS_PER_DEVICE"])
-    
+
     network_params = network.init(_rng, init_obs, init_hstate)
     tx = optax.chain(
         optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
-        optax.inject_hyperparams(optax.adam)(
-            learning_rate=linear_schedule, eps=1e-8
-        ),  # eps=1e-5
+        optax.inject_hyperparams(optax.adam)(learning_rate=linear_schedule, eps=1e-8),  # eps=1e-5
     )
     train_state = TrainState.create(apply_fn=network.apply, params=network_params, tx=tx)
     # env = VecEnv(env)
-    
 
-    return init_hstate, train_state,rng
+    return init_hstate, train_state, rng
+
 
 def train(rng, init_hstate, train_state):
     rng, _rng = jax.random.split(rng)
 
     reset_rng = jax.random.split(_rng, config["NUM_ENVS_PER_DEVICE"])
-    
 
-    obsv, env_state = jax.vmap(env.reset,in_axes=(0, None))(reset_rng, env_params)
+    obsv, env_state = jax.vmap(env.reset, in_axes=(0, None))(reset_rng, env_params)
     prev_action = jnp.zeros(config["NUM_ENVS_PER_DEVICE"], dtype=jnp.int32)
     prev_reward = jnp.zeros(config["NUM_ENVS_PER_DEVICE"])
 
@@ -166,7 +170,7 @@ def train(rng, init_hstate, train_state):
 
             # STEP ENV
             rng_step = jax.random.split(rng, config["NUM_ENVS_PER_DEVICE"])
-            obsv, env_state, reward, _,done, info =jax.vmap(env.step,in_axes=(0, 0,0,None))(
+            obsv, env_state, reward, _, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None))(
                 rng_step, env_state, action, env_params
             )
             transition = Transition(
@@ -184,9 +188,7 @@ def train(rng, init_hstate, train_state):
             return runner_state, transition
 
         initial_hstate = runner_state[-1]
-        runner_state, transitions = jax.lax.scan(
-            _env_step, runner_state, None, config["NUM_STEPS"]
-        )
+        runner_state, transitions = jax.lax.scan(_env_step, runner_state, None, config["NUM_STEPS"])
 
         # CALCULATE ADVANTAGE
 
@@ -283,39 +285,40 @@ def train(rng, init_hstate, train_state):
         return runner_state, (metric, loss_info)
 
     runner_state = (rng, train_state, env_state, obsv, prev_action, prev_reward, init_hstate)
-    runner_state, loss_info = jax.lax.scan(
-        _update_step, runner_state, None, config["NUM_UPDATES"]
-    )
+    runner_state, loss_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
     metric, loss = loss_info
     return {
         "runner_state": runner_state,
         "metrics": metric,
         "loss_info": loss,
-        "rl_total_loss":loss["total_loss"],
-        "rl_value_loss":loss["value_loss"],
-        "rl_actor_loss":loss["actor_loss"],
+        "rl_total_loss": loss["total_loss"],
+        "rl_value_loss": loss["value_loss"],
+        "rl_actor_loss": loss["actor_loss"],
         "rl_entrophy_loss": loss["entropy"],
     }
 
+
 if config["NUM_SEEDS"] > 1:
-    init_hstate, train_state,rng = jax.vmap(make_train)(rng)
+    init_hstate, train_state, rng = jax.vmap(make_train)(rng)
     init_hstate = replicate(init_hstate, jax.local_devices())
     train_state = replicate(train_state, jax.local_devices())
-    train_fn= jax.vmap(train, in_axes=(0,0,0))
+    train_fn = jax.vmap(train, in_axes=(0, 0, 0))
     train_fn = jax.pmap(train_fn, axis_name="devices")
-    vectorized_split = jax.vmap(lambda key: jax.random.split(key, num=jax.device_count()), out_axes=1)
+    vectorized_split = jax.vmap(
+        lambda key: jax.random.split(key, num=jax.device_count()), out_axes=1
+    )
     rng = vectorized_split(rng)
-    output = jax.block_until_ready(train_fn(rng,init_hstate,train_state))
+    output = jax.block_until_ready(train_fn(rng, init_hstate, train_state))
     output = unreplicate(output)
 
 
 else:
-    init_hstate, train_state,rng = make_train(rng)
+    init_hstate, train_state, rng = make_train(rng)
     train_state = replicate(train_state, jax.local_devices())
     init_hstate = replicate(init_hstate, jax.local_devices())
     rng = jax.random.split(rng, num=jax.device_count())
     train_fn = jax.pmap(train, axis_name="devices")
-    output = jax.block_until_ready(train_fn(rng,init_hstate,train_state))
+    output = jax.block_until_ready(train_fn(rng, init_hstate, train_state))
     output = unreplicate(output)
 
 print(output["rl_total_loss"].shape)
