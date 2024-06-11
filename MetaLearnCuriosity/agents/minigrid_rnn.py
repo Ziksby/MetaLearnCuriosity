@@ -2,15 +2,16 @@
 # https://github.com/corl-team/xland-minigrid/blob/main/training/train_single_task.py
 
 import os
+import time
 
 import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
 import optax
+import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.training.train_state import TrainState
 
-import wandb
 from MetaLearnCuriosity.agents.nn import MiniGridActorCriticRNN
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
@@ -29,14 +30,25 @@ from MetaLearnCuriosity.wrappers import (
 
 jax.config.update("jax_threefry_partitionable", True)
 
+environments = [
+    "MiniGrid-BlockedUnlockPickUp",
+    "MiniGrid-DoorKey-16x16",
+    "MiniGrid-Empty-16x16",
+    "MiniGrid-EmptyRandom-16x16",
+    "MiniGrid-FourRooms",
+    "MiniGrid-LockedRoom",
+    "MiniGrid-MemoryS128",
+    "MiniGrid-Unlock",
+    "MiniGrid-UnlockPickUp",
+]
+
 config = {
-    "NUM_SEEDS": 1,
-    "PROJECT": "xminigrid",
-    "RUN_NAME": "single-task-ppo-flatten",
-    "ENV_NAME": "MiniGrid-Empty-16x16",
+    "NUM_SEEDS": 10,
+    "PROJECT": "MetaLearnCuriosity",
+    "RUN_NAME": "minigrid-ppo-baseline_w_cnns",
     "BENCHMARK_ID": None,
     "RULESET_ID": None,
-    "USE_CNNS": False,
+    "USE_CNNS": True,
     # Agent
     "ACTION_EMB_DIM": 16,
     "RNN_HIDDEN_DIM": 1024,
@@ -47,7 +59,7 @@ config = {
     "NUM_STEPS": 16,
     "UPDATE_EPOCHS": 1,
     "NUM_MINIBATCHES": 16,
-    "TOTAL_TIMESTEPS": 10_000_000,
+    "TOTAL_TIMESTEPS": 50_000_000,
     "LR": 0.001,
     "CLIP_EPS": 0.2,
     "GAMMA": 0.99,
@@ -58,32 +70,31 @@ config = {
     "EVAL_EPISODES": 80,
     "SEED": 42,
 }
-rng = jax.random.PRNGKey(config["SEED"])
-if config["NUM_SEEDS"] > 1:
-    rng = jax.random.split(rng, config["NUM_SEEDS"])
-num_devices = jax.local_device_count()
-config["NUM_ENVS_PER_DEVICE"] = config["NUM_ENVS"] // num_devices
-config["TOTAL_TIMESTEPS_PER_DEVICE"] = config["TOTAL_TIMESTEPS"] // num_devices
-config["EVAL_EPISODES_PER_DEVICE"] = config["EVAL_EPISODES"] // num_devices
-assert config["NUM_ENVS"] % num_devices == 0
-env = MiniGridGymnax(config["ENV_NAME"])
-env_params = env._env_params
-env_eval = MiniGridGymnax(config["ENV_NAME"])
-if not config["USE_CNNS"]:
-    env = FlattenObservationWrapper(env)
-    observations_shape = env.observation_space(env_params).shape
-else:
-    observations_shape = env.observation_space(env_params).shape[0]
-env_eval = LogWrapper(env_eval)
-env = LogWrapper(env)
-num_devices = jax.local_device_count()
-config["NUM_ENVS_PER_DEVICE"] = config["NUM_ENVS"] // num_devices
-config["TOTAL_TIMESTEPS_PER_DEVICE"] = config["TOTAL_TIMESTEPS"] // num_devices
-config["EVAL_EPISODES_PER_DEVICE"] = config["EVAL_EPISODES"] // num_devices
-config["NUM_UPDATES"] = (
-    config["TOTAL_TIMESTEPS_PER_DEVICE"] // config["NUM_STEPS"] // config["NUM_ENVS_PER_DEVICE"]
-)
-print(f"Num devices: {num_devices}, Num updates: {config['NUM_UPDATES']}")
+
+
+def make_env_config(config, env_name):
+    num_devices = jax.local_device_count()
+    config["ENV_NAME"] = env_name
+    assert config["NUM_ENVS"] % num_devices == 0
+    env = MiniGridGymnax(config["ENV_NAME"])
+    env_params = env._env_params
+    env_eval = MiniGridGymnax(config["ENV_NAME"])
+    if config["USE_CNNS"]:
+        observations_shape = env.observation_space(env_params).shape[0]
+    else:
+        env = FlattenObservationWrapper(env)
+        observations_shape = env.observation_space(env_params).shape
+    env_eval = LogWrapper(env_eval)
+    env = LogWrapper(env)
+    num_devices = jax.local_device_count()
+    config["NUM_ENVS_PER_DEVICE"] = config["NUM_ENVS"] // num_devices
+    config["TOTAL_TIMESTEPS_PER_DEVICE"] = config["TOTAL_TIMESTEPS"] // num_devices
+    config["EVAL_EPISODES_PER_DEVICE"] = config["EVAL_EPISODES"] // num_devices
+    config["NUM_UPDATES"] = (
+        config["TOTAL_TIMESTEPS_PER_DEVICE"] // config["NUM_STEPS"] // config["NUM_ENVS_PER_DEVICE"]
+    )
+    print(f"Num devices: {num_devices}, Num updates: {config['NUM_UPDATES']}")
+    return observations_shape, config, env, env_params
 
 
 def make_train(rng):
@@ -122,6 +133,7 @@ def make_train(rng):
     )
     train_state = TrainState.create(apply_fn=network.apply, params=network_params, tx=tx)
     # env = VecEnv(env)
+    rng = jax.random.split(rng, jax.local_device_count())
 
     return init_hstate, train_state, rng
 
@@ -170,7 +182,7 @@ def train(rng, init_hstate, train_state):
 
             # STEP ENV
             rng_step = jax.random.split(rng, config["NUM_ENVS_PER_DEVICE"])
-            obsv, env_state, reward, _, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None))(
+            obsv, env_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None))(
                 rng_step, env_state, action, env_params
             )
             transition = Transition(
@@ -298,42 +310,48 @@ def train(rng, init_hstate, train_state):
     }
 
 
-if config["NUM_SEEDS"] > 1:
-    init_hstate, train_state, rng = jax.vmap(make_train)(rng)
-    init_hstate = replicate(init_hstate, jax.local_devices())
-    train_state = replicate(train_state, jax.local_devices())
-    train_fn = jax.vmap(train, in_axes=(0, 0, 0))
-    train_fn = jax.pmap(train_fn, axis_name="devices")
-    vectorized_split = jax.vmap(
-        lambda key: jax.random.split(key, num=jax.device_count()), out_axes=1
+for env_name in environments:
+
+    observations_shape, config, env, env_params = make_env_config(config, env_name)
+
+    # experiments
+    rng = jax.random.PRNGKey(config["SEED"])
+
+    if config["NUM_SEEDS"] > 1:
+        rng = jax.random.split(rng, config["NUM_SEEDS"])
+        init_hstate, train_state, rng = jax.jit(jax.vmap(make_train, out_axes=(0, 0, 1)))(rng)
+        init_hstate = replicate(init_hstate, jax.local_devices())
+        train_state = replicate(train_state, jax.local_devices())
+        train_fn = jax.vmap(train, in_axes=(0, 0, 0))
+        train_fn = jax.pmap(train_fn, axis_name="devices")
+        print(f"Training in {config['ENV_NAME']}")
+        t = time.time()
+        output = jax.block_until_ready(train_fn(rng, init_hstate, train_state))
+        elapsed_time = time.time() - t
+        output = unreplicate(output)
+
+    else:
+        init_hstate, train_state, rng = make_train(rng)
+        train_state = replicate(train_state, jax.local_devices())
+        init_hstate = replicate(init_hstate, jax.local_devices())
+        train_fn = jax.pmap(train, axis_name="devices")
+        output = jax.block_until_ready(train_fn(rng, init_hstate, train_state))
+        output = unreplicate(output)
+
+    print(output["rl_total_loss"].shape)
+    logger = WBLogger(
+        config=config,
+        group="minigrid_baseline",
+        tags=["minigrid", config["ENV_NAME"], "baseline", "cnns"],
+        name=config["RUN_NAME"],
     )
-    rng = vectorized_split(rng)
-    output = jax.block_until_ready(train_fn(rng, init_hstate, train_state))
-    output = unreplicate(output)
+    logger.log_episode_return(output, config["NUM_SEEDS"])
+    logger.log_rl_loss_minigrid(output, config["NUM_SEEDS"])
+    output["config"] = config
+    checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
-
-else:
-    init_hstate, train_state, rng = make_train(rng)
-    train_state = replicate(train_state, jax.local_devices())
-    init_hstate = replicate(init_hstate, jax.local_devices())
-    rng = jax.random.split(rng, num=jax.device_count())
-    train_fn = jax.pmap(train, axis_name="devices")
-    output = jax.block_until_ready(train_fn(rng, init_hstate, train_state))
-    output = unreplicate(output)
-
-print(output["rl_total_loss"].shape)
-logger = WBLogger(
-    config=config,
-    group=f"rnn_minigrid/{config['ENV_NAME']}",
-    tags=["rnn_minigrid", config["ENV_NAME"]],
-    name=config["RUN_NAME"],
-)
-logger.log_episode_return(output, config["NUM_SEEDS"])
-logger.log_rl_loss_minigrid(output, config["NUM_SEEDS"])
-output["config"] = config
-checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
-
-# Get the absolute path of the directory
-path = os.path.abspath(checkpoint_directory)
-Save(path, output)
-logger.save_artifact(path)
+    # Get the absolute path of the directory
+    path = os.path.abspath(checkpoint_directory)
+    Save(path, output)
+    logger.save_artifact(path)
+    print(f"Done in {elapsed_time / 60:.2f}min")

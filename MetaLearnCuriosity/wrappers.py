@@ -78,6 +78,7 @@ class LogEnvState:
     episode_lengths: int
     returned_episode_returns: float
     returned_episode_lengths: int
+    sum_of_rewards: int
     timestep: int
 
 
@@ -92,7 +93,7 @@ class LogWrapper(GymnaxWrapper):
         self, key: chex.PRNGKey, params: Optional[environment.EnvParams] = None
     ) -> Tuple[chex.Array, environment.EnvState]:
         obs, env_state = self._env.reset(key, params)
-        state = LogEnvState(env_state, 0, 0, 0, 0, 0)
+        state = LogEnvState(env_state, 0, 0, 0, 0, 0, 0)
         return obs, state
 
     @partial(jax.jit, static_argnums=(0,))
@@ -114,13 +115,15 @@ class LogWrapper(GymnaxWrapper):
             + new_episode_return * done,
             returned_episode_lengths=state.returned_episode_lengths * (1 - done)
             + new_episode_length * done,
+            sum_of_rewards=state.sum_of_rewards + reward,
             timestep=state.timestep + 1,
         )
         info["returned_episode_returns"] = state.returned_episode_returns
         info["returned_episode_lengths"] = state.returned_episode_lengths
         info["timestep"] = state.timestep
         info["returned_episode"] = done
-        return obs, state, reward, state.timestep, done, info
+        info["sum_of_rewards"] = state.sum_of_rewards
+        return obs, state, reward, done, info
 
 
 class BraxGymnaxWrapper:
@@ -250,9 +253,7 @@ class NormalizeVecObservation(GymnaxWrapper):
         return (obs - state.mean) / jnp.sqrt(state.var + 1e-8), state
 
     def step(self, key, state, action, params=None):
-        obs, env_state, reward, time_step, done, info = self._env.step(
-            key, state.env_state, action, params
-        )
+        obs, env_state, reward, done, info = self._env.step(key, state.env_state, action, params)
 
         batch_mean = jnp.mean(obs, axis=0)
         batch_var = jnp.var(obs, axis=0)
@@ -278,7 +279,6 @@ class NormalizeVecObservation(GymnaxWrapper):
             (obs - state.mean) / jnp.sqrt(state.var + 1e-8),
             state,
             reward,
-            time_step,
             done,
             info,
         )
@@ -311,9 +311,7 @@ class NormalizeVecReward(GymnaxWrapper):
         return obs, state
 
     def step(self, key, state, action, params=None):
-        obs, env_state, reward, time_step, done, info = self._env.step(
-            key, state.env_state, action, params
-        )
+        obs, env_state, reward, done, info = self._env.step(key, state.env_state, action, params)
         return_val = state.return_val * self.gamma * (1 - done) + reward
 
         batch_mean = jnp.mean(return_val, axis=0)
@@ -337,7 +335,7 @@ class NormalizeVecReward(GymnaxWrapper):
             return_val=return_val,
             env_state=env_state,
         )
-        return obs, state, reward / jnp.sqrt(state.var + 1e-8), time_step, done, info
+        return obs, state, reward / jnp.sqrt(state.var + 1e-8), done, info
 
 
 @struct.dataclass
@@ -357,9 +355,7 @@ class DelayedReward(GymnaxWrapper):
         return obs, state
 
     def step(self, key, state, action, params=None):
-        obs, env_state, reward, time_step, done, info = self._env.step(
-            key, state.env_state, action, params
-        )
+        obs, env_state, reward, done, info = self._env.step(key, state.env_state, action, params)
         new_delayed_reward = state.delayed_reward + reward
         sparse_reward = 0.0
         steps = env_state.env_state.info["steps"]
@@ -373,7 +369,7 @@ class DelayedReward(GymnaxWrapper):
 
         state = DelayedRewardEnvState(delayed_reward=delayed_reward, env_state=env_state)
 
-        return obs, state, returned_reward, time_step, done, info
+        return obs, state, returned_reward, done, info
 
 
 class MiniGridGymnax:

@@ -10,15 +10,16 @@ import jax.numpy as jnp
 import jax.tree_util
 import numpy as np
 import optax
+import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 from tqdm import tqdm
 
-import wandb
 from MetaLearnCuriosity.agents.nn import TemporalRewardCombiner
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
+from MetaLearnCuriosity.pmapped_open_es import OpenES
 from MetaLearnCuriosity.utils import lifetime_return
 from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper, VecEnv
 
@@ -67,6 +68,8 @@ env = FlattenObservationWrapper(env)
 env = LogWrapper(env)
 env = VecEnv(env)
 # THE NETWORKS
+
+
 class TargetEncoder(nn.Module):
     encoder_layer_out_shape: Sequence[int]
 
@@ -177,9 +180,6 @@ class Transition(NamedTuple):
     info: jnp.ndarray
 
 
-rng = jax.random.PRNGKey(config["PPO_SEED"])
-
-
 def byol_make_train(rng):  # noqa: C901
     def linear_schedule(count):
         frac = (
@@ -252,7 +252,9 @@ def train(rng, rc_params, network_state, online_state, predicator_state, target_
     obsv, env_state = env.reset(reset_rng, env_params)
     target = TargetEncoder(64)
     action_dim = env.action_space(env_params).n
+
     # TRAIN LOOP
+
     def _update_step(runner_state, unused):
         # COLLECT TRAJECTORIES
         def _env_step(runner_state, unused):

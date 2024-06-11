@@ -1,5 +1,4 @@
 import jax.numpy as jnp
-
 import wandb
 
 
@@ -72,15 +71,15 @@ class WBLogger:
         if num_seeds > 1:
             byol_avg = jnp.mean(output["byol_loss"], axis=0)
             encoder_avg = jnp.mean(output["encoder_loss"], axis=0)
-            for loss in range(len(byol_avg.mean(-1).reshape(-1))):
+            for loss in range(len(byol_avg.mean(-1).mean(-1))):
                 self.losses.log(
                     {
                         f"byol_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": byol_avg.mean(
                             -1
-                        ).reshape(-1)[loss],
+                        ).mean(-1)[loss],
                         f"encoder_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": encoder_avg.mean(
                             -1
-                        ).reshape(
+                        ).mean(
                             -1
                         )[
                             loss
@@ -90,15 +89,15 @@ class WBLogger:
             self.losses.finish()
         else:
 
-            for loss in range(len(output["byol_loss"].mean(-1).reshape(-1))):
+            for loss in range(len(output["byol_loss"].mean(-1).mean(-1))):
                 self.losses.log(
                     {
                         f"byol_loss_{self.config['ENV_NAME']}": output["byol_loss"]
                         .mean(-1)
-                        .reshape(-1)[loss],
+                        .mean(-1)[loss],
                         f"encoder_loss_{self.config['ENV_NAME']}": output["encoder_loss"]
                         .mean(-1)
-                        .reshape(-1)[loss],
+                        .mean(-1)[loss],
                     }
                 )
             self.losses.finish()
@@ -117,33 +116,33 @@ class WBLogger:
             rl_value_avg = jnp.mean(output["rl_value_loss"], axis=0)
             rl_actor_avg = jnp.mean(output["rl_actor_loss"], axis=0)
             rl_entrophy_avg = jnp.mean(output["rl_entrophy_loss"], axis=0)
-            for loss in range(len(rl_total_avg.mean(-1).reshape(-1))):
+            for loss in range(len(rl_total_avg.mean(-1).mean(-1))):
                 self.losses.log(
                     {
                         f"rl_total_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": rl_total_avg.mean(
                             -1
-                        ).reshape(
+                        ).mean(
                             -1
                         )[
                             loss
                         ],
                         f"rl_value_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": rl_value_avg.mean(
                             1
-                        ).reshape(
+                        ).mean(
                             -1
                         )[
                             loss
                         ],
                         f"rl_actor_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": rl_actor_avg.mean(
                             1
-                        ).reshape(
+                        ).mean(
                             -1
                         )[
                             loss
                         ],
                         f"rl_entrophy_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": rl_entrophy_avg.mean(
                             1
-                        ).reshape(
+                        ).mean(
                             -1
                         )[
                             loss
@@ -153,21 +152,21 @@ class WBLogger:
             self.losses.finish()
         else:
 
-            for loss in range(len(output["rl_total_loss"].mean(-1).reshape(-1))):
+            for loss in range(len(output["rl_total_loss"].mean(-1).mean(-1))):
                 self.losses.log(
                     {
                         f"rl_total_loss_{self.config['ENV_NAME']}": output["rl_total_loss"]
                         .mean(-1)
-                        .reshape(-1)[loss],
+                        .mean(-1)[loss],
                         f"rl_value_loss_{self.config['ENV_NAME']}": output["rl_value_loss"]
                         .mean(-1)
-                        .reshape(-1)[loss],
+                        .mean(-1)[loss],
                         f"rl_actor_loss_{self.config['ENV_NAME']}": output["rl_actor_loss"]
                         .mean(-1)
-                        .reshape(-1)[loss],
+                        .mean(-1)[loss],
                         f"rl_entrophy_loss_{self.config['ENV_NAME']}": output["rl_entrophy_loss"]
                         .mean(-1)
-                        .reshape(-1)[loss],
+                        .mean(-1)[loss],
                     }
                 )
             self.losses.finish()
@@ -184,23 +183,23 @@ class WBLogger:
 
         if num_seeds > 1:
             rnd_avg = jnp.mean(output["rnd_loss"], axis=0)
-            for loss in range(len(rnd_avg.mean(-1).reshape(-1))):
+            for loss in range(len(rnd_avg.mean(-1).mean(-1))):
                 self.losses.log(
                     {
                         f"rnd_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": rnd_avg.mean(
                             -1
-                        ).reshape(-1)[loss],
+                        ).mean(-1)[loss],
                     }
                 )
             self.losses.finish()
         else:
 
-            for loss in range(len(output["rnd_loss"].mean(-1).reshape(-1))):
+            for loss in range(len(output["rnd_loss"].mean(-1).mean(-1))):
                 self.losses.log(
                     {
                         f"rnd_loss_{self.config['ENV_NAME']}": output["rnd_loss"]
                         .mean(-1)
-                        .reshape(-1)[loss],
+                        .mean(-1)[loss],
                     }
                 )
             self.losses.finish()
@@ -217,23 +216,23 @@ class WBLogger:
 
         if num_seeds > 1:
             fast_avg = jnp.mean(output["fast_loss"], axis=0)
-            for loss in range(len(fast_avg.mean(-1).reshape(-1))):
+            for loss in range(len(fast_avg.mean(-1).mean(-1))):
                 self.losses.log(
                     {
                         f"fast_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": fast_avg.mean(
                             -1
-                        ).reshape(-1)[loss],
+                        ).mean(-1)[loss],
                     }
                 )
             self.losses.finish()
         else:
 
-            for loss in range(len(output["fast_loss"].mean(-1).reshape(-1))):
+            for loss in range(len(output["fast_loss"].mean(-1).mean(-1))):
                 self.losses.log(
                     {
                         f"fast_loss_{self.config['ENV_NAME']}": output["fast_loss"]
                         .mean(-1)
-                        .reshape(-1)[loss],
+                        .mean(-1)[loss],
                     }
                 )
             self.losses.finish()
@@ -251,29 +250,29 @@ class WBLogger:
         if num_seeds > 1:
             for_avg = jnp.mean(output["forward_loss"], axis=0)
             back_avg = jnp.mean(output["backward_loss"], axis=0)
-            for loss in range(len(for_avg.mean(-1).reshape(-1))):
+            for loss in range(len(for_avg.mean(-1).mean(-1))):
                 self.losses.log(
                     {
                         f"forward_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": for_avg.mean(
                             -1
-                        ).reshape(-1)[loss],
+                        ).mean(-1)[loss],
                         f"backward_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": back_avg.mean(
                             -1
-                        ).reshape(-1)[loss],
+                        ).mean(-1)[loss],
                     }
                 )
             self.losses.finish()
         else:
 
-            for loss in range(len(output["forward_loss"].mean(-1).reshape(-1))):
+            for loss in range(len(output["forward_loss"].mean(-1).mean(-1))):
                 self.losses.log(
                     {
                         f"forward_loss_{self.config['ENV_NAME']}": output["forward_loss"]
                         .mean(-1)
-                        .reshape(-1)[loss],
+                        .mean(-1)[loss],
                         f"backward_loss_{self.config['ENV_NAME']}": output["backward_loss"]
                         .mean(-1)
-                        .reshape(-1)[loss],
+                        .mean(-1)[loss],
                     }
                 )
             self.losses.finish()
@@ -290,12 +289,12 @@ class WBLogger:
 
         if num_seeds > 1:
             int_value_avg = jnp.mean(output["rl_int_value_loss"], axis=0)
-            for loss in range(len(int_value_avg.mean(-1).reshape(-1))):
+            for loss in range(len(int_value_avg.mean(-1).mean(-1))):
                 self.losses.log(
                     {
                         f"int_value_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": int_value_avg.mean(
                             -1
-                        ).reshape(
+                        ).mean(
                             -1
                         )[
                             loss
@@ -305,12 +304,12 @@ class WBLogger:
             self.losses.finish()
         else:
 
-            for loss in range(len(output["rl_int_value_loss"].mean(-1).reshape(-1))):
+            for loss in range(len(output["rl_int_value_loss"].mean(-1).mean(-1))):
                 self.losses.log(
                     {
                         f"int_value_loss_{self.config['ENV_NAME']}": output["rl_int_value_loss"]
                         .mean(-1)
-                        .reshape(-1)[loss],
+                        .mean(-1)[loss],
                     }
                 )
             self.losses.finish()
