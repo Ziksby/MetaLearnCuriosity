@@ -1,10 +1,19 @@
-from typing import NamedTuple
+from typing import NamedTuple,Optional
 
 import jax
 import jax.numpy as jnp
 from flax import struct
 from flax.training.train_state import TrainState
 
+class RNDTransition(NamedTuple):
+    done: jnp.ndarray
+    action: jnp.ndarray
+    value: jnp.ndarray
+    reward: jnp.ndarray
+    int_reward: jnp.ndarray
+    log_prob: jnp.ndarray
+    obs: jnp.ndarray
+    info: jnp.ndarray
 
 class BYOLLiteTransition(NamedTuple):
     done: jnp.ndarray
@@ -40,6 +49,20 @@ class PPOTransition(NamedTuple):
     obs: jnp.ndarray
     info: jnp.ndarray
 
+class RandomTransition(NamedTuple):
+    obs: jnp.ndarray
+
+class ObsNormParams(NamedTuple):
+    count: float
+    mean: jnp.ndarray
+    var: jnp.ndarray
+
+class RNDNormIntReturnParams(NamedTuple):
+    count: float
+    mean: float
+    var: float
+    rewems: jnp.ndarray
+
 
 def calculate_gae(
     transitions: MiniGridTransition,
@@ -65,13 +88,13 @@ def calculate_gae(
 
 
 # Get dummy data for Obs Norm
-def make_obs_gymnax_discrete(config, env, env_params):
+def make_obs_gymnax_discrete(num_envs, env, env_params,num_steps):
     def random_rollout(rng, env_params=env_params):
         """Rollout a jitted gymnax episode with lax.scan."""
         # Reset the environment
         rng, _rng = jax.random.split(rng)
-        reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
-        obsv, env_state = jax.vmap(env.reset, in_axes=(0, None))(reset_rng, env_params)
+        reset_rng = jax.random.split(_rng, num_envs)
+        obsv, env_state = env.reset(reset_rng, env_params)
 
         def step(runner_state, tmp):
 
@@ -79,26 +102,58 @@ def make_obs_gymnax_discrete(config, env, env_params):
 
             # SELECT ACTION
             rng, _rng, act_rngs = jax.random.split(rng, 3)
-            act_rngs = jax.random.split(act_rngs, config["NUM_ENVS"])
+            act_rngs = jax.random.split(act_rngs, num_envs)
             action = jax.vmap(env.action_space(env_params).sample)(act_rngs)
 
             # STEP ENV
             rng, _rng = jax.random.split(rng)
-            rng_step = jax.random.split(_rng, config["NUM_ENVS"])
-            obsv, env_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None))(
+            rng_step = jax.random.split(_rng, num_envs)
+            obsv, env_state, reward, done, info = env.step(
                 rng_step, env_state, action, env_params
             )
-            transition = PPOTransition(done, action, reward, last_obs, info)
+            transition = RandomTransition(last_obs)
             runner_state = (env_state, obsv, rng)
             return runner_state, transition
 
         runner_state = (env_state, obsv, rng)
 
-        runner_state, traj_batch = jax.lax.scan(step, runner_state, None, config["NUM_STEPS"])
+        runner_state, traj_batch = jax.lax.scan(step, runner_state, None, num_steps)
 
         return traj_batch.obs
 
     return random_rollout
+
+def update_obs_norm_params(obs_norm_params, obs):
+
+    batch_mean = jnp.mean(obs, axis=0)
+    batch_var = jnp.var(obs, axis=0)
+    batch_count = obs.shape[0]
+
+    delta = batch_mean - obs_norm_params.mean
+    tot_count = obs_norm_params.count + batch_count
+
+    new_mean = obs_norm_params.mean + delta * batch_count / tot_count
+    m_a = obs_norm_params.var * obs_norm_params.count
+    m_b = batch_var * batch_count
+    M2 = m_a + m_b + jnp.square(delta) * obs_norm_params.count * batch_count / tot_count
+    new_var = M2 / tot_count
+    new_count = tot_count
+
+    return ObsNormParams(new_count, new_mean, new_var)
+
+def update_rnd_int_norm_params(batch_count,batch_mean,batch_var,rewems,rnd_int_norm_params):
+
+    delta = batch_mean - rnd_int_norm_params.mean
+    tot_count = rnd_int_norm_params.count + batch_count
+
+    new_mean = rnd_int_norm_params.mean + delta * batch_count / tot_count
+    m_a = rnd_int_norm_params.var * rnd_int_norm_params.count
+    m_b = batch_var * batch_count
+    M2 = m_a + m_b + jnp.square(delta) * rnd_int_norm_params.count * batch_count / tot_count
+    new_var = M2 / tot_count
+    new_count = tot_count
+
+    return RNDNormIntReturnParams(new_count, new_mean, new_var, rewems)
 
 
 def minigrid_ppo_update_networks(
@@ -263,3 +318,36 @@ def lifetime_return(life_rewards, lifetime_gamma, reverse=True):
         returns_cal, jnp.zeros(life_rewards.shape[-1]), life_rewards, reverse=reverse
     )
     return single_return
+
+def rnd_normalise_int_rewards(traj_batch, rnd_int_return_norm_params, int_gamma):
+    def _multiply_rewems_w_dones(rewems, dones_row):
+        rewems = rewems * (1 - dones_row)
+        return rewems, rewems
+
+    def _update_rewems(rewems, int_reward_row):
+        rewems = rewems * int_gamma + int_reward_row
+        return rewems, rewems
+
+    # Shape (num_steps, num_envs)
+    int_reward = traj_batch.int_reward
+
+    # Shape (num_envs,num_steps)
+    int_reward_transpose = jnp.transpose(int_reward)
+
+    rewems, _ = jax.lax.scan(
+        _multiply_rewems_w_dones, rnd_int_return_norm_params.rewems, jnp.transpose(traj_batch.done) # Shape (num_envs,num_steps)
+    )
+
+    rewems, _ = jax.lax.scan(
+        _update_rewems, rewems, int_reward_transpose
+    )
+
+    batch_count = len(rewems)
+    batch_mean = rewems.mean()
+    batch_var = jnp.var(rewems)
+
+    rnd_int_return_norm_params = update_rnd_int_norm_params(
+        batch_count,batch_mean,batch_var, rewems, rnd_int_return_norm_params 
+    )
+    norm_int_reward = int_reward / jnp.sqrt(rnd_int_return_norm_params.var + 1e-8)
+    return norm_int_reward, rnd_int_return_norm_params
