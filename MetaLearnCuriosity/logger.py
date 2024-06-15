@@ -1,14 +1,16 @@
 import jax.numpy as jnp
 import wandb
+from flax.jax_utils import unreplicate
 
 
 class WBLogger:
-    def __init__(self, config, group, tags, name, notes=None):
+    def __init__(self, config, group, tags, name, pmapped=False, notes=None):
         self.config = config
         self.tags = tags
         self.group = group
         self.notes = notes
         self.name = name
+        self.pmapped=pmapped
 
     def log_episode_return(self, output, num_seeds):
         self.episode_returns = wandb.init(
@@ -18,7 +20,9 @@ class WBLogger:
             group=self.group,
             tags=self.tags,
             notes=self.notes,
-        )
+        )   
+        if self.pmapped:
+            output["metrics"]["returned_episode_returns"]=output["metrics"]["returned_episode_returns"].mean(0)
 
         if num_seeds > 1:
             outs_avg = jnp.mean(output["metrics"]["returned_episode_returns"], axis=0)
@@ -43,6 +47,8 @@ class WBLogger:
             notes=self.notes,
             name=f"{self.name}_int_rew",
         )
+        if self.pmapped:
+            output["int_reward"]=output["int_reward"].mean(0)
 
         if num_seeds > 1:
             outs_avg = jnp.mean(output["int_reward"], axis=0)
@@ -67,6 +73,8 @@ class WBLogger:
             notes=self.notes,
             name=f"{self.name}_byol_loss",
         )
+        if self.pmapped:
+            output=unreplicate(output)
 
         if num_seeds > 1:
             byol_avg = jnp.mean(output["byol_loss"], axis=0)
@@ -111,6 +119,8 @@ class WBLogger:
             notes=self.notes,
             name=f"{self.name}_rl_loss",
         )
+        if self.pmapped:
+            output=unreplicate(output)
         if num_seeds > 1:
             rl_total_avg = jnp.mean(output["rl_total_loss"], axis=0)
             rl_value_avg = jnp.mean(output["rl_value_loss"], axis=0)
@@ -180,6 +190,9 @@ class WBLogger:
             notes=self.notes,
             name=f"{self.name}_rnd_loss",
         )
+    
+        if self.pmapped:
+            output=unreplicate(output)
 
         if num_seeds > 1:
             rnd_avg = jnp.mean(output["rnd_loss"], axis=0)
@@ -213,6 +226,9 @@ class WBLogger:
             notes=self.notes,
             name=f"{self.name}_fast_loss",
         )
+    
+        if self.pmapped:
+            output=unreplicate(output)
 
         if num_seeds > 1:
             fast_avg = jnp.mean(output["fast_loss"], axis=0)
@@ -246,6 +262,8 @@ class WBLogger:
             notes=self.notes,
             name=f"{self.name}_ccim_loss",
         )
+        if self.pmapped:
+            output=unreplicate(output)
 
         if num_seeds > 1:
             for_avg = jnp.mean(output["forward_loss"], axis=0)
@@ -286,7 +304,8 @@ class WBLogger:
             notes=self.notes,
             name=f"{self.name}_int_value_loss",
         )
-
+        if self.pmapped:
+            output=unreplicate(output)
         if num_seeds > 1:
             int_value_avg = jnp.mean(output["rl_int_value_loss"], axis=0)
             for loss in range(len(int_value_avg.mean(-1).mean(-1))):
@@ -323,6 +342,8 @@ class WBLogger:
             notes=self.notes,
             name=f"{self.name}_int_lambdas",
         )
+        if self.pmapped:
+            output["int_lambdas"]=output["int_lambdas"].mean(0)
 
         if num_seeds > 1:
             int_value_avg = jnp.mean(output["int_lambdas"], axis=0)
@@ -360,6 +381,9 @@ class WBLogger:
             notes=self.notes,
             name=f"{self.name}_total_reward",
         )
+
+        if self.pmapped:
+            output["total_reward"]=output["total_reward"].mean(0)
 
         if num_seeds > 1:
             total_reward_avg = jnp.mean(output["total_reward"], axis=0)
