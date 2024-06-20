@@ -363,3 +363,24 @@ def rnd_normalise_int_rewards(traj_batch, rnd_int_return_norm_params, int_gamma)
     )
     norm_int_reward = int_reward / jnp.sqrt(rnd_int_return_norm_params.var + 1e-8)
     return norm_int_reward, rnd_int_return_norm_params
+
+def process_output_general(output):
+    """
+    Process the output dictionary from the training function.
+
+    For every key that contains 'loss' or 'state', the function will unreplicate the value using Flax's unreplicate function.
+    For all other keys, it will compute the mean along axis 0.
+
+    Args:
+        output (dict): The dictionary returned by the training function, containing various metrics.
+
+    Returns:
+        dict: A processed dictionary with unreplicated or averaged values as described.
+    """
+    processed_output = {}
+    for key, value in output.items():
+        if 'loss' in key or 'state' in key:
+            processed_output[key] = unreplicate(value)
+        else:
+            processed_output[key] = jnp.mean(value, axis=0)
+    return processed_output
