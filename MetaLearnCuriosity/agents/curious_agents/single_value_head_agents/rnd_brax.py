@@ -575,6 +575,6 @@ for env_name in environments:
 
     # Get the absolute path of the directory
     path = os.path.abspath(checkpoint_directory)
-    Save(path, output)
+    # Save(path, output)
     logger.save_artifact(path)
     print(f"Done in {elapsed_time / 60:.2f}min")

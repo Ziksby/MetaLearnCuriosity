@@ -26,6 +26,18 @@ class BYOLLiteTransition(NamedTuple):
     next_obs: jnp.ndarray
     info: jnp.ndarray
 
+class RNDMiniGridTransition(NamedTuple):
+    done: jnp.ndarray
+    action: jnp.ndarray
+    value: jnp.ndarray
+    reward: jnp.ndarray
+    int_reward:jnp.ndarray
+    log_prob: jnp.ndarray
+    obs: jnp.ndarray
+    # for minigrid rnn policy
+    prev_action: jnp.ndarray
+    prev_reward: jnp.ndarray
+    info: jnp.ndarray
 
 class MiniGridTransition(NamedTuple):
     done: jnp.ndarray
