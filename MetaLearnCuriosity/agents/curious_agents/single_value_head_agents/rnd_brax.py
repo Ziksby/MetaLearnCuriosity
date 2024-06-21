@@ -1,6 +1,7 @@
 import os
 import time
 from typing import Any, NamedTuple, Sequence
+import shutil
 
 import distrax
 import flax.linen as nn
@@ -37,18 +38,18 @@ from MetaLearnCuriosity.wrappers import (
 environments = [
     "ant",
     "halfcheetah",
-    "hopper",
-    "humanoid",
-    "humanoidstandup",
-    "inverted_pendulum",
-    "inverted_double_pendulum",
-    "pusher",
-    "reacher",
-    "walker2d",
+    # "hopper",
+    # "humanoid",
+    # "humanoidstandup",
+    # "inverted_pendulum",
+    # "inverted_double_pendulum",
+    # "pusher",
+    # "reacher",
+    # "walker2d",
 ]
 
 config = {
-    "RUN_NAME": "rnd_delayed_brax_baseline",
+    "RUN_NAME": "rnd_delayed_brax_trying_",
     "SEED": 42,
     "NUM_SEEDS": 10,
     "LR": 3e-4,
@@ -188,7 +189,7 @@ def make_train(rng):
 
     pred_tx = optax.chain(
         optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
-        optax.adam(config["PRED_LR"], eps=1e-5),
+        optax.adam(pred_linear_schedule, eps=1e-5),
     )
 
     predictor_state = TrainState.create(apply_fn=predictor.apply, params=pred_params, tx=pred_tx)
@@ -566,15 +567,17 @@ for env_name in environments:
     output = process_output_general(output)
 
     logger.log_episode_return(output, config["NUM_SEEDS"])
-    logger.log_rl_losses(output, config["NUM_SEEDS"])
-    logger.log_rnd_losses(output, config["NUM_SEEDS"])
-    logger.log_int_rewards(output, config["NUM_SEEDS"])
-    logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
-    output["config"] = config
-    checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
+    # logger.log_rl_losses(output, config["NUM_SEEDS"])
+    # logger.log_rnd_losses(output, config["NUM_SEEDS"])
+    # logger.log_int_rewards(output, config["NUM_SEEDS"])
+    # logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
+    # output["config"] = config
+    # checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
-    # Get the absolute path of the directory
-    path = os.path.abspath(checkpoint_directory)
+    # # Get the absolute path of the directory
+    # path = os.path.abspath(checkpoint_directory)
     # Save(path, output)
-    logger.save_artifact(path)
-    print(f"Done in {elapsed_time / 60:.2f}min")
+    # logger.save_artifact(path)
+    # shutil.rmtree(path)
+    # print(f"Deleted local checkpoint directory: {path}")
+    # print(f"Done in {elapsed_time / 60:.2f}min")

@@ -2,7 +2,7 @@
 # https://github.com/corl-team/xland-minigrid/blob/main/training/nn.py
 
 import math
-from typing import TypedDict
+from typing import TypedDict, Sequence
 
 import distrax
 import flax
@@ -111,7 +111,7 @@ class MiniGridActorCriticRNN(nn.Module):
                     nn.relu,
                 ]
             )
-            obs_emb = mlp_encoder(inputs["observation"]).reshape(B, S, -1)
+            obs_emb = mlp_encoder(inputs["observation"])
         action_encoder = nn.Embed(self.num_actions, self.action_emb_dim)
 
         rnn_core = MiniGridBatchedRNNModel(self.rnn_hidden_dim, self.rnn_num_layers)
@@ -176,3 +176,43 @@ class TemporalRewardCombiner(nn.Module):
         int_lambda = nn.tanh(int_lambda)
 
         return jnp.squeeze(int_lambda, axis=-1)
+
+class TargetNetwork(nn.Module):
+    encoder_layer_out_shape: Sequence[int]
+
+    @nn.compact
+    def __call__(self, x):
+        encoded_obs = nn.Dense(
+            self.encoder_layer_out_shape
+        )(x)
+        encoded_obs = nn.relu(encoded_obs)
+        encoded_obs = nn.Dense(
+            self.encoder_layer_out_shape
+        )(encoded_obs)
+        encoded_obs = nn.relu(encoded_obs)
+        encoded_obs = nn.Dense(
+            self.encoder_layer_out_shape
+        )(encoded_obs)
+
+        return encoded_obs
+
+
+class PredictorNetwork(nn.Module):
+    encoder_layer_out_shape: Sequence[int]
+
+    @nn.compact
+    def __call__(self, x):
+        encoded_obs = nn.Dense(
+            self.encoder_layer_out_shape
+        )(x)
+        encoded_obs = nn.relu(encoded_obs)
+        encoded_obs = nn.Dense(
+            self.encoder_layer_out_shape
+        )(encoded_obs)
+        encoded_obs = nn.relu(encoded_obs)
+        encoded_obs = nn.Dense(
+            self.encoder_layer_out_shape
+        )(encoded_obs)
+
+
+        return encoded_obs
