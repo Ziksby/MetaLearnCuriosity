@@ -9,8 +9,8 @@ wandb/
 MLC_logs/
 # Ignore Hyperparameters
 MetaLearnCuriosity/agents/hyperparameter_versions/
-# Ignore notebooks
-*.ipynb
+# # Ignore notebooks
+# *.ipynb
 # Ignore get-pip.py
 get-pip.py
 # Ignore tpu_curiosax

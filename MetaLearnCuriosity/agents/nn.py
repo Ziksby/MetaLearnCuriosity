@@ -189,10 +189,10 @@ class TargetNetwork(nn.Module):
         encoded_obs = nn.Dense(
             self.encoder_layer_out_shape
         )(encoded_obs)
-        encoded_obs = nn.relu(encoded_obs)
-        encoded_obs = nn.Dense(
-            self.encoder_layer_out_shape
-        )(encoded_obs)
+        # encoded_obs = nn.relu(encoded_obs)
+        # encoded_obs = nn.Dense(
+        #     self.encoder_layer_out_shape
+        # )(encoded_obs)
 
         return encoded_obs
 
