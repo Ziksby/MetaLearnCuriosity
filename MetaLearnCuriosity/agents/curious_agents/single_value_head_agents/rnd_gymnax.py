@@ -1,16 +1,16 @@
 import os
+import shutil
 import time
-from typing import Any, NamedTuple, Sequence
+from typing import Sequence
 
 import distrax
 import flax.linen as nn
 import gymnax
 import jax
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
 import numpy as np
 import optax
-from flax.jax_utils import replicate, unreplicate
+from flax.jax_utils import replicate
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 
@@ -153,13 +153,13 @@ def ppo_make_train(rng):
         )
         return config["LR"] * frac
 
-    def pred_linear_schedule(count):
-        frac = (
-            1.0
-            - (count // (config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"]))
-            / config["NUM_UPDATES"]
-        )
-        return config["PRED_LR"] * frac
+    # def pred_linear_schedule(count):
+    #     frac = (
+    #         1.0
+    #         - (count // (config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"]))
+    #         / config["NUM_UPDATES"]
+    #     )
+    #     return config["PRED_LR"] * frac
 
     # INIT NETWORKS
     network = PPOActorCritic(env.action_space(env_params).n, activation=config["ACTIVATION"])
@@ -527,12 +527,13 @@ def train(rng, train_state, pred_state, target_params, init_obs_rng):
         "rnd_loss": rl_total_loss[1][3],
     }
 
-optimal_lambdas=[0.1,0.3,0.3,0.008]
+
+optimal_lambdas = [0.1, 0.5, 0.03, 0.05]
 for env_name, lambdas in zip(environments, optimal_lambdas):
     rng = jax.random.PRNGKey(config["SEED"])
     t = time.time()
     config, env, env_params = make_config_env(config, env_name)
-    config["INT_LAMBDA"]=lambdas
+    config["INT_LAMBDA"] = lambdas
 
     if config["NUM_SEEDS"] > 1:
         rng = jax.random.split(rng, config["NUM_SEEDS"])
@@ -570,11 +571,11 @@ for env_name, lambdas in zip(environments, optimal_lambdas):
     )
     output = process_output_general(output)
 
+    logger.log_rnd_losses(output, config["NUM_SEEDS"])
     logger.log_episode_return(output, config["NUM_SEEDS"])
     logger.log_rl_losses(output, config["NUM_SEEDS"])
-    logger.log_rnd_losses(output,config["NUM_SEEDS"])
-    logger.log_int_rewards(output,config["NUM_SEEDS"])
-    logger.log_norm_int_rewards(output,config["NUM_SEEDS"])
+    logger.log_int_rewards(output, config["NUM_SEEDS"])
+    logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
     output["config"] = config
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
@@ -582,5 +583,6 @@ for env_name, lambdas in zip(environments, optimal_lambdas):
     path = os.path.abspath(checkpoint_directory)
     Save(path, output)
     logger.save_artifact(path)
+    shutil.rmtree(path)
+    print(f"Deleted local checkpoint directory: {path}")
     print(f"Done in {elapsed_time / 60:.2f}min")
-    print(output["metrics"]["returned_episode_returns"].shape)
