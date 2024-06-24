@@ -1,9 +1,11 @@
-from typing import NamedTuple,Optional
+from typing import NamedTuple, Optional
 
 import jax
 import jax.numpy as jnp
 from flax import struct
+from flax.jax_utils import replicate, unreplicate
 from flax.training.train_state import TrainState
+
 
 class RNDTransition(NamedTuple):
     done: jnp.ndarray
@@ -14,6 +16,7 @@ class RNDTransition(NamedTuple):
     log_prob: jnp.ndarray
     obs: jnp.ndarray
     info: jnp.ndarray
+
 
 class BYOLLiteTransition(NamedTuple):
     done: jnp.ndarray
@@ -26,18 +29,20 @@ class BYOLLiteTransition(NamedTuple):
     next_obs: jnp.ndarray
     info: jnp.ndarray
 
+
 class RNDMiniGridTransition(NamedTuple):
     done: jnp.ndarray
     action: jnp.ndarray
     value: jnp.ndarray
     reward: jnp.ndarray
-    int_reward:jnp.ndarray
+    int_reward: jnp.ndarray
     log_prob: jnp.ndarray
     obs: jnp.ndarray
     # for minigrid rnn policy
     prev_action: jnp.ndarray
     prev_reward: jnp.ndarray
     info: jnp.ndarray
+
 
 class MiniGridTransition(NamedTuple):
     done: jnp.ndarray
@@ -61,13 +66,16 @@ class PPOTransition(NamedTuple):
     obs: jnp.ndarray
     info: jnp.ndarray
 
+
 class RandomTransition(NamedTuple):
     obs: jnp.ndarray
+
 
 class ObsNormParams(NamedTuple):
     count: float
     mean: jnp.ndarray
     var: jnp.ndarray
+
 
 class RNDNormIntReturnParams(NamedTuple):
     count: float
@@ -100,7 +108,7 @@ def calculate_gae(
 
 
 # Get dummy data for Obs Norm
-def make_obs_gymnax_discrete(num_envs, env, env_params,num_steps):
+def make_obs_gymnax_discrete(num_envs, env, env_params, num_steps):
     def random_rollout(rng, env_params=env_params):
         """Rollout a jitted gymnax episode with lax.scan."""
         # Reset the environment
@@ -120,9 +128,7 @@ def make_obs_gymnax_discrete(num_envs, env, env_params,num_steps):
             # STEP ENV
             rng, _rng = jax.random.split(rng)
             rng_step = jax.random.split(_rng, num_envs)
-            obsv, env_state, reward, done, info = env.step(
-                rng_step, env_state, action, env_params
-            )
+            obsv, env_state, reward, done, info = env.step(rng_step, env_state, action, env_params)
             transition = RandomTransition(last_obs)
             runner_state = (env_state, obsv, rng)
             return runner_state, transition
@@ -134,6 +140,7 @@ def make_obs_gymnax_discrete(num_envs, env, env_params,num_steps):
         return traj_batch.obs
 
     return random_rollout
+
 
 def update_obs_norm_params(obs_norm_params, obs):
 
@@ -153,7 +160,8 @@ def update_obs_norm_params(obs_norm_params, obs):
 
     return ObsNormParams(new_count, new_mean, new_var)
 
-def update_rnd_int_norm_params(batch_count,batch_mean,batch_var,rewems,rnd_int_norm_params):
+
+def update_rnd_int_norm_params(batch_count, batch_mean, batch_var, rewems, rnd_int_norm_params):
 
     delta = batch_mean - rnd_int_norm_params.mean
     tot_count = rnd_int_norm_params.count + batch_count
@@ -331,6 +339,7 @@ def lifetime_return(life_rewards, lifetime_gamma, reverse=True):
     )
     return single_return
 
+
 def rnd_normalise_int_rewards(traj_batch, rnd_int_return_norm_params, int_gamma):
     def _multiply_rewems_w_dones(rewems, dones_row):
         rewems = rewems * (1 - dones_row)
@@ -347,29 +356,30 @@ def rnd_normalise_int_rewards(traj_batch, rnd_int_return_norm_params, int_gamma)
     int_reward_transpose = jnp.transpose(int_reward)
 
     rewems, _ = jax.lax.scan(
-        _multiply_rewems_w_dones, rnd_int_return_norm_params.rewems, jnp.transpose(traj_batch.done) # Shape (num_envs,num_steps)
+        _multiply_rewems_w_dones,
+        rnd_int_return_norm_params.rewems,
+        jnp.transpose(traj_batch.done),  # Shape (num_envs,num_steps)
     )
 
-    rewems, _ = jax.lax.scan(
-        _update_rewems, rewems, int_reward_transpose
-    )
+    rewems, _ = jax.lax.scan(_update_rewems, rewems, int_reward_transpose)
 
     batch_count = len(rewems)
     batch_mean = rewems.mean()
     batch_var = jnp.var(rewems)
 
     rnd_int_return_norm_params = update_rnd_int_norm_params(
-        batch_count,batch_mean,batch_var, rewems, rnd_int_return_norm_params 
+        batch_count, batch_mean, batch_var, rewems, rnd_int_return_norm_params
     )
     norm_int_reward = int_reward / jnp.sqrt(rnd_int_return_norm_params.var + 1e-8)
     return norm_int_reward, rnd_int_return_norm_params
+
 
 def process_output_general(output):
     """
     Process the output dictionary from the training function.
 
     For every key that contains 'loss' or 'state', the function will unreplicate the value using Flax's unreplicate function.
-    For all other keys, it will compute the mean along axis 0.
+    For all other keys, it will compute the mean along axis 0. If the value is a nested dictionary, it will recursively process it.
 
     Args:
         output (dict): The dictionary returned by the training function, containing various metrics.
@@ -377,10 +387,16 @@ def process_output_general(output):
     Returns:
         dict: A processed dictionary with unreplicated or averaged values as described.
     """
+    def process_value(value):
+        if isinstance(value, dict):
+            return {k: process_value(v) for k, v in value.items()}
+        else:
+            return jnp.mean(value, axis=0)
+
     processed_output = {}
     for key, value in output.items():
-        if 'loss' in key or 'state' in key:
+        if "loss" in key or "state" in key:
             processed_output[key] = unreplicate(value)
         else:
-            processed_output[key] = jnp.mean(value, axis=0)
+            processed_output[key] = process_value(value)
     return processed_output

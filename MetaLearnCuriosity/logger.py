@@ -74,7 +74,9 @@ class WBLogger:
             self.episode_norm_int_rewards.finish()
         else:
             for returns in output["norm_int_reward"].mean(-1).reshape(-1):
-                self.episode_norm_int_rewards.log({f"norm_int_rewards_{self.config['ENV_NAME']}": returns})
+                self.episode_norm_int_rewards.log(
+                    {f"norm_int_rewards_{self.config['ENV_NAME']}": returns}
+                )
             self.episode_norm_int_rewards.finish()
 
     def log_byol_losses(self, output, num_seeds):

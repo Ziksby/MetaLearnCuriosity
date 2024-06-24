@@ -2,7 +2,7 @@
 # https://github.com/corl-team/xland-minigrid/blob/main/training/nn.py
 
 import math
-from typing import TypedDict, Sequence
+from typing import Sequence, TypedDict
 
 import distrax
 import flax
@@ -177,18 +177,15 @@ class TemporalRewardCombiner(nn.Module):
 
         return jnp.squeeze(int_lambda, axis=-1)
 
+
 class TargetNetwork(nn.Module):
     encoder_layer_out_shape: Sequence[int]
 
     @nn.compact
     def __call__(self, x):
-        encoded_obs = nn.Dense(
-            self.encoder_layer_out_shape
-        )(x)
+        encoded_obs = nn.Dense(self.encoder_layer_out_shape)(x)
         encoded_obs = nn.relu(encoded_obs)
-        encoded_obs = nn.Dense(
-            self.encoder_layer_out_shape
-        )(encoded_obs)
+        encoded_obs = nn.Dense(self.encoder_layer_out_shape)(encoded_obs)
         # encoded_obs = nn.relu(encoded_obs)
         # encoded_obs = nn.Dense(
         #     self.encoder_layer_out_shape
@@ -202,17 +199,10 @@ class PredictorNetwork(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        encoded_obs = nn.Dense(
-            self.encoder_layer_out_shape
-        )(x)
+        encoded_obs = nn.Dense(self.encoder_layer_out_shape)(x)
         encoded_obs = nn.relu(encoded_obs)
-        encoded_obs = nn.Dense(
-            self.encoder_layer_out_shape
-        )(encoded_obs)
+        encoded_obs = nn.Dense(self.encoder_layer_out_shape)(encoded_obs)
         encoded_obs = nn.relu(encoded_obs)
-        encoded_obs = nn.Dense(
-            self.encoder_layer_out_shape
-        )(encoded_obs)
-
+        encoded_obs = nn.Dense(self.encoder_layer_out_shape)(encoded_obs)
 
         return encoded_obs
