@@ -12,7 +12,7 @@ import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.training.train_state import TrainState
 
-from MetaLearnCuriosity.agents.nn import MiniGridActorCriticRNN
+from MetaLearnCuriosity.agents.nn import MiniGridActorCriticRNN,TargetNetwork,PredictorNetwork
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import RNDMiniGridTransition
@@ -54,10 +54,10 @@ environments = [
 config = {
     "NUM_SEEDS": 10,
     "PROJECT": "MetaLearnCuriosity",
-    "RUN_NAME": "minigrid-ppo-baseline_w_cnns",
+    "RUN_NAME": "rnd_minigrid",
     "BENCHMARK_ID": None,
     "RULESET_ID": None,
-    "USE_CNNS": True,
+    "USE_CNNS": False,
     # Agent
     "ACTION_EMB_DIM": 16,
     "RNN_HIDDEN_DIM": 1024,
@@ -73,6 +73,7 @@ config = {
     "PRED_LR":1e-3,
     "CLIP_EPS": 0.2,
     "GAMMA": 0.99,
+    "INT_GAMMA":0.99,
     "GAE_LAMBDA": 0.95,
     "ENT_COEF": 0.01,
     "VF_COEF": 0.5,
@@ -94,8 +95,10 @@ def make_env_config(config, env_name):
     else:
         env = FlattenObservationWrapper(env)
         observations_shape = env.observation_space(env_params).shape
+    print(observations_shape)
     env_eval = LogWrapper(env_eval)
     env = LogWrapper(env)
+    env=VecEnv(env)
     num_devices = jax.local_device_count()
     config["NUM_ENVS_PER_DEVICE"] = config["NUM_ENVS"] // num_devices
     config["TOTAL_TIMESTEPS_PER_DEVICE"] = config["TOTAL_TIMESTEPS"] // num_devices
@@ -200,7 +203,7 @@ def train(rng, init_hstate, train_state,pred_state, target_params, init_obs_rng)
 
     reset_rng = jax.random.split(_rng, config["NUM_ENVS_PER_DEVICE"])
 
-    obsv, env_state = jax.vmap(env.reset, in_axes=(0, None))(reset_rng, env_params)
+    obsv, env_state = env.reset(reset_rng, env_params)
     prev_action = jnp.zeros(config["NUM_ENVS_PER_DEVICE"], dtype=jnp.int32)
     prev_reward = jnp.zeros(config["NUM_ENVS_PER_DEVICE"])
 
@@ -243,17 +246,18 @@ def train(rng, init_hstate, train_state,pred_state, target_params, init_obs_rng)
 
             # STEP ENV
             rng_step = jax.random.split(rng, config["NUM_ENVS_PER_DEVICE"])
-            obsv, env_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None))(
+            obsv, env_state, reward, done, info = env.step(
                 rng_step, env_state, action, env_params
             )
             # NORM THE OBS
-            rnd_obs = ((obsv - obs_norm_params.mean) / jnp.sqrt(obs_norm_params.var)).clip(-5, 5)
+            rnd_obs = ((obsv - obs_norm_params.mean) / jnp.sqrt(obs_norm_params.var)).clip(-5, 5)     
+
+
 
             # INT REWARD
             tar_feat = target.apply(target_params, rnd_obs)
             pred_feat = pred_state.apply_fn(pred_state.params, rnd_obs)
             int_reward = jnp.square(jnp.linalg.norm((pred_feat - tar_feat), axis=1)) / 2
-
             transition = RNDMiniGridTransition(
                 done=done,
                 action=action,
@@ -286,14 +290,15 @@ def train(rng, init_hstate, train_state,pred_state, target_params, init_obs_rng)
             hstate,
         )
 
-        advantages, targets, norm_int_rewards, rnd_int_return_norm_params = rnd_calculate_gae(
-            transitions, last_val.squeeze(1), config["GAMMA"], config["GAE_LAMBDA"], rnd_int_return_norm_params
+        advantages, targets, rnd_int_return_norm_params,norm_int_rewards = rnd_calculate_gae(
+            transitions, last_val.squeeze(1), config["GAMMA"], config["INT_GAMMA"],config["GAE_LAMBDA"], config["INT_LAMBDA"], rnd_int_return_norm_params
         )
 
         # UPDATE NETWORK
         def _update_epoch(update_state, _):
-            def _update_minbatch(train_state, batch_info):
+            def _update_minbatch(train_states, batch_info):
                 init_hstate, transitions, advantages, targets, rnd_obs = batch_info
+                train_state,pred_state=train_states
                 (new_train_state,pred_state), update_info = rnd_minigrid_ppo_update_networks(
                     train_state=train_state,
                     pred_state=pred_state,
@@ -316,11 +321,11 @@ def train(rng, init_hstate, train_state,pred_state, target_params, init_obs_rng)
             # MINIBATCHES PREPARATION
             # UPDATE OBS NORM PARAMETERS
             obs_norm_params = update_obs_norm_params(
-                obs_norm_params, traj_batch.obs.reshape(-1, init_obs.shape[-1])
+                obs_norm_params, transitions.obs.reshape(-1, init_obs.shape[-1])
             )
             # GET RND OBS
             rnd_obs = (
-                (traj_batch.obs - obs_norm_params.mean) / jnp.sqrt(obs_norm_params.var)
+                (transitions.obs - obs_norm_params.mean) / jnp.sqrt(obs_norm_params.var)
             ).clip(-5, 5)
 
             rng, _rng = jax.random.split(rng)
@@ -376,7 +381,8 @@ def train(rng, init_hstate, train_state,pred_state, target_params, init_obs_rng)
         #     }
         # )
 
-        rng, train_state,pred_state,obs_norm_params,traj_batch = update_state[:5]
+        rng, train_state,pred_state,obs_norm_params= update_state[:4]
+        traj_batch=update_state[5]
         metric = traj_batch.info
         runner_state = (rng, train_state, pred_state,target_params, obs_norm_params, rnd_int_return_norm_params, env_state, prev_obs, prev_action, prev_reward, hstate)
         return runner_state, (metric, loss_info, traj_batch.int_reward,norm_int_rewards)
@@ -407,7 +413,9 @@ for env_name in environments:
 
     if config["NUM_SEEDS"] > 1:
         rng = jax.random.split(rng, config["NUM_SEEDS"])
-        init_hstate, train_state, pred_state,target_params,rng,init_obs_rng = jax.jit(jax.vmap(make_train, out_axes=(0, 0, 0,0,1,0)))(rng)
+        init_hstate, train_state, pred_state, target_params, rng, init_obs_rng = jax.jit(
+            jax.vmap(make_train, out_axes=(0, 0, 0, 0, 1, 0))
+        )(rng)
         init_hstate = replicate(init_hstate, jax.local_devices())
         train_state = replicate(train_state, jax.local_devices())
         pred_state = replicate(pred_state, jax.local_devices())
@@ -417,12 +425,13 @@ for env_name in environments:
         train_fn = jax.pmap(train_fn, axis_name="devices")
         print(f"Training in {config['ENV_NAME']}")
         t = time.time()
-        output = jax.block_until_ready(train_fn(rng, init_hstate, train_state,pred_state,target_params,init_obs_rng))
+        output = jax.block_until_ready(
+            train_fn(rng, init_hstate, train_state, pred_state, target_params, init_obs_rng)
+        )
         elapsed_time = time.time() - t
 
-
     else:
-        init_hstate, train_state, pred_state,target_params,rng,init_obs_rng  = make_train(rng)
+        init_hstate, train_state, pred_state, target_params, rng, init_obs_rng = make_train(rng)
         train_state = replicate(train_state, jax.local_devices())
         init_hstate = replicate(init_hstate, jax.local_devices())
         pred_state = replicate(pred_state, jax.local_devices())
@@ -432,7 +441,6 @@ for env_name in environments:
         output = jax.block_until_ready(train_fn(rng, init_hstate, train_state))
 
     output = process_output_general(output)
-
 
     logger = WBLogger(
         config=config,
