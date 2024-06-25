@@ -12,22 +12,24 @@ import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.training.train_state import TrainState
 
-from MetaLearnCuriosity.agents.nn import MiniGridActorCriticRNN,TargetNetwork,PredictorNetwork
+from MetaLearnCuriosity.agents.nn import (
+    MiniGridActorCriticRNN,
+    PredictorNetwork,
+    TargetNetwork,
+)
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
-from MetaLearnCuriosity.utils import RNDMiniGridTransition
-from MetaLearnCuriosity.utils import (
-    rnd_calculate_gae,
-    rnd_minigrid_ppo_update_networks,
-    rnn_rollout,
-)
 from MetaLearnCuriosity.utils import (
     ObsNormParams,
+    RNDMiniGridTransition,
     RNDNormIntReturnParams,
     RNDTransition,
     make_obs_gymnax_discrete,
     process_output_general,
+    rnd_calculate_gae,
+    rnd_minigrid_ppo_update_networks,
     rnd_normalise_int_rewards,
+    rnn_rollout,
     update_obs_norm_params,
 )
 from MetaLearnCuriosity.wrappers import (
@@ -70,10 +72,10 @@ config = {
     "NUM_MINIBATCHES": 16,
     "TOTAL_TIMESTEPS": 50_000_000,
     "LR": 0.001,
-    "PRED_LR":1e-3,
+    "PRED_LR": 1e-3,
     "CLIP_EPS": 0.2,
     "GAMMA": 0.99,
-    "INT_GAMMA":0.99,
+    "INT_GAMMA": 0.99,
     "GAE_LAMBDA": 0.95,
     "ENT_COEF": 0.01,
     "VF_COEF": 0.5,
@@ -98,7 +100,7 @@ def make_env_config(config, env_name):
     print(observations_shape)
     env_eval = LogWrapper(env_eval)
     env = LogWrapper(env)
-    env=VecEnv(env)
+    env = VecEnv(env)
     num_devices = jax.local_device_count()
     config["NUM_ENVS_PER_DEVICE"] = config["NUM_ENVS"] // num_devices
     config["TOTAL_TIMESTEPS_PER_DEVICE"] = config["TOTAL_TIMESTEPS"] // num_devices
@@ -127,7 +129,6 @@ def make_train(rng):
             / config["NUM_UPDATES"]
         )
         return config["LR"] * frac
-    
 
     def pred_linear_schedule(count):
         frac = (
@@ -136,7 +137,7 @@ def make_train(rng):
             / config["NUM_UPDATES"]
         )
         return config["PRED_LR"] * frac
-    
+
     network = MiniGridActorCriticRNN(
         num_actions=num_actions,
         action_emb_dim=config["ACTION_EMB_DIM"],
@@ -173,15 +174,13 @@ def make_train(rng):
 
     rng = jax.random.split(rng, jax.local_device_count())
 
-    return init_hstate, train_state, pred_state,target_params,rng,_init_obs_rng
+    return init_hstate, train_state, pred_state, target_params, rng, _init_obs_rng
 
 
-def train(rng, init_hstate, train_state,pred_state, target_params, init_obs_rng):
+def train(rng, init_hstate, train_state, pred_state, target_params, init_obs_rng):
 
     # INIT OBS NORM PARAMS:
-    random_rollout = make_obs_gymnax_discrete(
-        config["NUM_ENVS_PER_DEVICE"], env, env_params, 1
-    )
+    random_rollout = make_obs_gymnax_discrete(config["NUM_ENVS_PER_DEVICE"], env, env_params, 1)
     # Obs will be in shape: num_steps, num_envs, obs.shape
     init_obs = random_rollout(init_obs_rng)
     init_obs = init_obs.reshape(
@@ -246,13 +245,9 @@ def train(rng, init_hstate, train_state,pred_state, target_params, init_obs_rng)
 
             # STEP ENV
             rng_step = jax.random.split(rng, config["NUM_ENVS_PER_DEVICE"])
-            obsv, env_state, reward, done, info = env.step(
-                rng_step, env_state, action, env_params
-            )
+            obsv, env_state, reward, done, info = env.step(rng_step, env_state, action, env_params)
             # NORM THE OBS
-            rnd_obs = ((obsv - obs_norm_params.mean) / jnp.sqrt(obs_norm_params.var)).clip(-5, 5)     
-
-
+            rnd_obs = ((obsv - obs_norm_params.mean) / jnp.sqrt(obs_norm_params.var)).clip(-5, 5)
 
             # INT REWARD
             tar_feat = target.apply(target_params, rnd_obs)
@@ -270,7 +265,19 @@ def train(rng, init_hstate, train_state,pred_state, target_params, init_obs_rng)
                 prev_reward=prev_reward,
                 info=info,
             )
-            runner_state = (rng, train_state, pred_state, target_params, obs_norm_params, rnd_int_return_norm_params, env_state, obsv, action, reward, hstate)
+            runner_state = (
+                rng,
+                train_state,
+                pred_state,
+                target_params,
+                obs_norm_params,
+                rnd_int_return_norm_params,
+                env_state,
+                obsv,
+                action,
+                reward,
+                hstate,
+            )
             return runner_state, transition
 
         initial_hstate = runner_state[-1]
@@ -278,7 +285,19 @@ def train(rng, init_hstate, train_state,pred_state, target_params, init_obs_rng)
 
         # CALCULATE ADVANTAGE
 
-        rng, train_state, pred_state, target_params, obs_norm_params, rnd_int_return_norm_params, env_state, prev_obs, prev_action, prev_reward, hstate = runner_state
+        (
+            rng,
+            train_state,
+            pred_state,
+            target_params,
+            obs_norm_params,
+            rnd_int_return_norm_params,
+            env_state,
+            prev_obs,
+            prev_action,
+            prev_reward,
+            hstate,
+        ) = runner_state
 
         _, last_val, _ = train_state.apply_fn(
             train_state.params,
@@ -290,16 +309,22 @@ def train(rng, init_hstate, train_state,pred_state, target_params, init_obs_rng)
             hstate,
         )
 
-        advantages, targets, rnd_int_return_norm_params,norm_int_rewards = rnd_calculate_gae(
-            transitions, last_val.squeeze(1), config["GAMMA"], config["INT_GAMMA"],config["GAE_LAMBDA"], config["INT_LAMBDA"], rnd_int_return_norm_params
+        advantages, targets, rnd_int_return_norm_params, norm_int_rewards = rnd_calculate_gae(
+            transitions,
+            last_val.squeeze(1),
+            config["GAMMA"],
+            config["INT_GAMMA"],
+            config["GAE_LAMBDA"],
+            config["INT_LAMBDA"],
+            rnd_int_return_norm_params,
         )
 
         # UPDATE NETWORK
         def _update_epoch(update_state, _):
             def _update_minbatch(train_states, batch_info):
                 init_hstate, transitions, advantages, targets, rnd_obs = batch_info
-                train_state,pred_state=train_states
-                (new_train_state,pred_state), update_info = rnd_minigrid_ppo_update_networks(
+                train_state, pred_state = train_states
+                (new_train_state, pred_state), update_info = rnd_minigrid_ppo_update_networks(
                     train_state=train_state,
                     pred_state=pred_state,
                     target_params=target_params,
@@ -314,9 +339,18 @@ def train(rng, init_hstate, train_state,pred_state, target_params, init_obs_rng)
                     vf_coef=config["VF_COEF"],
                     ent_coef=config["ENT_COEF"],
                 )
-                return (new_train_state,pred_state), update_info
+                return (new_train_state, pred_state), update_info
 
-            rng, train_state,pred_state,obs_norm_params, init_hstate, transitions, advantages, targets = update_state
+            (
+                rng,
+                train_state,
+                pred_state,
+                obs_norm_params,
+                init_hstate,
+                transitions,
+                advantages,
+                targets,
+            ) = update_state
 
             # MINIBATCHES PREPARATION
             # UPDATE OBS NORM PARAMETERS
@@ -333,7 +367,7 @@ def train(rng, init_hstate, train_state,pred_state, target_params, init_obs_rng)
 
             permutation = jax.random.permutation(_rng, config["NUM_ENVS_PER_DEVICE"])
             # [seq_len, batch_size, ...]
-            batch = (init_hstate, transitions, advantages, targets,rnd_obs)
+            batch = (init_hstate, transitions, advantages, targets, rnd_obs)
             # [batch_size, seq_len, ...], as our model assumes
             batch = jtu.tree_map(lambda x: x.swapaxes(0, 1), batch)
 
@@ -343,14 +377,34 @@ def train(rng, init_hstate, train_state,pred_state, target_params, init_obs_rng)
                 lambda x: jnp.reshape(x, (config["NUM_MINIBATCHES"], -1) + x.shape[1:]),
                 shuffled_batch,
             )
-            (train_state,pred_state) ,update_info = jax.lax.scan(_update_minbatch, (train_state,pred_state) ,minibatches)
+            (train_state, pred_state), update_info = jax.lax.scan(
+                _update_minbatch, (train_state, pred_state), minibatches
+            )
 
-            update_state = (rng, train_state, pred_state,obs_norm_params,init_hstate, transitions, advantages, targets)
+            update_state = (
+                rng,
+                train_state,
+                pred_state,
+                obs_norm_params,
+                init_hstate,
+                transitions,
+                advantages,
+                targets,
+            )
             return update_state, update_info
 
         # [seq_len, batch_size, num_layers, hidden_dim]
         init_hstate = initial_hstate[None, :]
-        update_state = (rng, train_state, pred_state,obs_norm_params,init_hstate, transitions, advantages, targets)
+        update_state = (
+            rng,
+            train_state,
+            pred_state,
+            obs_norm_params,
+            init_hstate,
+            transitions,
+            advantages,
+            targets,
+        )
         update_state, loss_info = jax.lax.scan(
             _update_epoch, update_state, None, config["UPDATE_EPOCHS"]
         )
@@ -381,13 +435,37 @@ def train(rng, init_hstate, train_state,pred_state, target_params, init_obs_rng)
         #     }
         # )
 
-        rng, train_state,pred_state,obs_norm_params= update_state[:4]
-        traj_batch=update_state[5]
+        rng, train_state, pred_state, obs_norm_params = update_state[:4]
+        traj_batch = update_state[5]
         metric = traj_batch.info
-        runner_state = (rng, train_state, pred_state,target_params, obs_norm_params, rnd_int_return_norm_params, env_state, prev_obs, prev_action, prev_reward, hstate)
-        return runner_state, (metric, loss_info, traj_batch.int_reward,norm_int_rewards)
+        runner_state = (
+            rng,
+            train_state,
+            pred_state,
+            target_params,
+            obs_norm_params,
+            rnd_int_return_norm_params,
+            env_state,
+            prev_obs,
+            prev_action,
+            prev_reward,
+            hstate,
+        )
+        return runner_state, (metric, loss_info, traj_batch.int_reward, norm_int_rewards)
 
-    runner_state = (rng, train_state,pred_state, target_params, obs_norm_params, rnd_int_return_norm_params, env_state, obsv, prev_action, prev_reward, init_hstate)
+    runner_state = (
+        rng,
+        train_state,
+        pred_state,
+        target_params,
+        obs_norm_params,
+        rnd_int_return_norm_params,
+        env_state,
+        obsv,
+        prev_action,
+        prev_reward,
+        init_hstate,
+    )
     runner_state, loss_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
     metric, loss, int_reward, norm_int_reward = loss_info
     return {
@@ -395,12 +473,12 @@ def train(rng, init_hstate, train_state,pred_state, target_params, init_obs_rng)
         "metrics": metric,
         "loss_info": loss,
         "norm_int_reward": norm_int_reward,
-        "int_reward":int_reward,
+        "int_reward": int_reward,
         "rl_total_loss": loss["total_loss"],
         "rl_value_loss": loss["value_loss"],
         "rl_actor_loss": loss["actor_loss"],
         "rl_entrophy_loss": loss["entropy"],
-        "rnd_loss": loss["rnd_loss"]
+        "rnd_loss": loss["rnd_loss"],
     }
 
 
