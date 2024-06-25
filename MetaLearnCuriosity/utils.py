@@ -307,10 +307,9 @@ def rnd_minigrid_ppo_update_networks(
     target = TargetNetwork(256)
 
     def _rnd_loss(pred_params, rnd_obs):
-        tar_feat = target.apply(target_params, rnd_obs)
-        pred_feat = pred_state.apply_fn(pred_params, rnd_obs)
+        tar_feat = target.apply(target_params, rnd_obs.reshape(-1, rnd_obs.shape[-1]))
+        pred_feat = pred_state.apply_fn(pred_params, rnd_obs.reshape(-1, rnd_obs.shape[-1]))
         loss = jnp.square(jnp.linalg.norm((pred_feat - tar_feat), axis=1)) / 2
-
         mask = jax.random.uniform(_mask_rng, (loss.shape[0],))
         mask = (mask < update_prop).astype(jnp.float32)
         loss = loss * mask
@@ -368,7 +367,10 @@ def rnd_minigrid_ppo_update_networks(
         "entropy": entropy,
         "rnd_loss": rnd_loss,
     }
-    return train_state, pred_state, update_info
+    return (
+        train_state,
+        pred_state,
+    ), update_info
 
 
 class RolloutStats(struct.PyTreeNode):
