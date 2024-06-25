@@ -1,10 +1,12 @@
-from typing import NamedTuple, Optional
+from typing import Any, NamedTuple, Optional
 
 import jax
 import jax.numpy as jnp
 from flax import struct
 from flax.jax_utils import replicate, unreplicate
 from flax.training.train_state import TrainState
+
+from MetaLearnCuriosity.agents.nn import TargetNetwork
 
 
 class RNDTransition(NamedTuple):
@@ -105,6 +107,52 @@ def calculate_gae(
     )
     # advantages and values (Q)
     return advantages, advantages + transitions.value
+
+
+def rnd_calculate_gae(
+    transitions: MiniGridTransition,
+    last_val: jax.Array,
+    gamma: float,
+    int_gamma: float,
+    gae_lambda: float,
+    int_lambda: float,
+    rnd_int_return_norm_params: NamedTuple,
+) -> tuple[jax.Array, jax.Array]:
+    # single iteration for the loop
+
+    norm_int_reward, rnd_int_return_norm_params = rnd_normalise_int_rewards(
+        transitions, rnd_int_return_norm_params, int_gamma
+    )
+
+    norm_traj_batch = RNDTransition(
+        transitions.done,
+        transitions.action,
+        transitions.value,
+        transitions.reward,
+        norm_int_reward,
+        transitions.log_prob,
+        transitions.obs,
+        transitions.info,
+    )
+
+    def _get_advantages(gae_and_next_value, transition):
+        gae, next_value = gae_and_next_value
+        delta = (
+            (transition.reward + (int_lambda * transition.int_reward))
+            + gamma * next_value * (1 - transition.done)
+            - transition.value
+        )
+        gae = delta + gamma * gae_lambda * (1 - transition.done) * gae
+        return (gae, transition.value), gae
+
+    _, advantages = jax.lax.scan(
+        _get_advantages,
+        (jnp.zeros_like(last_val), last_val),
+        norm_traj_batch,
+        reverse=True,
+    )
+    # advantages and values (Q)
+    return advantages, advantages + transitions.value, rnd_int_return_norm_params, norm_int_reward
 
 
 # Get dummy data for Obs Norm
@@ -237,6 +285,90 @@ def minigrid_ppo_update_networks(
         "entropy": entropy,
     }
     return train_state, update_info
+
+
+def rnd_minigrid_ppo_update_networks(
+    train_state: TrainState,
+    pred_state: TrainState,
+    target_params: Any,
+    _mask_rng: jnp.ndarray,
+    transitions: RNDMiniGridTransition,
+    rnd_obs: jnp.ndarray,
+    init_hstate: jax.Array,
+    advantages: jax.Array,
+    targets: jax.Array,
+    update_prop: float,
+    clip_eps: float,
+    vf_coef: float,
+    ent_coef: float,
+):
+    # NORMALIZE ADVANTAGES
+    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+    target = TargetNetwork(256)
+
+    def _rnd_loss(pred_params, rnd_obs):
+        tar_feat = target.apply(target_params, rnd_obs)
+        pred_feat = pred_state.apply_fn(pred_params, rnd_obs)
+        loss = jnp.square(jnp.linalg.norm((pred_feat - tar_feat), axis=1)) / 2
+
+        mask = jax.random.uniform(_mask_rng, (loss.shape[0],))
+        mask = (mask < update_prop).astype(jnp.float32)
+        loss = loss * mask
+
+        return loss.sum() / jnp.max(jnp.array([mask.sum(), 1]))
+
+    def _loss_fn(params):
+        # RERUN NETWORK
+        dist, value, _ = train_state.apply_fn(
+            params,
+            {
+                # [batch_size, seq_len, ...]
+                "observation": transitions.obs,
+                "prev_action": transitions.prev_action,
+                "prev_reward": transitions.prev_reward,
+            },
+            init_hstate,
+        )
+        log_prob = dist.log_prob(transitions.action)
+
+        # CALCULATE VALUE LOSS
+        value_pred_clipped = transitions.value + (value - transitions.value).clip(
+            -clip_eps, clip_eps
+        )
+        value_loss = jnp.square(value - targets)
+        value_loss_clipped = jnp.square(value_pred_clipped - targets)
+        value_loss = 0.5 * jnp.maximum(value_loss, value_loss_clipped).mean()
+        # TODO: ablate this!
+        # value_loss = jnp.square(value - targets).mean()
+
+        # CALCULATE ACTOR LOSS
+        ratio = jnp.exp(log_prob - transitions.log_prob)
+        actor_loss1 = advantages * ratio
+        actor_loss2 = advantages * jnp.clip(ratio, 1.0 - clip_eps, 1.0 + clip_eps)
+        actor_loss = -jnp.minimum(actor_loss1, actor_loss2).mean()
+        entropy = dist.entropy().mean()
+
+        total_loss = actor_loss + vf_coef * value_loss - ent_coef * entropy
+        return total_loss, (value_loss, actor_loss, entropy)
+
+    (loss, (vloss, aloss, entropy)), grads = jax.value_and_grad(_loss_fn, has_aux=True)(
+        train_state.params
+    )
+
+    rnd_loss, rnd_grads = jax.value_and_grad(_rnd_loss)(pred_state.params, rnd_obs)
+    (loss, vloss, aloss, entropy, rnd_loss, grads, rnd_grads) = jax.lax.pmean(
+        (loss, vloss, aloss, entropy, rnd_loss, grads, rnd_grads), axis_name="devices"
+    )
+    train_state = train_state.apply_gradients(grads=grads)
+    pred_state = pred_state.apply_gradients(grads=rnd_grads)
+    update_info = {
+        "total_loss": loss,
+        "value_loss": vloss,
+        "actor_loss": aloss,
+        "entropy": entropy,
+        "rnd_loss": rnd_loss,
+    }
+    return train_state, pred_state, update_info
 
 
 class RolloutStats(struct.PyTreeNode):
@@ -387,6 +519,7 @@ def process_output_general(output):
     Returns:
         dict: A processed dictionary with unreplicated or averaged values as described.
     """
+
     def process_value(value):
         if isinstance(value, dict):
             return {k: process_value(v) for k, v in value.items()}
