@@ -153,13 +153,13 @@ def ppo_make_train(rng):
         )
         return config["LR"] * frac
 
-    # def pred_linear_schedule(count):
-    #     frac = (
-    #         1.0
-    #         - (count // (config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"]))
-    #         / config["NUM_UPDATES"]
-    #     )
-    #     return config["PRED_LR"] * frac
+    def pred_linear_schedule(count):
+        frac = (
+            1.0
+            - (count // (config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"]))
+            / config["NUM_UPDATES"]
+        )
+        return config["PRED_LR"] * frac
 
     # INIT NETWORKS
     network = PPOActorCritic(env.action_space(env_params).n, activation=config["ACTIVATION"])
@@ -194,7 +194,7 @@ def ppo_make_train(rng):
 
     pred_tx = optax.chain(
         optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
-        optax.adam(config["PRED_LR"], eps=1e-5),
+        optax.adam(pred_linear_schedule, eps=1e-5),
     )
 
     predictor_state = TrainState.create(apply_fn=predictor.apply, params=pred_params, tx=pred_tx)
@@ -528,7 +528,7 @@ def train(rng, train_state, pred_state, target_params, init_obs_rng):
     }
 
 
-optimal_lambdas = [0.1, 0.5, 0.03, 0.05]
+optimal_lambdas = [0.02, 0.02, 0.02, 0.02]
 for env_name, lambdas in zip(environments, optimal_lambdas):
     rng = jax.random.PRNGKey(config["SEED"])
     t = time.time()
