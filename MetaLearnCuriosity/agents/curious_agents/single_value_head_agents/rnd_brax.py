@@ -512,7 +512,7 @@ def train(rng, train_state, pred_state, target_params, init_obs_rng):
     runner_state, extra_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
     metric, int_rewards, norm_int_rewards, rl_total_loss = extra_info
     return {
-        "train_state": runner_state[:4],
+        "train_state": runner_state[:3],
         "metrics": metric,
         "int_reward": int_rewards,
         "norm_int_reward": norm_int_rewards,
@@ -526,10 +526,10 @@ def train(rng, train_state, pred_state, target_params, init_obs_rng):
 
 for env_name in environments:
     rng = jax.random.PRNGKey(config["SEED"])
+    t = time.time()
     config, env, env_params = make_config_env(config, env_name)
     print(f"Training in {config['ENV_NAME']}")
 
-    t = time.time()
     if config["NUM_SEEDS"] > 1:
         rng = jax.random.split(rng, config["NUM_SEEDS"])
         rng, train_state, pred_state, target_params, init_rnd_obs = jax.vmap(
@@ -539,7 +539,7 @@ for env_name in environments:
         pred_state = replicate(pred_state, jax.local_devices())
         target_params = replicate(target_params, jax.local_devices())
         init_rnd_obs = replicate(init_rnd_obs, jax.local_devices())
-        train_fn = jax.vmap(train)
+        train_fn = jax.vmap(train, in_axes=(0, 0, 0, 0, 0))
         train_fn = jax.pmap(train_fn, axis_name="devices")
         output = jax.block_until_ready(
             train_fn(rng, train_state, pred_state, target_params, init_rnd_obs)
