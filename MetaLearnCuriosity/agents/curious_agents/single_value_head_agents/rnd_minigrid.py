@@ -498,7 +498,7 @@ for env_name in environments:
         train_state = replicate(train_state, jax.local_devices())
         pred_state = replicate(pred_state, jax.local_devices())
         target_params = replicate(target_params, jax.local_devices())
-        init_rnd_obs = replicate(init_rnd_obs, jax.local_devices())
+        init_obs_rng = replicate(init_obs_rng, jax.local_devices())
         train_fn = jax.vmap(train)
         train_fn = jax.pmap(train_fn, axis_name="devices")
         print(f"Training in {config['ENV_NAME']}")
@@ -514,7 +514,7 @@ for env_name in environments:
         init_hstate = replicate(init_hstate, jax.local_devices())
         pred_state = replicate(pred_state, jax.local_devices())
         target_params = replicate(target_params, jax.local_devices())
-        init_rnd_obs = replicate(init_rnd_obs, jax.local_devices())
+        init_obs_rng = replicate(init_obs_rng, jax.local_devices())
         train_fn = jax.pmap(train, axis_name="devices")
         output = jax.block_until_ready(train_fn(rng, init_hstate, train_state))
 
