@@ -2,16 +2,17 @@
 # https://github.com/corl-team/xland-minigrid/blob/main/training/train_single_task.py
 
 import os
+import shutil
 import time
 
 import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
 import optax
-import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.training.train_state import TrainState
 
+import wandb
 from MetaLearnCuriosity.agents.nn import (
     MiniGridActorCriticRNN,
     PredictorNetwork,
@@ -77,6 +78,7 @@ config = {
     "GAMMA": 0.99,
     "INT_GAMMA": 0.99,
     "GAE_LAMBDA": 0.95,
+    "INT_LAMBDA": 0.005,
     "ENT_COEF": 0.01,
     "VF_COEF": 0.5,
     "MAX_GRAD_NORM": 0.5,
@@ -483,11 +485,8 @@ def train(rng, init_hstate, train_state, pred_state, target_params, init_obs_rng
 
 
 for env_name in environments:
-
-    observations_shape, config, env, env_params = make_env_config(config, env_name)
-
-    # experiments
     rng = jax.random.PRNGKey(config["SEED"])
+    observations_shape, config, env, env_params = make_env_config(config, env_name)
 
     if config["NUM_SEEDS"] > 1:
         rng = jax.random.split(rng, config["NUM_SEEDS"])
@@ -501,7 +500,6 @@ for env_name in environments:
         init_obs_rng = replicate(init_obs_rng, jax.local_devices())
         train_fn = jax.vmap(train)
         train_fn = jax.pmap(train_fn, axis_name="devices")
-        print(f"Training in {config['ENV_NAME']}")
         t = time.time()
         output = jax.block_until_ready(
             train_fn(rng, init_hstate, train_state, pred_state, target_params, init_obs_rng)
@@ -514,20 +512,23 @@ for env_name in environments:
         init_hstate = replicate(init_hstate, jax.local_devices())
         pred_state = replicate(pred_state, jax.local_devices())
         target_params = replicate(target_params, jax.local_devices())
-        init_obs_rng = replicate(init_obs_rng, jax.local_devices())
+        init_rnd_obs = replicate(init_rnd_obs, jax.local_devices())
         train_fn = jax.pmap(train, axis_name="devices")
         output = jax.block_until_ready(train_fn(rng, init_hstate, train_state))
 
-    output = process_output_general(output)
-
     logger = WBLogger(
         config=config,
-        group="minigrid_curious",
-        tags=["minigrid", config["ENV_NAME"], "curious_baseline"],
+        group="delayed_brax_curious",
+        tags=["curious_baseline", config["ENV_NAME"], "delayed_brax"],
         name=f'{config["RUN_NAME"]}_{config["ENV_NAME"]}',
     )
+    output = process_output_general(output)
+
+    logger.log_rnd_losses(output, config["NUM_SEEDS"])
     logger.log_episode_return(output, config["NUM_SEEDS"])
-    logger.log_rl_loss_minigrid(output, config["NUM_SEEDS"])
+    logger.log_rl_losses(output, config["NUM_SEEDS"])
+    logger.log_int_rewards(output, config["NUM_SEEDS"])
+    logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
     output["config"] = config
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
@@ -535,4 +536,6 @@ for env_name in environments:
     path = os.path.abspath(checkpoint_directory)
     Save(path, output)
     logger.save_artifact(path)
+    shutil.rmtree(path)
+    print(f"Deleted local checkpoint directory: {path}")
     print(f"Done in {elapsed_time / 60:.2f}min")
