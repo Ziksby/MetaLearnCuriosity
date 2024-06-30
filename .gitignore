@@ -13,3 +13,7 @@ MetaLearnCuriosity/agents/hyperparameter_versions/
 *.ipynb
 # Ignore get-pip.py
 get-pip.py
+# Ignore tpu_curiosax
+tpu_curiosax/
+# Ignore images
+*.png

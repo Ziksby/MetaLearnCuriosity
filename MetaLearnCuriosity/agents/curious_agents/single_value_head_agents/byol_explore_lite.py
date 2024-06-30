@@ -16,13 +16,11 @@ from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.wrappers import (
     FlattenObservationWrapper,
     LogWrapper,
-    MiniGridGymnax,
-    TimeLimitGymnax,
     VecEnv,
 )
 
 # THE NETWORKS
-jax.config.update("jax_enable_x64", True)
+# jax.config.update("jax_enable_x64", True)
 
 
 class TargetEncoder(nn.Module):
@@ -137,8 +135,7 @@ class Transition(NamedTuple):
 def byol_make_train(config):  # noqa: C901
     config["NUM_UPDATES"] = config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     config["MINIBATCH_SIZE"] = config["NUM_ENVS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
-    env = TimeLimitGymnax(config["ENV_NAME"])
-    env_params = env._env_params
+    env, env_params = gymnax.make(config["ENV_NAME"])
     env = FlattenObservationWrapper(env)
     env = LogWrapper(env)
     env = VecEnv(env)
@@ -642,7 +639,7 @@ if __name__ == "__main__":
         "LR": 2.5e-4,
         "NUM_ENVS": 4,
         "NUM_STEPS": 128,
-        "TOTAL_TIMESTEPS": 5e5 // 5,
+        "TOTAL_TIMESTEPS": 5e5 ,
         "UPDATE_EPOCHS": 4,
         "NUM_MINIBATCHES": 4,
         "GAMMA": 0.99,
@@ -659,6 +656,10 @@ if __name__ == "__main__":
         "REW_NORM_PARAMETER": 0.99,
         "INT_LAMBDA": 0.006,
     }
+    config["NUM_ENVS_PER_DEVICE"] = config["NUM_ENVS"] // num_devices
+    config["TOTAL_TIMESTEPS_PER_DEVICE"] = config["TOTAL_TIMESTEPS"] // num_devices
+    config["EVAL_EPISODES_PER_DEVICE"] = config["EVAL_EPISODES"] // num_devices
+    assert config["NUM_ENVS"] % num_devices == 0
     rng = jax.random.PRNGKey(config["SEED"])
     if config["NUM_SEEDS"] > 1:
         rngs = jax.random.split(rng, config["NUM_SEEDS"])
@@ -669,14 +670,14 @@ if __name__ == "__main__":
         train_jit = jax.jit(byol_make_train(config))
         output = train_jit(rng)
 
-    logger = WBLogger(
-        config=config,
-        group=f"byol_toy/{config['ENV_NAME']}",
-        tags=["byol_lite", f'{config["ENV_NAME"]}'],
-        notes="gae: normed",
-        name=config["RUN_NAME"],
-    )
-    logger.log_episode_return(output, config["NUM_SEEDS"])
+    # logger = WBLogger(
+    #     config=config,
+    #     group=f"byol_toy/{config['ENV_NAME']}",
+    #     tags=["byol_lite", f'{config["ENV_NAME"]}'],
+    #     notes="gae: normed",
+    #     name=config["RUN_NAME"],
+    # )
+    # logger.log_episode_return(output, config["NUM_SEEDS"])
     # logger.log_int_rewards(output, config["NUM_SEEDS"])
     # logger.log_byol_losses(output, config["NUM_SEEDS"])
     # logger.log_rl_losses(output, config["NUM_SEEDS"])
