@@ -20,6 +20,19 @@ class RNDTransition(NamedTuple):
     info: jnp.ndarray
 
 
+class BYOLTransition(NamedTuple):
+    done: jnp.ndarray
+    action: jnp.ndarray
+    prev_action: jnp.ndarray
+    value: jnp.ndarray
+    reward: jnp.ndarray
+    int_reward: jnp.ndarray
+    log_prob: jnp.ndarray
+    obs: jnp.ndarray
+    next_obs: jnp.ndarray
+    info: jnp.ndarray
+
+
 class BYOLLiteTransition(NamedTuple):
     done: jnp.ndarray
     action: jnp.ndarray
@@ -44,6 +57,12 @@ class RNDMiniGridTransition(NamedTuple):
     prev_action: jnp.ndarray
     prev_reward: jnp.ndarray
     info: jnp.ndarray
+
+
+class BYOLRewardNorm(NamedTuple):
+    ema_mean: float
+    ema_mean_sq: float
+    c: float
 
 
 class MiniGridTransition(NamedTuple):
