@@ -15,6 +15,7 @@ from flax.training.train_state import TrainState
 
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
+from MetaLearnCuriosity.utils import process_output_general
 from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper, VecEnv
 
 
@@ -108,7 +109,6 @@ environments = [
     "Asterix-MinAtar",
     "Breakout-MinAtar",
     "Freeway-MinAtar",
-    # "Seaquest-MinAtar", not working
     "SpaceInvaders-MinAtar",
 ]
 
@@ -345,23 +345,23 @@ for env_name in environments:
         train_fn = jax.vmap(train, in_axes=(0, 0))
         train_fn = jax.pmap(train_fn, axis_name="devices")
         output = jax.block_until_ready(train_fn(rng, train_state))
-        output = unreplicate(output)
 
     else:
         rng, train_state = ppo_make_train(rng)
         train_state = replicate(train_state, jax.local_devices())
         train_fn = jax.pmap(train, axis_name="devices")
         output = jax.block_until_ready(train_fn(rng, train_state))
-        output = unreplicate(output)
 
     elapsed_time = time.time() - t
-    print(output["metrics"]["returned_episode_returns"].shape)
+
     logger = WBLogger(
         config=config,
         group="minatar_baseline",
         tags=["baseline", config["ENV_NAME"]],
         name=config["RUN_NAME"],
     )
+    output = process_output_general(output)
+
     logger.log_episode_return(output, config["NUM_SEEDS"])
     logger.log_rl_losses(output, config["NUM_SEEDS"])
     output["config"] = config
