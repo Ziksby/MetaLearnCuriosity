@@ -283,10 +283,10 @@ class OpenScannedRNN(nn.Module):
         )
 
 
-class AtariBYOLPredictor(nn.module):
+class AtariBYOLPredictor(nn.Module):
     encoder_layer_out_shape: Sequence[int]
     num_actions: int
-    action_emb_dim: int = 16
+    action_emb_dim: int = 8
 
     @nn.compact
     def __call__(self, close_hidden, open_hidden, x):
@@ -302,6 +302,6 @@ class AtariBYOLPredictor(nn.module):
 
         pred_fut = nn.Dense(self.encoder_layer_out_shape)(btk)
         pred_fut = nn.relu(pred_fut)
-        pred_fut = nn.Dense(self.encoder_layer_out_shape)
+        pred_fut = nn.Dense(self.encoder_layer_out_shape)(pred_fut)
 
         return pred_fut, bt, close_hidden, open_hidden

@@ -23,7 +23,6 @@ class RNDTransition(NamedTuple):
 class BYOLTransition(NamedTuple):
     done: jnp.ndarray
     action: jnp.ndarray
-    prev_action: jnp.ndarray
     value: jnp.ndarray
     reward: jnp.ndarray
     int_reward: jnp.ndarray
@@ -63,6 +62,7 @@ class BYOLRewardNorm(NamedTuple):
     ema_mean: float
     ema_mean_sq: float
     c: float
+    mu_l: float
 
 
 class MiniGridTransition(NamedTuple):
@@ -554,3 +554,36 @@ def process_output_general(output):
         else:
             processed_output[key] = process_value(value)
     return processed_output
+
+def byol_update_reward_prior_norm(norm_int_reward, byol_reward_norm_params, rew_norm_param):
+    new_mu_l = (
+        rew_norm_param * byol_reward_norm_params.mu_l
+        + (1 - rew_norm_param) * norm_int_reward.mean()
+    )
+    return BYOLRewardNorm(byol_reward_norm_params.ema_mean, byol_reward_norm_params.ema_mean_sq, byol_reward_norm_params.c, new_mu_l)
+
+def byol_update_reward_norm_params(byol_reward_norm_params, int_reward, rew_norm_param):
+    r_c = int_reward.mean()
+    r_c_sq = jnp.square(int_reward).mean()
+    new_ema_mean = (
+        rew_norm_param * byol_reward_norm_params.ema_mean + (1 - rew_norm_param) * r_c
+    )
+    new_ema_mean_sq = (
+        rew_norm_param * byol_reward_norm_params.ema_mean_sq
+        + (1 - rew_norm_param) * r_c_sq
+    )
+    new_c = byol_reward_norm_params.c + 1
+
+    return BYOLRewardNorm(new_ema_mean,new_ema_mean_sq,new_c,byol_reward_norm_params.mu_l)
+
+def byol_normlise_prior_int_rewards(int_reward, byol_reward_norm_params, rew_norm_param):
+
+    byol_reward_norm_params = byol_update_reward_norm_params(byol_reward_norm_params, int_reward, rew_norm_param)
+    mu_r = byol_reward_norm_params.ema_mean / (1 - rew_norm_param ** byol_reward_norm_params.c)
+    mu_r_sq = byol_reward_norm_params.ema_mean_sq / (1 - rew_norm_param ** byol_reward_norm_params.c)
+    mu_array = jnp.array([0, mu_r_sq - jnp.square(mu_r)])
+    sigma_r = jnp.sqrt(jnp.max(mu_array) + 10e-8)
+    norm_int_reward = int_reward / sigma_r
+    byol_reward_norm_params = byol_update_reward_prior_norm(norm_int_reward, byol_reward_norm_params, rew_norm_param)
+    prior_norm_int_reward = jnp.maximum(norm_int_reward - byol_reward_norm_params.mu_l, 0)
+    return prior_norm_int_reward, byol_reward_norm_params
