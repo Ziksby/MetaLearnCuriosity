@@ -286,7 +286,7 @@ class OpenScannedRNN(nn.Module):
 class AtariBYOLPredictor(nn.Module):
     encoder_layer_out_shape: Sequence[int]
     num_actions: int
-    action_emb_dim: int = 8
+    action_emb_dim: int = 4
 
     @nn.compact
     def __call__(self, close_hidden, open_hidden, x):
