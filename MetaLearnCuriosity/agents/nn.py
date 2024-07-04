@@ -214,9 +214,17 @@ class BYOLEncoder(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        encoded_obs = nn.Dense(self.encoder_layer_out_shape)(x)
+        encoded_obs = nn.Dense(
+            self.encoder_layer_out_shape, 
+            kernel_init=orthogonal(np.sqrt(2)), 
+            bias_init=constant(0.0)
+        )(x)
         encoded_obs = nn.relu(encoded_obs)
-        encoded_obs = nn.Dense(self.encoder_layer_out_shape)(x)
+        encoded_obs = nn.Dense(
+            self.encoder_layer_out_shape, 
+            kernel_init=orthogonal(np.sqrt(2)), 
+            bias_init=constant(0.0)
+        )(encoded_obs)
         # encoded_obs = nn.relu(encoded_obs)
         return encoded_obs
 
@@ -226,9 +234,17 @@ class BYOLTarget(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        encoded_obs = nn.Dense(self.encoder_layer_out_shape)(x)
+        encoded_obs = nn.Dense(
+            self.encoder_layer_out_shape, 
+            kernel_init=orthogonal(np.sqrt(2)), 
+            bias_init=constant(0.0)
+        )(x)
         encoded_obs = nn.relu(encoded_obs)
-        encoded_obs = nn.Dense(self.encoder_layer_out_shape)(x)
+        encoded_obs = nn.Dense(
+            self.encoder_layer_out_shape, 
+            kernel_init=orthogonal(np.sqrt(2)), 
+            bias_init=constant(0.0)
+        )(encoded_obs)
         # encoded_obs = nn.relu(encoded_obs)
         return encoded_obs
 
@@ -247,7 +263,7 @@ class CloseScannedRNN(nn.Module):
         encoded observation are concatenated."""
         features = carry[0].shape[-1]
         rnn_state = carry
-        new_rnn_state, y = nn.GRUCell(features)(rnn_state, x)
+        new_rnn_state, y = nn.GRUCell(features,kernel_init=orthogonal(np.sqrt(2)))(rnn_state, x)
         return new_rnn_state, y
 
     @staticmethod
@@ -272,7 +288,7 @@ class OpenScannedRNN(nn.Module):
         previous history representation is concatenated."""
         features = carry[0].shape[-1]
         rnn_state = carry
-        new_rnn_state, y = nn.GRUCell(features)(rnn_state, x)
+        new_rnn_state, y = nn.GRUCell(features,kernel_init=orthogonal(np.sqrt(2)))(rnn_state, x)
         return new_rnn_state, y
 
     @staticmethod
@@ -286,22 +302,31 @@ class OpenScannedRNN(nn.Module):
 class AtariBYOLPredictor(nn.Module):
     encoder_layer_out_shape: Sequence[int]
     num_actions: int
-    action_emb_dim: int = 4
+    action_emb_dim: int = 16
 
     @nn.compact
     def __call__(self, close_hidden, open_hidden, x):
         action_encoder = nn.Embed(self.num_actions, self.action_emb_dim)
 
-        bt, en_obs, action = x
+        bt, obs, action = x
 
+        # Encoder
+        en_obs = nn.Dense(self.encoder_layer_out_shape, kernel_init=orthogonal(np.sqrt(2)),name = "encoder_layer_1",bias_init=constant(0.0))(obs)
+        en_obs = nn.relu(en_obs)
+        en_obs = nn.Dense(self.encoder_layer_out_shape, kernel_init=orthogonal(np.sqrt(2)),name = "encoder_layer_2",bias_init=constant(0.0))(en_obs)
+
+        # Embed the action
         act_emb = action_encoder(action)
+
+        # RNN stuff
         close_loop_input = jnp.concatenate((bt, en_obs, act_emb), axis=-1)
-        close_hidden, bt = CloseScannedRNN()(close_hidden, close_loop_input)
-        open_loop_input = jnp.concatenate((bt, act_emb), axis=-1)
-        open_hidden, btk = OpenScannedRNN()(open_hidden, open_loop_input)
+        new_close_hidden, new_bt = CloseScannedRNN()(close_hidden, close_loop_input)
+        open_loop_input = jnp.concatenate((new_bt, act_emb), axis=-1)
+        new_open_hidden, bt_1 = OpenScannedRNN()(open_hidden, open_loop_input)
 
-        pred_fut = nn.Dense(self.encoder_layer_out_shape)(btk)
+        # Predictor
+        pred_fut = nn.Dense(self.encoder_layer_out_shape,kernel_init=orthogonal(np.sqrt(2)),name = "pred_layer_1",bias_init=constant(0.0))(bt_1)
         pred_fut = nn.relu(pred_fut)
-        pred_fut = nn.Dense(self.encoder_layer_out_shape)(pred_fut)
+        pred_fut = nn.Dense(self.encoder_layer_out_shape,kernel_init=orthogonal(np.sqrt(2)),name = "pred_layer_2",bias_init=constant(0.0))(pred_fut)
 
-        return pred_fut, bt, close_hidden, open_hidden
+        return pred_fut, new_bt, new_close_hidden, new_open_hidden

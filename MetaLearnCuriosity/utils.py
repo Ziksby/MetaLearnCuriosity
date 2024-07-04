@@ -22,6 +22,7 @@ class RNDTransition(NamedTuple):
 
 class BYOLTransition(NamedTuple):
     done: jnp.ndarray
+    prev_action: jnp.ndarray
     action: jnp.ndarray
     value: jnp.ndarray
     reward: jnp.ndarray
@@ -574,16 +575,38 @@ def byol_update_reward_norm_params(byol_reward_norm_params, int_reward, rew_norm
     )
     new_c = byol_reward_norm_params.c + 1
 
-    return BYOLRewardNorm(new_ema_mean,new_ema_mean_sq,new_c,byol_reward_norm_params.mu_l)
+    return BYOLRewardNorm(new_ema_mean, new_ema_mean_sq, new_c, byol_reward_norm_params.mu_l)
 
-def byol_normlise_prior_int_rewards(int_reward, byol_reward_norm_params, rew_norm_param):
-
+def byol_normalize_prior_int_rewards(int_reward, byol_reward_norm_params, rew_norm_param):
+    # Update reward normalization parameters
     byol_reward_norm_params = byol_update_reward_norm_params(byol_reward_norm_params, int_reward, rew_norm_param)
-    mu_r = byol_reward_norm_params.ema_mean / (1 - rew_norm_param ** byol_reward_norm_params.c)
-    mu_r_sq = byol_reward_norm_params.ema_mean_sq / (1 - rew_norm_param ** byol_reward_norm_params.c)
+    
+    # Compute the adjusted EMA mean and mean square
+    mu_r = byol_reward_norm_params.ema_mean / (1 - (rew_norm_param ** byol_reward_norm_params.c))
+    mu_r_sq = byol_reward_norm_params.ema_mean_sq / (1 - (rew_norm_param ** byol_reward_norm_params.c))
+    
+    # Compute standard deviation
     mu_array = jnp.array([0, mu_r_sq - jnp.square(mu_r)])
-    sigma_r = jnp.sqrt(jnp.max(mu_array) + 10e-8)
+    sigma_r = jnp.sqrt(jnp.max(mu_array) + 1e-8)  # 1e-8 as a small numerical regularization
+    
+    # Normalize intrinsic reward
     norm_int_reward = int_reward / sigma_r
+    
+    # Update prior normalization
     byol_reward_norm_params = byol_update_reward_prior_norm(norm_int_reward, byol_reward_norm_params, rew_norm_param)
+    
+    # Compute prior normalized intrinsic reward
     prior_norm_int_reward = jnp.maximum(norm_int_reward - byol_reward_norm_params.mu_l, 0)
+    
     return prior_norm_int_reward, byol_reward_norm_params
+
+def update_target_state_with_ema(predictor_state, target_state, ema_param):
+    """Update the target network parameters with EMA."""
+    new_target_params = jax.tree_util.tree_map(
+        lambda target, predictor: ema_param * target + (1 - ema_param) * predictor,
+        target_state.params,
+        predictor_state.params
+    )
+    # Replace the target state's parameters with the new EMA parameters
+    target_state = target_state.replace(params=new_target_params)
+    return target_state
