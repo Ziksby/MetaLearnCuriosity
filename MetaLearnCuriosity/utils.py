@@ -30,6 +30,7 @@ class BYOLTransition(NamedTuple):
     log_prob: jnp.ndarray
     obs: jnp.ndarray
     next_obs: jnp.ndarray
+    bt: jnp.ndarray
     info: jnp.ndarray
 
 
@@ -556,57 +557,87 @@ def process_output_general(output):
             processed_output[key] = process_value(value)
     return processed_output
 
+
 def byol_update_reward_prior_norm(norm_int_reward, byol_reward_norm_params, rew_norm_param):
     new_mu_l = (
         rew_norm_param * byol_reward_norm_params.mu_l
         + (1 - rew_norm_param) * norm_int_reward.mean()
     )
-    return BYOLRewardNorm(byol_reward_norm_params.ema_mean, byol_reward_norm_params.ema_mean_sq, byol_reward_norm_params.c, new_mu_l)
+    return BYOLRewardNorm(
+        byol_reward_norm_params.ema_mean,
+        byol_reward_norm_params.ema_mean_sq,
+        byol_reward_norm_params.c,
+        new_mu_l,
+    )
+
 
 def byol_update_reward_norm_params(byol_reward_norm_params, int_reward, rew_norm_param):
     r_c = int_reward.mean()
     r_c_sq = jnp.square(int_reward).mean()
-    new_ema_mean = (
-        rew_norm_param * byol_reward_norm_params.ema_mean + (1 - rew_norm_param) * r_c
-    )
+    new_ema_mean = rew_norm_param * byol_reward_norm_params.ema_mean + (1 - rew_norm_param) * r_c
     new_ema_mean_sq = (
-        rew_norm_param * byol_reward_norm_params.ema_mean_sq
-        + (1 - rew_norm_param) * r_c_sq
+        rew_norm_param * byol_reward_norm_params.ema_mean_sq + (1 - rew_norm_param) * r_c_sq
     )
     new_c = byol_reward_norm_params.c + 1
 
     return BYOLRewardNorm(new_ema_mean, new_ema_mean_sq, new_c, byol_reward_norm_params.mu_l)
 
+
 def byol_normalize_prior_int_rewards(int_reward, byol_reward_norm_params, rew_norm_param):
     # Update reward normalization parameters
-    byol_reward_norm_params = byol_update_reward_norm_params(byol_reward_norm_params, int_reward, rew_norm_param)
-    
+    byol_reward_norm_params = byol_update_reward_norm_params(
+        byol_reward_norm_params, int_reward, rew_norm_param
+    )
+
     # Compute the adjusted EMA mean and mean square
-    mu_r = byol_reward_norm_params.ema_mean / (1 - (rew_norm_param ** byol_reward_norm_params.c))
-    mu_r_sq = byol_reward_norm_params.ema_mean_sq / (1 - (rew_norm_param ** byol_reward_norm_params.c))
-    
+    mu_r = byol_reward_norm_params.ema_mean / (1 - (rew_norm_param**byol_reward_norm_params.c))
+    mu_r_sq = byol_reward_norm_params.ema_mean_sq / (
+        1 - (rew_norm_param**byol_reward_norm_params.c)
+    )
+
     # Compute standard deviation
     mu_array = jnp.array([0, mu_r_sq - jnp.square(mu_r)])
     sigma_r = jnp.sqrt(jnp.max(mu_array) + 1e-8)  # 1e-8 as a small numerical regularization
-    
+
     # Normalize intrinsic reward
     norm_int_reward = int_reward / sigma_r
-    
+
     # Update prior normalization
-    byol_reward_norm_params = byol_update_reward_prior_norm(norm_int_reward, byol_reward_norm_params, rew_norm_param)
-    
+    byol_reward_norm_params = byol_update_reward_prior_norm(
+        norm_int_reward, byol_reward_norm_params, rew_norm_param
+    )
+
     # Compute prior normalized intrinsic reward
     prior_norm_int_reward = jnp.maximum(norm_int_reward - byol_reward_norm_params.mu_l, 0)
-    
+
     return prior_norm_int_reward, byol_reward_norm_params
 
+
 def update_target_state_with_ema(predictor_state, target_state, ema_param):
-    """Update the target network parameters with EMA."""
-    new_target_params = jax.tree_util.tree_map(
-        lambda target, predictor: ema_param * target + (1 - ema_param) * predictor,
-        target_state.params,
-        predictor_state.params
+    """Update the target network parameters with EMA for encoder layers only."""
+
+    def update_encoder_params(target_params, predictor_params, param_names):
+        updated_params = {}
+        for name, target_param in target_params.items():
+            if name in param_names:
+                updated_params[name] = (
+                    ema_param * target_param + (1 - ema_param) * predictor_params[name]
+                )
+            else:
+                updated_params[name] = target_param
+        return updated_params
+
+    # Names of the encoder layers in the predictor network
+    encoder_layer_names = ["encoder_layer_1", "encoder_layer_2"]
+
+    # Get the new encoder parameters using EMA
+    new_encoder_params = update_encoder_params(
+        target_state.params, predictor_state.params, encoder_layer_names
     )
-    # Replace the target state's parameters with the new EMA parameters
+
+    # Replace the target state's parameters with the new encoder parameters
+    new_target_params = target_state.params.copy()
+    new_target_params.update(new_encoder_params)
     target_state = target_state.replace(params=new_target_params)
+
     return target_state

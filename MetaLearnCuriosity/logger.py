@@ -1,7 +1,6 @@
 import jax.numpy as jnp
-from flax.jax_utils import unreplicate
-
 import wandb
+from flax.jax_utils import unreplicate
 
 
 class WBLogger:

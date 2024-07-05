@@ -215,15 +215,15 @@ class BYOLEncoder(nn.Module):
     @nn.compact
     def __call__(self, x):
         encoded_obs = nn.Dense(
-            self.encoder_layer_out_shape, 
-            kernel_init=orthogonal(np.sqrt(2)), 
-            bias_init=constant(0.0)
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
         )(x)
         encoded_obs = nn.relu(encoded_obs)
         encoded_obs = nn.Dense(
-            self.encoder_layer_out_shape, 
-            kernel_init=orthogonal(np.sqrt(2)), 
-            bias_init=constant(0.0)
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
         )(encoded_obs)
         # encoded_obs = nn.relu(encoded_obs)
         return encoded_obs
@@ -235,15 +235,15 @@ class BYOLTarget(nn.Module):
     @nn.compact
     def __call__(self, x):
         encoded_obs = nn.Dense(
-            self.encoder_layer_out_shape, 
-            kernel_init=orthogonal(np.sqrt(2)), 
-            bias_init=constant(0.0)
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
         )(x)
         encoded_obs = nn.relu(encoded_obs)
         encoded_obs = nn.Dense(
-            self.encoder_layer_out_shape, 
-            kernel_init=orthogonal(np.sqrt(2)), 
-            bias_init=constant(0.0)
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
         )(encoded_obs)
         # encoded_obs = nn.relu(encoded_obs)
         return encoded_obs
@@ -263,7 +263,7 @@ class CloseScannedRNN(nn.Module):
         encoded observation are concatenated."""
         features = carry[0].shape[-1]
         rnn_state = carry
-        new_rnn_state, y = nn.GRUCell(features,kernel_init=orthogonal(np.sqrt(2)))(rnn_state, x)
+        new_rnn_state, y = nn.GRUCell(features, kernel_init=orthogonal(np.sqrt(2)))(rnn_state, x)
         return new_rnn_state, y
 
     @staticmethod
@@ -288,7 +288,7 @@ class OpenScannedRNN(nn.Module):
         previous history representation is concatenated."""
         features = carry[0].shape[-1]
         rnn_state = carry
-        new_rnn_state, y = nn.GRUCell(features,kernel_init=orthogonal(np.sqrt(2)))(rnn_state, x)
+        new_rnn_state, y = nn.GRUCell(features, kernel_init=orthogonal(np.sqrt(2)))(rnn_state, x)
         return new_rnn_state, y
 
     @staticmethod
@@ -311,9 +311,33 @@ class AtariBYOLPredictor(nn.Module):
         bt, obs, action = x
 
         # Encoder
-        en_obs = nn.Dense(self.encoder_layer_out_shape, kernel_init=orthogonal(np.sqrt(2)),name = "encoder_layer_1",bias_init=constant(0.0))(obs)
+        en_obs = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="encoder_layer_1",
+            bias_init=constant(0.0),
+        )(obs)
         en_obs = nn.relu(en_obs)
-        en_obs = nn.Dense(self.encoder_layer_out_shape, kernel_init=orthogonal(np.sqrt(2)),name = "encoder_layer_2",bias_init=constant(0.0))(en_obs)
+        en_obs = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="encoder_layer_2",
+            bias_init=constant(0.0),
+        )(en_obs)
+
+        # RL AGENT
+        # actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(
+        #     en_obs
+        # )
+        # actor_mean = nn.relu(actor_mean)
+        # actor_mean = nn.Dense(
+        #     self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
+        # )(actor_mean)
+        # pi = distrax.Categorical(logits=actor_mean)
+
+        # critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(en_obs)
+        # critic = nn.relu(critic)
+        # critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(critic)
 
         # Embed the action
         act_emb = action_encoder(action)
@@ -325,8 +349,18 @@ class AtariBYOLPredictor(nn.Module):
         new_open_hidden, bt_1 = OpenScannedRNN()(open_hidden, open_loop_input)
 
         # Predictor
-        pred_fut = nn.Dense(self.encoder_layer_out_shape,kernel_init=orthogonal(np.sqrt(2)),name = "pred_layer_1",bias_init=constant(0.0))(bt_1)
+        pred_fut = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="pred_layer_1",
+            bias_init=constant(0.0),
+        )(bt_1)
         pred_fut = nn.relu(pred_fut)
-        pred_fut = nn.Dense(self.encoder_layer_out_shape,kernel_init=orthogonal(np.sqrt(2)),name = "pred_layer_2",bias_init=constant(0.0))(pred_fut)
+        pred_fut = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="pred_layer_2",
+            bias_init=constant(0.0),
+        )(pred_fut)
 
         return pred_fut, new_bt, new_close_hidden, new_open_hidden
