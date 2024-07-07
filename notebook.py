@@ -1,51 +1,81 @@
-# Taken from:
-# https://github.com/corl-team/xland-minigrid/blob/main/training/train_single_task.py
-
-import functools
-import math
 import os
 import time
-from typing import Sequence, TypedDict
+from typing import Any, NamedTuple, Sequence
 
 import distrax
-import flax
 import flax.linen as nn
-import gymnax
 import jax
 import jax.numpy as jnp
-import jax.tree_util
 import numpy as np
 import optax
-import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
-
 from MetaLearnCuriosity.agents.nn import (
-    AtariBYOLPredictor,
-    BYOLEncoder,
+    BraxBYOLPredictor,
     BYOLTarget,
     CloseScannedRNN,
     OpenScannedRNN,
 )
-from MetaLearnCuriosity.checkpoints import Save
-from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import BYOLRewardNorm
 from MetaLearnCuriosity.utils import BYOLTransition as Transition
 from MetaLearnCuriosity.utils import (
     byol_normalize_prior_int_rewards,
-    make_obs_gymnax_discrete,
     process_output_general,
     update_target_state_with_ema,
 )
-from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper, VecEnv
+from MetaLearnCuriosity.checkpoints import Save
+from MetaLearnCuriosity.logger import WBLogger
+from MetaLearnCuriosity.wrappers import (
+    BraxGymnaxWrapper,
+    ClipAction,
+    DelayedReward,
+    LogWrapper,
+    NormalizeVecObservation,
+    NormalizeVecReward,
+    VecEnv,
+)
 
 environments = [
-    "Asterix-MinAtar",
-    "Breakout-MinAtar",
-    "Freeway-MinAtar",
-    "SpaceInvaders-MinAtar",
+    'ant',
+    'halfcheetah',
+    'hopper',
+    'humanoid',
+    'humanoidstandup',
+    'inverted_pendulum',
+    'inverted_double_pendulum',
+    "pusher",
+    "reacher",
+    "walker2d",
 ]
+
+config = {
+    "RUN_NAME": "delayed_brax_byol_ppo",
+    "SEED": 42,
+    "NUM_SEEDS": 10,
+    "LR": 3e-4,
+    "NUM_ENVS": 2048,
+    "NUM_STEPS": 10,  # unroll length
+    "TOTAL_TIMESTEPS": 5e7,
+    "UPDATE_EPOCHS": 4,
+    "NUM_MINIBATCHES": 32,
+    "GAMMA": 0.99,
+    "GAE_LAMBDA": 0.95,
+    "CLIP_EPS": 0.2,
+    "ENT_COEF": 0.0,
+    "VF_COEF": 0.5,
+    "MAX_GRAD_NORM": 0.5,
+    "ACTIVATION": "tanh",
+    "ANNEAL_LR": False,
+    "NORMALIZE_ENV": True,
+    "DELAY_REWARDS": True,
+    "STEP_INTERVAL": 10,
+    "ANNEAL_PRED_LR": False,
+    "DEBUG": False,
+    "PRED_LR": 0.001,
+    "REW_NORM_PARAMETER": 0.99,
+    "EMA_PARAMETER": 0.99,
+}
 
 
 class PPOActorCritic(nn.Module):
@@ -58,61 +88,30 @@ class PPOActorCritic(nn.Module):
             activation = nn.relu
         else:
             activation = nn.tanh
-        actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
+        actor_mean = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
         actor_mean = activation(actor_mean)
-        actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(
+        actor_mean = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(
             actor_mean
         )
         actor_mean = activation(actor_mean)
         actor_mean = nn.Dense(
             self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
-        pi = distrax.Categorical(logits=actor_mean)
+        actor_logtstd = self.param("log_std", nn.initializers.zeros, (self.action_dim,))
+        pi = distrax.MultivariateNormalDiag(actor_mean, jnp.exp(actor_logtstd))
 
-        critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
+        critic = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
         critic = activation(critic)
-        critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(critic)
+        critic = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(critic)
         critic = activation(critic)
         critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(critic)
 
         return pi, jnp.squeeze(critic, axis=-1)
 
 
-config = {
-    "RUN_NAME": "minatar_baseline_ppo",
-    "SEED": 42,
-    "NUM_SEEDS": 10,
-    "LR": 5e-3,
-    "NUM_ENVS": 64,
-    "NUM_STEPS": 128,
-    "TOTAL_TIMESTEPS": 1e7,
-    "UPDATE_EPOCHS": 4,
-    "NUM_MINIBATCHES": 8,
-    "GAMMA": 0.99,
-    "GAE_LAMBDA": 0.95,
-    "CLIP_EPS": 0.2,
-    "ENT_COEF": 0.01,
-    "VF_COEF": 0.5,
-    "MAX_GRAD_NORM": 0.5,
-    "ACTIVATION": "relu",
-    "ANNEAL_LR": True,
-    "ANNEAL_PRED_LR": False,
-    "DEBUG": False,
-    "PRED_LR": 0.001,
-    "REW_NORM_PARAMETER": 0.99,
-    "EMA_PARAMETER": 0.99,
-}
-
-environments = [
-    "Asterix-MinAtar",
-    "Breakout-MinAtar",
-    "Freeway-MinAtar",
-    "SpaceInvaders-MinAtar",
-]
-
-
 def make_config_env(config, env_name):
     config["ENV_NAME"] = env_name
+    env, env_params = BraxGymnaxWrapper(config["ENV_NAME"]), None
     num_devices = jax.local_device_count()
     assert config["NUM_ENVS"] % num_devices == 0
     config["NUM_ENVS_PER_DEVICE"] = config["NUM_ENVS"] // num_devices
@@ -127,10 +126,14 @@ def make_config_env(config, env_name):
     config["TRAINING_HORIZON"] = (
         config["TOTAL_TIMESTEPS_PER_DEVICE"] // config["NUM_ENVS_PER_DEVICE"]
     )
-    env, env_params = gymnax.make(config["ENV_NAME"])
-    env = FlattenObservationWrapper(env)
     env = LogWrapper(env)
+    env = ClipAction(env)
+    if config["DELAY_REWARDS"]:
+        env = DelayedReward(env, config["STEP_INTERVAL"])
     env = VecEnv(env)
+    if config["NORMALIZE_ENV"]:
+        env = NormalizeVecObservation(env)
+        env = NormalizeVecReward(env, config["GAMMA"])
 
     return config, env, env_params
 
@@ -153,9 +156,9 @@ def ppo_make_train(rng):
         return config["PRED_LR"] * frac
 
     # INIT NETWORK
-    network = PPOActorCritic(env.action_space(env_params).n, activation=config["ACTIVATION"])
-    target = BYOLTarget(128)
-    pred = AtariBYOLPredictor(128, env.action_space(env_params).n)
+    network = PPOActorCritic(env.action_space(env_params).shape[0], activation=config["ACTIVATION"])
+    target = BYOLTarget(256)
+    pred = BraxBYOLPredictor(256)
 
     # KEYS
     rng, _rng = jax.random.split(rng)
@@ -165,10 +168,10 @@ def ppo_make_train(rng):
 
     # INIT INPUT
     init_x = jnp.zeros((1, config["NUM_ENVS_PER_DEVICE"], *env.observation_space(env_params).shape))
-    init_action = jnp.zeros((config["NUM_ENVS_PER_DEVICE"],), dtype=jnp.int32)
-    close_init_hstate = CloseScannedRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 128)
-    open_init_hstate = OpenScannedRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 128)
-    init_bt = jnp.zeros((1, config["NUM_ENVS_PER_DEVICE"], 128))
+    init_action = jnp.zeros((config["NUM_ENVS_PER_DEVICE"],*env.action_space(env_params).shape), dtype=jnp.float32)
+    close_init_hstate = CloseScannedRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 256)
+    open_init_hstate = OpenScannedRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 256)
+    init_bt = jnp.zeros((1, config["NUM_ENVS_PER_DEVICE"], 256))
 
     init_pred_input = (init_bt, init_x, init_action[np.newaxis, :])
 
@@ -227,8 +230,6 @@ def ppo_make_train(rng):
         open_init_hstate,
         init_action,
     )
-
-
 def train(
     rng,
     train_state,
@@ -651,6 +652,7 @@ def train(
 lambda_values = jnp.array(
     [0.001, 0.0001, 0.0003, 0.0005, 0.0008, 0.01, 0.1, 0.003, 0.005, 0.02, 0.03, 0.05]
 ).sort()
+
 
 y_values = {}
 for lambda_value in lambda_values:

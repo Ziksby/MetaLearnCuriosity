@@ -364,3 +364,49 @@ class AtariBYOLPredictor(nn.Module):
         )(pred_fut)
 
         return pred_fut, new_bt, new_close_hidden, new_open_hidden
+
+
+class BraxBYOLPredictor(nn.Module):
+    encoder_layer_out_shape: Sequence[int]
+
+    @nn.compact
+    def __call__(self, close_hidden, open_hidden, x):
+        bt, obs, action = x
+
+        # Encoder
+        en_obs = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="encoder_layer_1",
+            bias_init=constant(0.0),
+        )(obs)
+        en_obs = nn.relu(en_obs)
+        en_obs = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="encoder_layer_2",
+            bias_init=constant(0.0),
+        )(en_obs)
+
+        # RNN stuff
+        close_loop_input = jnp.concatenate((bt, en_obs, action), axis=-1)
+        new_close_hidden, new_bt = CloseScannedRNN()(close_hidden, close_loop_input)
+        open_loop_input = jnp.concatenate((new_bt, action), axis=-1)
+        new_open_hidden, bt_1 = OpenScannedRNN()(open_hidden, open_loop_input)
+
+        # Predictor
+        pred_fut = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="pred_layer_1",
+            bias_init=constant(0.0),
+        )(bt_1)
+        pred_fut = nn.relu(pred_fut)
+        pred_fut = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="pred_layer_2",
+            bias_init=constant(0.0),
+        )(pred_fut)
+
+        return pred_fut, new_bt, new_close_hidden, new_open_hidden
