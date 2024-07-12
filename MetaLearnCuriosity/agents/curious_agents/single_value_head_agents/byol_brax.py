@@ -11,15 +11,12 @@ import optax
 from flax.jax_utils import replicate, unreplicate
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
-
 from MetaLearnCuriosity.agents.nn import (
     BraxBYOLPredictor,
     BYOLTarget,
     CloseScannedRNN,
     OpenScannedRNN,
 )
-from MetaLearnCuriosity.checkpoints import Save
-from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import BYOLRewardNorm
 from MetaLearnCuriosity.utils import BYOLTransition as Transition
 from MetaLearnCuriosity.utils import (
@@ -27,6 +24,8 @@ from MetaLearnCuriosity.utils import (
     process_output_general,
     update_target_state_with_ema,
 )
+from MetaLearnCuriosity.checkpoints import Save
+from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.wrappers import (
     BraxGymnaxWrapper,
     ClipAction,
@@ -38,20 +37,20 @@ from MetaLearnCuriosity.wrappers import (
 )
 
 environments = [
-    "ant",
-    "halfcheetah",
-    "hopper",
-    "humanoid",
-    "humanoidstandup",
-    "inverted_pendulum",
-    "inverted_double_pendulum",
+    'ant',
+    'halfcheetah',
+    'hopper',
+    'humanoid',
+    'humanoidstandup',
+    'inverted_pendulum',
+    'inverted_double_pendulum',
     "pusher",
     "reacher",
     "walker2d",
 ]
 
 config = {
-    "RUN_NAME": "delayed_brax_byol_ppo",
+    "RUN_NAME": "delayed_brax_byol",
     "SEED": 42,
     "NUM_SEEDS": 10,
     "LR": 3e-4,
@@ -76,6 +75,7 @@ config = {
     "PRED_LR": 0.001,
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
+    "INT_LAMBDA": 0.0003,
 }
 
 
@@ -169,9 +169,7 @@ def ppo_make_train(rng):
 
     # INIT INPUT
     init_x = jnp.zeros((1, config["NUM_ENVS_PER_DEVICE"], *env.observation_space(env_params).shape))
-    init_action = jnp.zeros(
-        (config["NUM_ENVS_PER_DEVICE"], *env.action_space(env_params).shape), dtype=jnp.float32
-    )
+    init_action = jnp.zeros((config["NUM_ENVS_PER_DEVICE"],*env.action_space(env_params).shape), dtype=jnp.float32)
     close_init_hstate = CloseScannedRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 256)
     open_init_hstate = OpenScannedRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 256)
     init_bt = jnp.zeros((1, config["NUM_ENVS_PER_DEVICE"], 256))
@@ -233,8 +231,6 @@ def ppo_make_train(rng):
         open_init_hstate,
         init_action,
     )
-
-
 def train(
     rng,
     train_state,
@@ -653,27 +649,36 @@ def train(
         "norm_int_reward": norm_int_reward,
     }
 
+for env_name in environments:
+    rng = jax.random.PRNGKey(config["SEED"])
+    t = time.time()
+    config, env, env_params = make_config_env(config, env_name)
+    print(f"Training in {config['ENV_NAME']}")
 
-lambda_values = jnp.array(
-    [0.001, 0.0001, 0.0003, 0.0005, 0.0008, 0.01, 0.1, 0.003, 0.005, 0.02, 0.03, 0.05]
-).sort()
-
-
-y_values = {}
-for lambda_value in lambda_values:
-    y_values[
-        float(lambda_value)
-    ] = {}  # Use float(lambda_value) to ensure dictionary keys are serializable
-    config["INT_LAMBDA"] = lambda_value
-    for env_name in environments:
-        rng = jax.random.PRNGKey(config["SEED"])
+    if config["NUM_SEEDS"] > 1:
+        rng = jax.random.split(rng, config["NUM_SEEDS"])
+        (
+            rng,
+            train_state,
+            pred_state,
+            target_state,
+            init_bt,
+            close_init_hstate,
+            open_init_hstate,
+            init_action,
+        ) = jax.jit(jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0, 0)))(rng)
+        open_init_hstate = replicate(open_init_hstate, jax.local_devices())
+        close_init_hstate = replicate(close_init_hstate, jax.local_devices())
+        train_state = replicate(train_state, jax.local_devices())
+        pred_state = replicate(pred_state, jax.local_devices())
+        target_state = replicate(target_state, jax.local_devices())
+        init_bt = replicate(init_bt, jax.local_devices())
+        init_action = replicate(init_action, jax.local_devices())
+        train_fn = jax.vmap(train)
+        train_fn = jax.pmap(train_fn, axis_name="devices")
         t = time.time()
-        config, env, env_params = make_config_env(config, env_name)
-        print(f"Training in {config['ENV_NAME']}")
-
-        if config["NUM_SEEDS"] > 1:
-            rng = jax.random.split(rng, config["NUM_SEEDS"])
-            (
+        output = jax.block_until_ready(
+            train_fn(
                 rng,
                 train_state,
                 pred_state,
@@ -682,40 +687,38 @@ for lambda_value in lambda_values:
                 close_init_hstate,
                 open_init_hstate,
                 init_action,
-            ) = jax.jit(jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0, 0)))(rng)
-            open_init_hstate = replicate(open_init_hstate, jax.local_devices())
-            close_init_hstate = replicate(close_init_hstate, jax.local_devices())
-            train_state = replicate(train_state, jax.local_devices())
-            pred_state = replicate(pred_state, jax.local_devices())
-            target_state = replicate(target_state, jax.local_devices())
-            init_bt = replicate(init_bt, jax.local_devices())
-            init_action = replicate(init_action, jax.local_devices())
-            train_fn = jax.vmap(train)
-            train_fn = jax.pmap(train_fn, axis_name="devices")
-            print(f"Training in {config['ENV_NAME']}")
-            t = time.time()
-            output = jax.block_until_ready(
-                train_fn(
-                    rng,
-                    train_state,
-                    pred_state,
-                    target_state,
-                    init_bt,
-                    close_init_hstate,
-                    open_init_hstate,
-                    init_action,
-                )
             )
-            elapsed_time = time.time() - t
-            epi_ret = (
-                output["metrics"]["returned_episode_returns"].mean(0).mean(0).mean(-1).reshape(-1)
-            )
-            int_rew = output["int_reward"].mean(0).mean(0).mean(-1).reshape(-1)
-            int_norm_rew = output["norm_int_reward"].mean(0).mean(0).mean(-1).reshape(-1)
-            pred_loss = unreplicate(output["pred_loss"]).mean(-1).mean(0).mean(-1)
+        )
+        elapsed_time = time.time() - t
+        epi_ret = (
+            output["metrics"]["returned_episode_returns"].mean(0).mean(0).mean(-1).reshape(-1)
+        )
+        int_rew = output["int_reward"].mean(0).mean(0).mean(-1).reshape(-1)
+        int_norm_rew = output["norm_int_reward"].mean(0).mean(0).mean(-1).reshape(-1)
+        pred_loss = unreplicate(output["pred_loss"]).mean(-1).mean(0).mean(-1)
 
-        else:
-            (
+    else:
+        (
+            rng,
+            train_state,
+            pred_state,
+            target_state,
+            init_bt,
+            close_init_hstate,
+            open_init_hstate,
+            init_action,
+        ) = ppo_make_train(rng)
+        open_init_hstate = replicate(open_init_hstate, jax.local_devices())
+        close_init_hstate = replicate(close_init_hstate, jax.local_devices())
+        train_state = replicate(train_state, jax.local_devices())
+        pred_state = replicate(pred_state, jax.local_devices())
+        target_state = replicate(target_state, jax.local_devices())
+        init_bt = replicate(init_bt, jax.local_devices())
+        init_action = replicate(init_action, jax.local_devices())
+        train_fn = jax.pmap(train, axis_name="devices")
+        t = time.time()
+        output = jax.block_until_ready(
+            train_fn(
                 rng,
                 train_state,
                 pred_state,
@@ -724,117 +727,29 @@ for lambda_value in lambda_values:
                 close_init_hstate,
                 open_init_hstate,
                 init_action,
-            ) = ppo_make_train(rng)
-            open_init_hstate = replicate(open_init_hstate, jax.local_devices())
-            close_init_hstate = replicate(close_init_hstate, jax.local_devices())
-            train_state = replicate(train_state, jax.local_devices())
-            pred_state = replicate(pred_state, jax.local_devices())
-            target_state = replicate(target_state, jax.local_devices())
-            init_bt = replicate(init_bt, jax.local_devices())
-            init_action = replicate(init_action, jax.local_devices())
-            train_fn = jax.pmap(train, axis_name="devices")
-            t = time.time()
-            output = jax.block_until_ready(
-                train_fn(
-                    rng,
-                    train_state,
-                    pred_state,
-                    target_state,
-                    init_bt,
-                    close_init_hstate,
-                    open_init_hstate,
-                    init_action,
-                )
             )
-            elapsed_time = time.time() - t
-            epi_ret = output["metrics"]["returned_episode_returns"].mean(0).mean(-1).reshape(-1)
-            int_rew = output["int_reward"].mean(0).mean(-1).reshape(-1)
-            int_norm_rew = output["norm_int_reward"].mean(0).mean(-1).reshape(-1)
-            pred_loss = unreplicate(output["pred_loss"]).mean(-1).mean(-1)
+        )
 
-        print((time.time() - t) / 60)
-        # Assuming `output` is your array
-
-        # Use the last element of each row from 'epi_ret' as y-values
-        y_values[float(lambda_value)][env_name] = (epi_ret, int_rew, int_norm_rew, pred_loss)
-
-import matplotlib.pyplot as plt
-
-# Metric names corresponding to the data stored in y_values
-metric_names = [
-    "Episode Returns",
-    "Intrinsic Reward",
-    "Normalized Intrinsic Reward",
-    "Pred Loss",
-]
-
-# Initialize plotting
-for env_name in environments:
-    num_metrics = len(metric_names)
-    fig, axs = plt.subplots(num_metrics, 1, figsize=(12, 6 * num_metrics), sharex=False)
-    fig.suptitle(f"Training Metrics Over Time for {env_name}")
-
-    # Iterate over each metric
-    for idx, metric_name in enumerate(metric_names):
-        ax = axs[idx] if num_metrics > 1 else axs
-
-        # Plot each lambda's data for this metric
-        plotted = False
-        for lambda_value in lambda_values:
-            lambda_key = float(lambda_value)  # Ensure float key matches dictionary keys
-            if lambda_key in y_values and env_name in y_values[lambda_key]:
-                metric_data = y_values[lambda_key][env_name][idx]
-                if len(metric_data) > 0:
-                    x_axis = range(1, len(metric_data) + 1)
-                    ax.plot(x_axis, metric_data, label=f"Lambda={lambda_value:.5f}")
-                    plotted = True
-
-        # Only add a legend if data was actually plotted
-        if plotted:
-            ax.set_title(metric_name)
-            ax.set_xlabel("Training Steps")
-            ax.set_ylabel(metric_name)
-            ax.legend()
-        else:
-            ax.set_title(f"{metric_name} (no data)")
-            ax.set_xlabel("Training Steps")
-            ax.set_ylabel(metric_name)
-
-    # Adjust layout and save the figure
-    plt.subplots_adjust(hspace=0.4)  # Adjust vertical spacing between plots
-    plt.savefig(f"{env_name}_metrics_over_time_sep_byol.png")
-    plt.close(fig)
-
-# Scatter plot for final episode returns vs. lambda values
-for env_name in environments:
-    lambda_values = []
-    final_returns = []
-
-    # Collect data for plotting
-    for lambda_value, env_data in y_values.items():
-        epi_ret = env_data[env_name][0]  # index 0 for episode returns
-        if epi_ret.size > 0:  # Ensure there is at least one return value
-            final_returns.append(epi_ret[-1])
-            lambda_values.append(lambda_value)
-
-    # Sort lambda values for consistent plotting
-    sorted_indices = sorted(range(len(lambda_values)), key=lambda k: lambda_values[k])
-    sorted_lambda_values = [lambda_values[i] for i in sorted_indices]
-    sorted_final_returns = [final_returns[i] for i in sorted_indices]
-
-    # Plotting
-    plt.figure(figsize=(10, 6))
-    plt.scatter(range(1, len(sorted_lambda_values) + 1), sorted_final_returns, color="blue")
-    plt.title(f"Final Episode Returns vs. Lambda for {env_name}")
-    plt.xlabel("Lambda Value (Indexed)")
-    plt.ylabel("Final Episode Return")
-    plt.xticks(
-        range(1, len(sorted_lambda_values) + 1),
-        [f"{lv:.5f}" for lv in sorted_lambda_values],
-        rotation=45,
+    logger = WBLogger(
+        config=config,
+        group="delayed_brax_curious",
+        tags=["curious_baseline", config["ENV_NAME"], "delayed_brax"],
+        name=f'{config["RUN_NAME"]}_{config["ENV_NAME"]}',
     )
-    plt.grid(True)
+    output = process_output_general(output)
 
-    # Save and close plot
-    plt.savefig(f"{env_name}_final_episode_returns_vs_lambda_sep_byol.png")
-    plt.close()  # Close the plot to free up memory
+    logger.log_pred_losses(output, config["NUM_SEEDS"])
+    logger.log_episode_return(output, config["NUM_SEEDS"])
+    logger.log_rl_losses(output, config["NUM_SEEDS"])
+    logger.log_int_rewards(output, config["NUM_SEEDS"])
+    logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
+    output["config"] = config
+    checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
+
+    # Get the absolute path of the directory
+    path = os.path.abspath(checkpoint_directory)
+    Save(path, output)
+    logger.save_artifact(path)
+    shutil.rmtree(path)
+    print(f"Deleted local checkpoint directory: {path}")
+    print(f"Done in {elapsed_time / 60:.2f}min")

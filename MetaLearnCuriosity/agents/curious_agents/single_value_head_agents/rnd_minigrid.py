@@ -9,10 +9,10 @@ import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
 import optax
-import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.training.train_state import TrainState
 
+import wandb
 from MetaLearnCuriosity.agents.nn import (
     MiniGridActorCriticRNN,
     PredictorNetwork,
