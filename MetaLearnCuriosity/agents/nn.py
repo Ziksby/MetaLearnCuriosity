@@ -69,6 +69,79 @@ MiniGridBatchedRNNModel = flax.linen.vmap(
 )
 
 
+class MiniGridBYOLPredictor(nn.Module):
+    encoder_layer_out_shape: Sequence[int]
+    num_actions: int
+    action_emb_dim: int = 16
+
+    @nn.compact
+    def __call__(self, close_hidden, open_hidden, x):
+        action_encoder = nn.Embed(self.num_actions, self.action_emb_dim)
+
+        bt, obs, action = x
+
+        # Encoder
+        en_obs = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="encoder_layer_1",
+            bias_init=constant(0.0),
+        )(obs)
+        en_obs = nn.relu(en_obs)
+        en_obs = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="encoder_layer_2",
+            bias_init=constant(0.0),
+        )(en_obs)
+
+        # RL AGENT
+        # actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(
+        #     en_obs
+        # )
+        # actor_mean = nn.relu(actor_mean)
+        # actor_mean = nn.Dense(
+        #     self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
+        # )(actor_mean)
+        # pi = distrax.Categorical(logits=actor_mean)
+
+        # critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(en_obs)
+        # critic = nn.relu(critic)
+        # critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(critic)
+
+        # Embed the action
+        act_emb = action_encoder(action)
+
+        # RNN stuff
+        close_rnn_core = MiniGridBatchedRNNModel(self.encoder_layer_out_shape, 1)
+        open_rnn_core = MiniGridBatchedRNNModel(self.encoder_layer_out_shape, 1)
+
+        close_loop_input = jnp.concatenate((bt, en_obs, act_emb), axis=-1)
+        new_bt, new_close_hidden = close_rnn_core(close_loop_input, close_hidden)
+        open_loop_input = jnp.concatenate((new_bt, act_emb), axis=-1)
+        bt_1, new_open_hidden = open_rnn_core(open_loop_input, open_hidden)
+
+        # Predictor
+        pred_fut = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="pred_layer_1",
+            bias_init=constant(0.0),
+        )(bt_1)
+        pred_fut = nn.relu(pred_fut)
+        pred_fut = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="pred_layer_2",
+            bias_init=constant(0.0),
+        )(pred_fut)
+
+        return pred_fut, new_bt, new_close_hidden, new_open_hidden
+
+    def initialize_carry(self, batch_size):
+        return jnp.zeros((batch_size, 1, self.encoder_layer_out_shape))
+
+
 class MiniGridActorCriticInput(TypedDict):
     observation: jax.Array
     prev_action: jax.Array

@@ -332,9 +332,9 @@ def byol_minigrid_ppo_update_networks(
 
     def pred_loss(pred_params, target_params):
         tar_obs = target_state.apply_fn(target_params, transitions.next_obs)
-        pred_input = (transitions.bt, transitions.obs, transitions.prev_action)
+        pred_input = (transitions.prev_bt.squeeze(2), transitions.obs, transitions.prev_action)
         pred_obs, _, _, _ = pred_state.apply_fn(
-            pred_params, init_close_hstate[0], init_open_hstate[0], pred_input
+            pred_params, init_close_hstate, init_open_hstate, pred_input
         )
         pred_norm = (pred_obs) / (jnp.linalg.norm(pred_obs, axis=-1, keepdims=True))
         tar_norm = jax.lax.stop_gradient(
