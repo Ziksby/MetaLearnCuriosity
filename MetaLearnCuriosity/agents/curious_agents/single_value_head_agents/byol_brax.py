@@ -11,12 +11,15 @@ import optax
 from flax.jax_utils import replicate, unreplicate
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
+
 from MetaLearnCuriosity.agents.nn import (
     BraxBYOLPredictor,
     BYOLTarget,
     CloseScannedRNN,
     OpenScannedRNN,
 )
+from MetaLearnCuriosity.checkpoints import Save
+from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import BYOLRewardNorm
 from MetaLearnCuriosity.utils import BYOLTransition as Transition
 from MetaLearnCuriosity.utils import (
@@ -24,8 +27,6 @@ from MetaLearnCuriosity.utils import (
     process_output_general,
     update_target_state_with_ema,
 )
-from MetaLearnCuriosity.checkpoints import Save
-from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.wrappers import (
     BraxGymnaxWrapper,
     ClipAction,
@@ -37,13 +38,13 @@ from MetaLearnCuriosity.wrappers import (
 )
 
 environments = [
-    'ant',
-    'halfcheetah',
-    'hopper',
-    'humanoid',
-    'humanoidstandup',
-    'inverted_pendulum',
-    'inverted_double_pendulum',
+    "ant",
+    "halfcheetah",
+    "hopper",
+    "humanoid",
+    "humanoidstandup",
+    "inverted_pendulum",
+    "inverted_double_pendulum",
     "pusher",
     "reacher",
     "walker2d",
@@ -169,7 +170,9 @@ def ppo_make_train(rng):
 
     # INIT INPUT
     init_x = jnp.zeros((1, config["NUM_ENVS_PER_DEVICE"], *env.observation_space(env_params).shape))
-    init_action = jnp.zeros((config["NUM_ENVS_PER_DEVICE"],*env.action_space(env_params).shape), dtype=jnp.float32)
+    init_action = jnp.zeros(
+        (config["NUM_ENVS_PER_DEVICE"], *env.action_space(env_params).shape), dtype=jnp.float32
+    )
     close_init_hstate = CloseScannedRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 256)
     open_init_hstate = OpenScannedRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 256)
     init_bt = jnp.zeros((1, config["NUM_ENVS_PER_DEVICE"], 256))
@@ -231,6 +234,8 @@ def ppo_make_train(rng):
         open_init_hstate,
         init_action,
     )
+
+
 def train(
     rng,
     train_state,
@@ -489,7 +494,9 @@ def train(
 
                     # Conditionally update every 10 steps
                     return jax.lax.cond(
-                        update_target_counter % (10*config["NUM_MINIBATCHES"]*config["UPDATE_EPOCHS"]) == 0,
+                        update_target_counter
+                        % (10 * config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"])
+                        == 0,
                         true_fun,
                         false_fun,
                         None,  # The argument passed to true_fun and false_fun, `_` in this case is unused
@@ -649,6 +656,7 @@ def train(
         "norm_int_reward": norm_int_reward,
     }
 
+
 for env_name in environments:
     rng = jax.random.PRNGKey(config["SEED"])
     t = time.time()
@@ -690,12 +698,6 @@ for env_name in environments:
             )
         )
         elapsed_time = time.time() - t
-        epi_ret = (
-            output["metrics"]["returned_episode_returns"].mean(0).mean(0).mean(-1).reshape(-1)
-        )
-        int_rew = output["int_reward"].mean(0).mean(0).mean(-1).reshape(-1)
-        int_norm_rew = output["norm_int_reward"].mean(0).mean(0).mean(-1).reshape(-1)
-        pred_loss = unreplicate(output["pred_loss"]).mean(-1).mean(0).mean(-1)
 
     else:
         (
@@ -729,6 +731,7 @@ for env_name in environments:
                 init_action,
             )
         )
+        elapsed_time = time.time() - t
 
     logger = WBLogger(
         config=config,

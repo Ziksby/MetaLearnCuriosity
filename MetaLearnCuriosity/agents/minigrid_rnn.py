@@ -8,10 +8,10 @@ import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
 import optax
-import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.training.train_state import TrainState
 
+import wandb
 from MetaLearnCuriosity.agents.nn import MiniGridActorCriticRNN
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
@@ -19,8 +19,8 @@ from MetaLearnCuriosity.utils import MiniGridTransition as Transition
 from MetaLearnCuriosity.utils import (
     calculate_gae,
     minigrid_ppo_update_networks,
+    process_output_general,
     rnn_rollout,
-    process_output_general
 )
 from MetaLearnCuriosity.wrappers import (
     FlattenObservationWrapper,
@@ -330,14 +330,12 @@ for env_name in environments:
         output = jax.block_until_ready(train_fn(rng, init_hstate, train_state))
         elapsed_time = time.time() - t
 
-
     else:
         init_hstate, train_state, rng = make_train(rng)
         train_state = replicate(train_state, jax.local_devices())
         init_hstate = replicate(init_hstate, jax.local_devices())
         train_fn = jax.pmap(train, axis_name="devices")
         output = jax.block_until_ready(train_fn(rng, init_hstate, train_state))
-
 
     print(output["rl_total_loss"].shape)
     logger = WBLogger(
@@ -346,7 +344,7 @@ for env_name in environments:
         tags=["minigrid", config["ENV_NAME"], "baseline"],
         name=f"{config['RUN_NAME']}_{config['ENV_NAME']}",
     )
-    output=process_output_general(output)
+    output = process_output_general(output)
 
     logger.log_episode_return(output, config["NUM_SEEDS"])
     logger.log_rl_loss_minigrid(output, config["NUM_SEEDS"])

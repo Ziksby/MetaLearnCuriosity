@@ -11,9 +11,10 @@ import optax
 from flax.jax_utils import replicate, unreplicate
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
-from MetaLearnCuriosity.utils import process_output_general, PPOTransition
+
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
+from MetaLearnCuriosity.utils import PPOTransition, process_output_general
 from MetaLearnCuriosity.wrappers import (
     BraxGymnaxWrapper,
     ClipAction,
@@ -25,13 +26,13 @@ from MetaLearnCuriosity.wrappers import (
 )
 
 environments = [
-    'ant',
-    'halfcheetah',
-    'hopper',
-    'humanoid',
-    'humanoidstandup',
-    'inverted_pendulum',
-    'inverted_double_pendulum',
+    "ant",
+    "halfcheetah",
+    "hopper",
+    "humanoid",
+    "humanoidstandup",
+    "inverted_pendulum",
+    "inverted_double_pendulum",
     "pusher",
     "reacher",
     "walker2d",
@@ -91,7 +92,6 @@ class ActorCritic(nn.Module):
         critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(critic)
 
         return pi, jnp.squeeze(critic, axis=-1)
-
 
 
 def make_config_env(config, env_name):
@@ -319,6 +319,7 @@ def train(rng, train_state):
         "rl_entrophy_loss": rl_total_loss[1][2],
     }
 
+
 for env_name in environments:
     rng = jax.random.PRNGKey(config["SEED"])
     config, env, env_params = make_config_env(config, env_name)
@@ -344,10 +345,10 @@ for env_name in environments:
     logger = WBLogger(
         config=config,
         group="delayed_brax_baseline",
-        tags=["baseline", config["ENV_NAME"],"delayed_brax"],
+        tags=["baseline", config["ENV_NAME"], "delayed_brax"],
         name=f'{config["RUN_NAME"]}_{config["ENV_NAME"]}',
     )
-    output=process_output_general(output)
+    output = process_output_general(output)
 
     logger.log_episode_return(output, config["NUM_SEEDS"])
     logger.log_rl_losses(output, config["NUM_SEEDS"])

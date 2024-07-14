@@ -46,6 +46,22 @@ class BYOLLiteTransition(NamedTuple):
     info: jnp.ndarray
 
 
+class BYOLMiniGridTransition(NamedTuple):
+    done: jnp.ndarray
+    action: jnp.ndarray
+    value: jnp.ndarray
+    reward: jnp.ndarray
+    int_reward: jnp.ndarray
+    log_prob: jnp.ndarray
+    obs: jnp.ndarray
+    next_obs: jnp.ndarray
+    # for minigrid rnn policy
+    prev_action: jnp.ndarray
+    prev_reward: jnp.ndarray
+    prev_bt: jnp.ndarray
+    info: jnp.ndarray
+
+
 class RNDMiniGridTransition(NamedTuple):
     done: jnp.ndarray
     action: jnp.ndarray
@@ -130,14 +146,62 @@ def calculate_gae(
     return advantages, advantages + transitions.value
 
 
+def byol_calculate_gae(
+    transitions: BYOLMiniGridTransition,
+    last_val: jax.Array,
+    gamma: float,
+    gae_lambda: float,
+    int_lambda: float,
+    rew_norm_parameter: float,
+    byol_reward_norm_params: BYOLRewardNorm,
+) -> tuple[jax.Array, jax.Array]:
+    norm_int_reward, byol_reward_norm_params = byol_normalize_prior_int_rewards(
+        transitions.int_reward, byol_reward_norm_params, rew_norm_parameter
+    )
+    norm_traj_batch = BYOLMiniGridTransition(
+        transitions.done,
+        transitions.action,
+        transitions.value,
+        transitions.reward,
+        transitions.int_reward,
+        transitions.log_prob,
+        transitions.obs,
+        transitions.next_obs,
+        # for minigrid rnn policy
+        transitions.prev_action,
+        transitions.prev_reward,
+        transitions.prev_bt,
+        transitions.info,
+    )
+    # single iteration for the loop
+    def _get_advantages(gae_and_next_value, transition):
+        gae, next_value = gae_and_next_value
+        delta = (
+            (transition.reward + (transition.int_reward * int_lambda))
+            + gamma * next_value * (1 - transition.done)
+            - transition.value
+        )
+        gae = delta + gamma * gae_lambda * (1 - transition.done) * gae
+        return (gae, transition.value), gae
+
+    _, advantages = jax.lax.scan(
+        _get_advantages,
+        (jnp.zeros_like(last_val), last_val),
+        norm_traj_batch,
+        reverse=True,
+    )
+    # advantages and values (Q)
+    return advantages, advantages + transitions.value, norm_int_reward, byol_reward_norm_params
+
+
 def rnd_calculate_gae(
-    transitions: MiniGridTransition,
+    transitions: RNDMiniGridTransition,
     last_val: jax.Array,
     gamma: float,
     int_gamma: float,
     gae_lambda: float,
     int_lambda: float,
-    rnd_int_return_norm_params: NamedTuple,
+    rnd_int_return_norm_params: RNDNormIntReturnParams,
 ) -> tuple[jax.Array, jax.Array]:
     # single iteration for the loop
 
@@ -145,6 +209,8 @@ def rnd_calculate_gae(
         transitions, rnd_int_return_norm_params, int_gamma
     )
 
+    # *** Wrong transition class used here.
+    # *** But it still works.
     norm_traj_batch = RNDTransition(
         transitions.done,
         transitions.action,
@@ -243,6 +309,120 @@ def update_rnd_int_norm_params(batch_count, batch_mean, batch_var, rewems, rnd_i
     new_count = tot_count
 
     return RNDNormIntReturnParams(new_count, new_mean, new_var, rewems)
+
+
+def byol_minigrid_ppo_update_networks(
+    train_state: TrainState,
+    pred_state: TrainState,
+    target_state: TrainState,
+    transitions: BYOLMiniGridTransition,
+    init_hstate: jax.Array,
+    init_close_hstate: jnp.ndarray,
+    init_open_hstate: jnp.ndarray,
+    advantages: jax.Array,
+    targets: jax.Array,
+    clip_eps: float,
+    vf_coef: float,
+    ent_coef: float,
+    update_target_counter: int,
+    ema_param: float,
+):
+    # NORMALIZE ADVANTAGES
+    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+    def pred_loss(pred_params, target_params):
+        tar_obs = target_state.apply_fn(target_params, transitions.next_obs)
+        pred_input = (transitions.bt, transitions.obs, transitions.prev_action)
+        pred_obs, _, _, _ = pred_state.apply_fn(
+            pred_params, init_close_hstate[0], init_open_hstate[0], pred_input
+        )
+        pred_norm = (pred_obs) / (jnp.linalg.norm(pred_obs, axis=-1, keepdims=True))
+        tar_norm = jax.lax.stop_gradient(
+            (tar_obs) / (jnp.linalg.norm(tar_obs, axis=-1, keepdims=True))
+        )
+        loss = jnp.square(jnp.linalg.norm((pred_norm - tar_norm), axis=-1)) * (1 - transitions.done)
+        return loss.mean()
+
+    def _loss_fn(params):
+        # RERUN NETWORK
+        dist, value, _ = train_state.apply_fn(
+            params,
+            {
+                # [batch_size, seq_len, ...]
+                "observation": transitions.obs,
+                "prev_action": transitions.prev_action,
+                "prev_reward": transitions.prev_reward,
+            },
+            init_hstate,
+        )
+        log_prob = dist.log_prob(transitions.action)
+
+        # CALCULATE VALUE LOSS
+        value_pred_clipped = transitions.value + (value - transitions.value).clip(
+            -clip_eps, clip_eps
+        )
+        value_loss = jnp.square(value - targets)
+        value_loss_clipped = jnp.square(value_pred_clipped - targets)
+        value_loss = 0.5 * jnp.maximum(value_loss, value_loss_clipped).mean()
+        # TODO: ablate this!
+        # value_loss = jnp.square(value - targets).mean()
+
+        # CALCULATE ACTOR LOSS
+        ratio = jnp.exp(log_prob - transitions.log_prob)
+        actor_loss1 = advantages * ratio
+        actor_loss2 = advantages * jnp.clip(ratio, 1.0 - clip_eps, 1.0 + clip_eps)
+        actor_loss = -jnp.minimum(actor_loss1, actor_loss2).mean()
+        entropy = dist.entropy().mean()
+
+        total_loss = actor_loss + vf_coef * value_loss - ent_coef * entropy
+        return total_loss, (value_loss, actor_loss, entropy)
+
+    (loss, (vloss, aloss, entropy)), grads = jax.value_and_grad(_loss_fn, has_aux=True)(
+        train_state.params
+    )
+    pred_losses, pred_grads = jax.value_and_grad(pred_loss)(
+        pred_state.params,
+        target_state.params,
+    )
+    (loss, vloss, aloss, entropy, pred_losses, grads, pred_grads) = jax.lax.pmean(
+        (loss, vloss, aloss, entropy, pred_losses, grads, pred_grads),
+        axis_name="devices",
+    )
+
+    def update_target(target_state, pred_state, update_target_counter=update_target_counter):
+        def true_fun(_):
+            # Perform the EMA update
+            return update_target_state_with_ema(
+                predictor_state=pred_state,
+                target_state=target_state,
+                ema_param=ema_param,
+            )
+
+        def false_fun(_):
+            # Return the old target_params unchanged
+            return target_state
+
+        # Conditionally update every 10 steps
+        return jax.lax.cond(
+            update_target_counter % (10 * 16 * 1) == 0,
+            true_fun,
+            false_fun,
+            None,  # The argument passed to true_fun and false_fun, `_` in this case is unused
+        )
+
+    update_target_counter += 1
+    train_state = train_state.apply_gradients(grads=grads)
+    pred_state = pred_state.apply_gradients(grads=pred_grads)
+    target_state = update_target(target_state, pred_state, update_target_counter)
+
+    update_info = {
+        "total_loss": loss,
+        "value_loss": vloss,
+        "actor_loss": aloss,
+        "entropy": entropy,
+        "pred_loss": pred_losses,
+    }
+    return (train_state, pred_state, target_state, update_target_counter), update_info
 
 
 def minigrid_ppo_update_networks(
