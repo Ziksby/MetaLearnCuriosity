@@ -11,7 +11,7 @@ import optax
 from flax.jax_utils import replicate, unreplicate
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
-
+import shutil
 from MetaLearnCuriosity.agents.nn import (
     BraxBYOLPredictor,
     BYOLTarget,
