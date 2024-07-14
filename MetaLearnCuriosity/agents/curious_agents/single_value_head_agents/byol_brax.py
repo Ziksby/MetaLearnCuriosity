@@ -489,7 +489,7 @@ def train(
 
                     # Conditionally update every 10 steps
                     return jax.lax.cond(
-                        update_target_counter % 320 == 0,
+                        update_target_counter % (10*config["NUM_MINIBATCHES"]*config["UPDATE_EPOCHS"]) == 0,
                         true_fun,
                         false_fun,
                         None,  # The argument passed to true_fun and false_fun, `_` in this case is unused
