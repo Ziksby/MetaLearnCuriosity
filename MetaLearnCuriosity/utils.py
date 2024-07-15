@@ -174,6 +174,7 @@ def byol_calculate_gae(
         transitions.info,
     )
     # single iteration for the loop
+
     def _get_advantages(gae_and_next_value, transition):
         gae, next_value = gae_and_next_value
         delta = (
