@@ -11,24 +11,16 @@ import optax
 import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.training.train_state import TrainState
-
-from MetaLearnCuriosity.agents.nn import MiniGridActorCriticRNN,TargetNetwork,PredictorNetwork
+import numpy as np
+from MetaLearnCuriosity.agents.nn import MiniGridActorCriticRNN, MiniGridBYOLPredictor, BYOLTarget,OpenScannedRNN,CloseScannedRNN
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
-from MetaLearnCuriosity.utils import RNDMiniGridTransition
+from MetaLearnCuriosity.utils import BYOLMiniGridTransition as Transition
 from MetaLearnCuriosity.utils import (
-    rnd_calculate_gae,
-    rnd_minigrid_ppo_update_networks,
+    byol_calculate_gae,
+    byol_minigrid_ppo_update_networks,
     rnn_rollout,
-)
-from MetaLearnCuriosity.utils import (
-    ObsNormParams,
-    RNDNormIntReturnParams,
-    RNDTransition,
-    make_obs_gymnax_discrete,
-    process_output_general,
-    rnd_normalise_int_rewards,
-    update_obs_norm_params,
+    BYOLRewardNorm
 )
 from MetaLearnCuriosity.wrappers import (
     FlattenObservationWrapper,
@@ -40,15 +32,12 @@ from MetaLearnCuriosity.wrappers import (
 jax.config.update("jax_threefry_partitionable", True)
 
 environments = [
-    "MiniGrid-BlockedUnlockPickUp",
-    "MiniGrid-DoorKey-16x16",
-    "MiniGrid-Empty-16x16",
-    "MiniGrid-EmptyRandom-16x16",
+    # "MiniGrid-BlockedUnlockPickUp",
+    # "MiniGrid-Empty-16x16",
+    # "MiniGrid-EmptyRandom-16x16",
     "MiniGrid-FourRooms",
-    "MiniGrid-LockedRoom",
     "MiniGrid-MemoryS128",
     "MiniGrid-Unlock",
-    "MiniGrid-UnlockPickUp",
 ]
 
 config = {
@@ -70,16 +59,19 @@ config = {
     "NUM_MINIBATCHES": 16,
     "TOTAL_TIMESTEPS": 50_000_000,
     "LR": 0.001,
-    "PRED_LR":1e-3,
     "CLIP_EPS": 0.2,
     "GAMMA": 0.99,
-    "INT_GAMMA":0.99,
     "GAE_LAMBDA": 0.95,
     "ENT_COEF": 0.01,
     "VF_COEF": 0.5,
     "MAX_GRAD_NORM": 0.5,
     "EVAL_EPISODES": 80,
     "SEED": 42,
+    "ANNEAL_PRED_LR": False,
+    "DEBUG": False,
+    "PRED_LR": 0.001,
+    "REW_NORM_PARAMETER": 0.99,
+    "EMA_PARAMETER": 0.99,
 }
 
 
@@ -95,10 +87,8 @@ def make_env_config(config, env_name):
     else:
         env = FlattenObservationWrapper(env)
         observations_shape = env.observation_space(env_params).shape
-    print(observations_shape)
     env_eval = LogWrapper(env_eval)
     env = LogWrapper(env)
-    env=VecEnv(env)
     num_devices = jax.local_device_count()
     config["NUM_ENVS_PER_DEVICE"] = config["NUM_ENVS"] // num_devices
     config["TOTAL_TIMESTEPS_PER_DEVICE"] = config["TOTAL_TIMESTEPS"] // num_devices
@@ -106,29 +96,16 @@ def make_env_config(config, env_name):
     config["NUM_UPDATES"] = (
         config["TOTAL_TIMESTEPS_PER_DEVICE"] // config["NUM_STEPS"] // config["NUM_ENVS_PER_DEVICE"]
     )
-    assert config["NUM_ENVS_PER_DEVICE"] >= 4
-    config["UPDATE_PROPORTION"] = 4 / config["NUM_ENVS_PER_DEVICE"]
     print(f"Num devices: {num_devices}, Num updates: {config['NUM_UPDATES']}")
     return observations_shape, config, env, env_params
 
 
 def make_train(rng):
     rng, _rng = jax.random.split(rng)
-    rng, _pred_rng = jax.random.split(rng)
     rng, _tar_rng = jax.random.split(rng)
-    rng, _init_obs_rng = jax.random.split(rng)
-
+    # rng, _en_rng = jax.random.split(rng)
+    rng, _pred_rng = jax.random.split(rng)
     num_actions = env.action_space(env_params).n
-
-    def linear_schedule(count):
-        frac = (
-            1.0
-            - (count // (config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"]))
-            / config["NUM_UPDATES"]
-        )
-        return config["LR"] * frac
-    
-
     def pred_linear_schedule(count):
         frac = (
             1.0
@@ -136,7 +113,16 @@ def make_train(rng):
             / config["NUM_UPDATES"]
         )
         return config["PRED_LR"] * frac
-    
+    def linear_schedule(count):
+        frac = (
+            1.0
+            - (count // (config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"]))
+            / config["NUM_UPDATES"]
+        )
+        return config["LR"] * frac
+        # INIT network
+    target = BYOLTarget(256)
+    pred = MiniGridBYOLPredictor(256, num_actions)
     network = MiniGridActorCriticRNN(
         num_actions=num_actions,
         action_emb_dim=config["ACTION_EMB_DIM"],
@@ -145,67 +131,70 @@ def make_train(rng):
         head_hidden_dim=config["HEAD_HIDDEN_DIM"],
         use_cnns=config["USE_CNNS"],
     )
-    target = TargetNetwork(256)
-    predictor = PredictorNetwork(256)
-
     init_obs = {
         "observation": jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1, *observations_shape)),
         "prev_action": jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1), dtype=jnp.int32),
         "prev_reward": jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1)),
     }
     init_hstate = network.initialize_carry(batch_size=config["NUM_ENVS_PER_DEVICE"])
-    init_x = jnp.zeros(env.observation_space(env_params).shape)
-    network_params = network.init(_rng, init_obs, init_hstate)
+    init_x = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1, *observations_shape))
+    init_action = jnp.zeros((config["NUM_ENVS_PER_DEVICE"],1), dtype=jnp.int32)
+    close_init_hstate = pred.initialize_carry(config["NUM_ENVS_PER_DEVICE"])
+    open_init_hstate = pred.initialize_carry(config["NUM_ENVS_PER_DEVICE"])
+    print(init_hstate.shape, close_init_hstate.shape,open_init_hstate.shape)
+    init_bt = jnp.zeros((config["NUM_ENVS_PER_DEVICE"],1, 256))
+    init_pred_input = (init_bt, init_x, init_action)
+    pred_params = pred.init(_pred_rng, close_init_hstate, open_init_hstate, init_pred_input)
     target_params = target.init(_tar_rng, init_x)
-    pred_params = predictor.init(_pred_rng, init_x)
+
+    network_params = network.init(_rng, init_obs, init_hstate)
+    pred_params = pred.init(_pred_rng, close_init_hstate, open_init_hstate, init_pred_input)
+    target_params = target.init(_tar_rng, init_x)
 
     tx = optax.chain(
         optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
         optax.inject_hyperparams(optax.adam)(learning_rate=linear_schedule, eps=1e-8),  # eps=1e-5
     )
-    train_state = TrainState.create(apply_fn=network.apply, params=network_params, tx=tx)
-    pred_tx = optax.chain(
-        optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
-        optax.adam(config["PRED_LR"], eps=1e-5),
+    if config["ANNEAL_PRED_LR"]:
+        pred_tx = optax.chain(
+            optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+            optax.adam(learning_rate=pred_linear_schedule, eps=1e-5),
+        )
+    else:
+        pred_tx = optax.chain(
+            optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+            optax.adam(config["PRED_LR"], eps=1e-5),
+        )
+    pred_state = TrainState.create(
+        apply_fn=pred.apply,
+        params=pred_params,
+        tx=pred_tx,
     )
 
-    pred_state = TrainState.create(apply_fn=predictor.apply, params=pred_params, tx=pred_tx)
-
+    target_state = TrainState.create(
+        apply_fn=target.apply,
+        params=target_params,
+        tx=pred_tx,
+    )
+    train_state = TrainState.create(apply_fn=network.apply, params=network_params, tx=tx)
+    # env = VecEnv(env)
     rng = jax.random.split(rng, jax.local_device_count())
 
-    return init_hstate, train_state, pred_state,target_params,rng,_init_obs_rng
+    return init_hstate,close_init_hstate,open_init_hstate, train_state,pred_state,target_state,rng
 
 
-def train(rng, init_hstate, train_state,pred_state, target_params, init_obs_rng):
-
-    # INIT OBS NORM PARAMS:
-    random_rollout = make_obs_gymnax_discrete(
-        config["NUM_ENVS_PER_DEVICE"], env, env_params, 1
-    )
-    # Obs will be in shape: num_steps, num_envs, obs.shape
-    init_obs = random_rollout(init_obs_rng)
-    init_obs = init_obs.reshape(
-        -1, init_obs.shape[-1]
-    )  # reshape it to num_envs*num_steps, obs.shape
-
-    init_mean_obs = jnp.zeros(init_obs.shape[-1])
-    init_var_obs = jnp.ones(init_obs.shape[-1])
-    init_obs_count = 1e-4
-
-    init_obs_norm_params = ObsNormParams(init_obs_count, init_mean_obs, init_var_obs)
-    rnd_int_return_norm_params = RNDNormIntReturnParams(
-        1e-4, 0.0, 1.0, jnp.zeros((config["NUM_STEPS"],))
-    )
-
-    obs_norm_params = update_obs_norm_params(init_obs_norm_params, init_obs)
-    target = TargetNetwork(256)
+def train(rng, init_hstate,close_init_hstate,open_init_hstate, train_state,pred_state,target_state):
     rng, _rng = jax.random.split(rng)
 
     reset_rng = jax.random.split(_rng, config["NUM_ENVS_PER_DEVICE"])
-
-    obsv, env_state = env.reset(reset_rng, env_params)
+    # INIT STUFF FOR OPTIMIZATION AND NORMALIZATION
+    update_target_counter = 0
+    byol_reward_norm_params = BYOLRewardNorm(0, 0, 1, 0)
+    
+    obsv, env_state = jax.vmap(env.reset, in_axes=(0, None))(reset_rng, env_params)
     prev_action = jnp.zeros(config["NUM_ENVS_PER_DEVICE"], dtype=jnp.int32)
     prev_reward = jnp.zeros(config["NUM_ENVS_PER_DEVICE"])
+    prev_bt = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1,256))
 
     # TRAIN LOOP
 
@@ -218,14 +207,17 @@ def train(rng, init_hstate, train_state,pred_state, target_params, init_obs_rng)
                 rng,
                 train_state,
                 pred_state,
-                target_params,
-                obs_norm_params,
-                rnd_int_return_norm_params,
+                target_state,
                 env_state,
                 prev_obs,
                 prev_action,
                 prev_reward,
+                prev_bt,
                 prev_hstate,
+                close_prev_hstate,
+                open_prev_hstate,
+                byol_reward_norm_params,
+                update_target_counter,
             ) = runner_state
 
             # SELECT ACTION
@@ -246,19 +238,24 @@ def train(rng, init_hstate, train_state,pred_state, target_params, init_obs_rng)
 
             # STEP ENV
             rng_step = jax.random.split(rng, config["NUM_ENVS_PER_DEVICE"])
-            obsv, env_state, reward, done, info = env.step(
+            obsv, env_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0, None))(
                 rng_step, env_state, action, env_params
             )
-            # NORM THE OBS
-            rnd_obs = ((obsv - obs_norm_params.mean) / jnp.sqrt(obs_norm_params.var)).clip(-5, 5)     
-
-
-
             # INT REWARD
-            tar_feat = target.apply(target_params, rnd_obs)
-            pred_feat = pred_state.apply_fn(pred_state.params, rnd_obs)
-            int_reward = jnp.square(jnp.linalg.norm((pred_feat - tar_feat), axis=1)) / 2
-            transition = RNDMiniGridTransition(
+            tar_obs = target_state.apply_fn(target_state.params, obsv[:,None])
+            pred_input = (prev_bt, prev_obs[:,None], prev_action[:,None])
+            pred_obs, new_bt, new_close_hstate, new_open_hstate = pred_state.apply_fn(
+                pred_state.params, close_prev_hstate, open_prev_hstate, pred_input
+            )
+            pred_norm = (pred_obs.squeeze(1)) / (
+                jnp.linalg.norm(pred_obs.squeeze(1), axis=-1, keepdims=True)
+            )
+            tar_norm = jax.lax.stop_gradient(
+                (tar_obs.squeeze(1)) / (jnp.linalg.norm(tar_obs.squeeze(1), axis=-1, keepdims=True))
+            )
+
+            int_reward = jnp.square(jnp.linalg.norm((pred_norm - tar_norm), axis=-1)) * (1 - done)
+            transition = Transition(
                 done=done,
                 action=action,
                 value=value,
@@ -266,19 +263,21 @@ def train(rng, init_hstate, train_state,pred_state, target_params, init_obs_rng)
                 int_reward=int_reward,
                 log_prob=log_prob,
                 obs=prev_obs,
+                next_obs=obsv,
                 prev_action=prev_action,
                 prev_reward=prev_reward,
+                prev_bt=prev_bt,
                 info=info,
             )
-            runner_state = (rng, train_state, pred_state, target_params, obs_norm_params, rnd_int_return_norm_params, env_state, obsv, action, reward, hstate)
+            runner_state = (rng, train_state, pred_state,target_state,env_state, obsv, action, reward, new_bt,hstate,new_close_hstate,new_open_hstate,byol_reward_norm_params,update_target_counter)
             return runner_state, transition
 
-        initial_hstate = runner_state[-1]
+        initial_hstate,close_initial_hstate,open_initial_hstate = runner_state[9:12]
         runner_state, transitions = jax.lax.scan(_env_step, runner_state, None, config["NUM_STEPS"])
 
         # CALCULATE ADVANTAGE
 
-        rng, train_state, pred_state, target_params, obs_norm_params, rnd_int_return_norm_params, env_state, prev_obs, prev_action, prev_reward, hstate = runner_state
+        rng, train_state,pred_state,target_state, env_state, prev_obs, prev_action, prev_reward,prev_bt, hstate,close_hstate,open_hstate,byol_reward_norm_params,update_target_counter = runner_state
 
         _, last_val, _ = train_state.apply_fn(
             train_state.params,
@@ -290,50 +289,40 @@ def train(rng, init_hstate, train_state,pred_state, target_params, init_obs_rng)
             hstate,
         )
 
-        advantages, targets, rnd_int_return_norm_params,norm_int_rewards = rnd_calculate_gae(
-            transitions, last_val.squeeze(1), config["GAMMA"], config["INT_GAMMA"],config["GAE_LAMBDA"], config["INT_LAMBDA"], rnd_int_return_norm_params
+        advantages, targets,norm_int_reward, byol_reward_norm_params = byol_calculate_gae(
+            transitions, last_val.squeeze(1), config["GAMMA"], config["GAE_LAMBDA"],config["INT_LAMBDA"],config["REW_NORM_PARAMETER"],byol_reward_norm_params
         )
 
         # UPDATE NETWORK
         def _update_epoch(update_state, _):
             def _update_minbatch(train_states, batch_info):
-                init_hstate, transitions, advantages, targets, rnd_obs = batch_info
-                train_state,pred_state=train_states
-                (new_train_state,pred_state), update_info = rnd_minigrid_ppo_update_networks(
+                init_hstate, close_init_hstate,open_init_hstate,transitions, advantages, targets = batch_info
+                train_state,pred_state,target_state,update_target_counter = train_states
+                (new_train_state,pred_state,target_state,update_target_counter) ,update_info = byol_minigrid_ppo_update_networks(
                     train_state=train_state,
                     pred_state=pred_state,
-                    target_params=target_params,
-                    _mask_rng=_mask_rng,
+                    target_state=target_state,
                     transitions=transitions,
-                    rnd_obs=rnd_obs,
                     init_hstate=init_hstate.squeeze(1),
+                    init_close_hstate=close_init_hstate.squeeze(1),
+                    init_open_hstate=open_init_hstate.squeeze(1),
                     advantages=advantages,
                     targets=targets,
-                    update_prop=config["UPDATE_PROPORTION"],
                     clip_eps=config["CLIP_EPS"],
                     vf_coef=config["VF_COEF"],
                     ent_coef=config["ENT_COEF"],
+                    update_target_counter=update_target_counter,
+                    ema_param=config["EMA_PARAMETER"],
                 )
-                return (new_train_state,pred_state), update_info
+                return (new_train_state,pred_state,target_state,update_target_counter), update_info
 
-            rng, train_state,pred_state,obs_norm_params, init_hstate, transitions, advantages, targets = update_state
+            rng, train_state,pred_state,target_state,update_target_counter, init_hstate,close_init_hstate,open_init_hstate, transitions, advantages, targets = update_state
 
             # MINIBATCHES PREPARATION
-            # UPDATE OBS NORM PARAMETERS
-            obs_norm_params = update_obs_norm_params(
-                obs_norm_params, transitions.obs.reshape(-1, init_obs.shape[-1])
-            )
-            # GET RND OBS
-            rnd_obs = (
-                (transitions.obs - obs_norm_params.mean) / jnp.sqrt(obs_norm_params.var)
-            ).clip(-5, 5)
-
             rng, _rng = jax.random.split(rng)
-            rng, _mask_rng = jax.random.split(rng)
-
             permutation = jax.random.permutation(_rng, config["NUM_ENVS_PER_DEVICE"])
             # [seq_len, batch_size, ...]
-            batch = (init_hstate, transitions, advantages, targets,rnd_obs)
+            batch = (init_hstate,close_init_hstate,open_init_hstate, transitions, advantages, targets)
             # [batch_size, seq_len, ...], as our model assumes
             batch = jtu.tree_map(lambda x: x.swapaxes(0, 1), batch)
 
@@ -343,14 +332,16 @@ def train(rng, init_hstate, train_state,pred_state, target_params, init_obs_rng)
                 lambda x: jnp.reshape(x, (config["NUM_MINIBATCHES"], -1) + x.shape[1:]),
                 shuffled_batch,
             )
-            (train_state,pred_state) ,update_info = jax.lax.scan(_update_minbatch, (train_state,pred_state) ,minibatches)
+            (train_state,pred_state,target_state,update_target_counter), update_info = jax.lax.scan(_update_minbatch, (train_state,pred_state,target_state,update_target_counter), minibatches)
 
-            update_state = (rng, train_state, pred_state,obs_norm_params,init_hstate, transitions, advantages, targets)
+            update_state = (rng, train_state,pred_state,target_state,update_target_counter, init_hstate,close_init_hstate,open_init_hstate, transitions, advantages, targets)
             return update_state, update_info
 
         # [seq_len, batch_size, num_layers, hidden_dim]
         init_hstate = initial_hstate[None, :]
-        update_state = (rng, train_state, pred_state,obs_norm_params,init_hstate, transitions, advantages, targets)
+        close_init_hstate = close_initial_hstate[None,:]
+        open_init_hstate = open_initial_hstate[None,:]
+        update_state = (rng, train_state,pred_state,target_state,update_target_counter, init_hstate,close_init_hstate,open_init_hstate, transitions, advantages, targets)
         update_state, loss_info = jax.lax.scan(
             _update_epoch, update_state, None, config["UPDATE_EPOCHS"]
         )
@@ -381,113 +372,149 @@ def train(rng, init_hstate, train_state,pred_state, target_params, init_obs_rng)
         #     }
         # )
 
-        rng, train_state,pred_state,obs_norm_params= update_state[:4]
-        traj_batch=update_state[5]
+        rng, train_state,pred_state,target_state,update_target_counter = update_state[:5]
+        traj_batch = update_state[-3]
         metric = traj_batch.info
-        runner_state = (rng, train_state, pred_state,target_params, obs_norm_params, rnd_int_return_norm_params, env_state, prev_obs, prev_action, prev_reward, hstate)
-        return runner_state, (metric, loss_info, traj_batch.int_reward,norm_int_rewards)
+        int_reward=traj_batch.int_reward
+        runner_state = (rng, train_state, pred_state,target_state,env_state, prev_obs, prev_action, prev_reward,prev_bt, hstate,close_hstate,open_hstate, byol_reward_norm_params,update_target_counter)
+        return runner_state, (metric, loss_info,int_reward,norm_int_reward)
 
-    runner_state = (rng, train_state,pred_state, target_params, obs_norm_params, rnd_int_return_norm_params, env_state, obsv, prev_action, prev_reward, init_hstate)
-    runner_state, loss_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
-    metric, loss, int_reward, norm_int_reward = loss_info
+    runner_state = (rng, train_state, pred_state,target_state,env_state, obsv, prev_action, prev_reward, prev_bt, init_hstate, close_init_hstate,open_init_hstate,byol_reward_norm_params,update_target_counter)
+    runner_state, (metric,loss,int_reward,norm_int_reward) = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
+  
     return {
-        "train_state": runner_state[1:3],
+        "runner_state": runner_state,
         "metrics": metric,
         "loss_info": loss,
-        "norm_int_reward": norm_int_reward,
-        "int_reward":int_reward,
         "rl_total_loss": loss["total_loss"],
         "rl_value_loss": loss["value_loss"],
         "rl_actor_loss": loss["actor_loss"],
         "rl_entrophy_loss": loss["entropy"],
-        "rnd_loss": loss["rnd_loss"]
+        "int_reward": int_reward,
+        "norm_int_reward": norm_int_reward,
+        "pred_loss":loss["pred_loss"],
     }
 
-lambda_values=jnp.array([000.1,0.01,0.1, 0.003,0.005,0.02,0.03,0.05,0.2,0.5]).sort()
 
+lambda_values = jnp.array(
+    [0.001, 0.0001, 0.0003, 0.0005, 0.0008, 0.01, 0.1, 0.003, 0.005, 0.02, 0.03, 0.05]
+).sort()
+# lambda_values = jnp.array(
+#     [0.001]
+# ).sort()
 y_values = {}
 for lambda_value in lambda_values:
-    y_values[float(lambda_value)] = {}  # Use float(lambda_value) to ensure dictionary keys are serializable
-    config["INT_LAMBDA"]=lambda_value
+    y_values[
+        float(lambda_value)
+    ] = {}  # Use float(lambda_value) to ensure dictionary keys are serializable
+    config["INT_LAMBDA"] = lambda_value
     for env_name in environments:
+
+        observations_shape, config, env, env_params = make_env_config(config, env_name)
+
+        # experiments
         rng = jax.random.PRNGKey(config["SEED"])
-        t = time.time()
-        observations_shape,config, env, env_params = make_env_config(config, env_name)
 
         if config["NUM_SEEDS"] > 1:
             rng = jax.random.split(rng, config["NUM_SEEDS"])
-            init_hstate, train_state, pred_state,target_params,rng,init_obs_rng = jax.jit(jax.vmap(make_train, out_axes=(0, 0, 0,0,1,0)))(rng)
+            init_hstate,close_init_hstate,open_init_hstate, train_state,pred_state,target_state,rng= jax.jit(jax.vmap(make_train, out_axes=(0, 0, 0,0,0,0,1)))(rng)
             init_hstate = replicate(init_hstate, jax.local_devices())
+
+            open_init_hstate = replicate(open_init_hstate, jax.local_devices())
+            close_init_hstate = replicate(close_init_hstate, jax.local_devices())
             train_state = replicate(train_state, jax.local_devices())
             pred_state = replicate(pred_state, jax.local_devices())
-            target_params = replicate(target_params, jax.local_devices())
-            init_obs_rng = replicate(init_obs_rng, jax.local_devices())
+            target_state = replicate(target_state, jax.local_devices())
+
             train_fn = jax.vmap(train)
             train_fn = jax.pmap(train_fn, axis_name="devices")
-            print(f"Training in {config['ENV_NAME']}_{config['INT_LAMBDA']}")
+            print(f"Training in {config['ENV_NAME']}")
             t = time.time()
-            output = jax.block_until_ready(train_fn(rng, init_hstate, train_state,pred_state,target_params,init_obs_rng))
+            output = jax.block_until_ready(train_fn(rng, init_hstate,close_init_hstate,open_init_hstate, train_state, pred_state, target_state))
             elapsed_time = time.time() - t
-
+            epi_ret = (
+                output["metrics"]["returned_episode_returns"].mean(0).mean(0).mean(-1).reshape(-1)
+            )
+            int_rew = output["int_reward"].mean(0).mean(0).mean(-1).reshape(-1)
+            int_norm_rew = output["norm_int_reward"].mean(0).mean(0).mean(-1).reshape(-1)
+            pred_loss = unreplicate(output["pred_loss"]).mean(-1).mean(0).mean(-1)
+            # output = unreplicate(output)
 
         else:
-            init_hstate, train_state, pred_state,target_params,rng,init_obs_rng  = make_train(rng)
-            train_state = replicate(train_state, jax.local_devices())
+            init_hstate,close_init_hstate,open_init_hstate, train_state,pred_state,target_state,rng = make_train(rng)
             init_hstate = replicate(init_hstate, jax.local_devices())
+            open_init_hstate = replicate(open_init_hstate, jax.local_devices())
+            close_init_hstate = replicate(close_init_hstate, jax.local_devices())
+            train_state = replicate(train_state, jax.local_devices())
             pred_state = replicate(pred_state, jax.local_devices())
-            target_params = replicate(target_params, jax.local_devices())
-            init_rnd_obs = replicate(init_rnd_obs, jax.local_devices())
+            target_state = replicate(target_state, jax.local_devices())
             train_fn = jax.pmap(train, axis_name="devices")
-            output = jax.block_until_ready(train_fn(rng, init_hstate, train_state))
+            t = time.time()
+            output = jax.block_until_ready(train_fn(rng, init_hstate,close_init_hstate,open_init_hstate, train_state, pred_state, target_state))
+            # output = unreplicate(output)
+            epi_ret = output["metrics"]["returned_episode_returns"].mean(0).mean(-1).reshape(-1)
+            int_rew = output["int_reward"].mean(0).mean(-1).reshape(-1)
+            int_norm_rew = output["norm_int_reward"].mean(0).mean(-1).reshape(-1)
+            pred_loss = unreplicate(output["pred_loss"]).mean(-1).mean(-1)
 
-        print(time.time() - t)
+        print((time.time() - t) / 60)
         # Assuming `output` is your array
-        epi_ret = output["metrics"]["returned_episode_returns"].mean(0).mean(0).mean(-1).reshape(-1)
-        int_rew = output["int_reward"].mean(0).mean(0).mean(-1).reshape(-1)
-        int_norm_rew = output["norm_int_reward"].mean(0).mean(0).mean(-1).reshape(-1)
-        rnd_loss = unreplicate(output["rnd_loss"]).mean(-1).mean(0).mean(-1)
-
-        print(epi_ret.shape, output["metrics"]["returned_episode_returns"].shape)
 
         # Use the last element of each row from 'epi_ret' as y-values
-        y_values[float(lambda_value)][env_name] = (epi_ret,int_rew,int_norm_rew,rnd_loss)
+        y_values[float(lambda_value)][env_name] = (epi_ret, int_rew, int_norm_rew, pred_loss)
 
-# Print or process `y_values` as needed
 import matplotlib.pyplot as plt
 
+# Metric names corresponding to the data stored in y_values
+metric_names = [
+    "Episode Returns",
+    "Intrinsic Reward",
+    "Normalized Intrinsic Reward",
+    "Pred Loss",
+]
 
-line_styles = ['-', '--', '-.', ':', '-', '--', '-.', ':', '-', '--']  # Expanded for more lambda values
-
-# Initialize the figure for each environment
+# Initialize plotting
 for env_name in environments:
-    fig, axs = plt.subplots(4, 1, figsize=(12, 24))  # Increased figure size
-    fig.suptitle(f'Training Metrics Over Time for {env_name}')
+    num_metrics = len(metric_names)
+    fig, axs = plt.subplots(num_metrics, 1, figsize=(12, 6 * num_metrics), sharex=False)
+    fig.suptitle(f"Training Metrics Over Time for {env_name}")
 
-    # Process each metric for plotting
-    metric_names = ['Episode Returns', 'Intrinsic Reward', 'Normalized Intrinsic Reward', 'RND Loss']
+    # Iterate over each metric
     for idx, metric_name in enumerate(metric_names):
-        ax = axs[idx]
-        for i, (lambda_value, metrics) in enumerate(y_values.items()):
-            metric_data = metrics[env_name][idx]
-            line_style = line_styles[i % len(line_styles)]
-            ax.plot(metric_data, linestyle=line_style, label=f'Lambda={lambda_value:.5f}')
-        
-        ax.set_title(metric_name)
-        ax.set_xlabel('Training Steps')
-        ax.set_ylabel(metric_name)
+        ax = axs[idx] if num_metrics > 1 else axs
 
-    # Adjust subplot parameters and add legend outside
-    plt.subplots_adjust(right=0.8)  # Adjust right margin
-    axs[0].legend(loc='center left', bbox_to_anchor=(1.01, 0.5), title="Lambda values")
+        # Plot each lambda's data for this metric
+        plotted = False
+        for lambda_value in lambda_values:
+            lambda_key = float(lambda_value)  # Ensure float key matches dictionary keys
+            if lambda_key in y_values and env_name in y_values[lambda_key]:
+                metric_data = y_values[lambda_key][env_name][idx]
+                if len(metric_data) > 0:
+                    x_axis = range(1, len(metric_data) + 1)
+                    ax.plot(x_axis, metric_data, label=f"Lambda={lambda_value:.5f}")
+                    plotted = True
 
-    plt.savefig(f"{env_name}_metrics_over_time.png")
+        # Only add a legend if data was actually plotted
+        if plotted:
+            ax.set_title(metric_name)
+            ax.set_xlabel("Training Steps")
+            ax.set_ylabel(metric_name)
+            ax.legend()
+        else:
+            ax.set_title(f"{metric_name} (no data)")
+            ax.set_xlabel("Training Steps")
+            ax.set_ylabel(metric_name)
+
+    # Adjust layout and save the figure
+    plt.subplots_adjust(hspace=0.4)  # Adjust vertical spacing between plots
+    plt.savefig(f"{env_name}_metrics_over_time_sep_byol.png")
     plt.close(fig)
 
 # Scatter plot for final episode returns vs. lambda values
 for env_name in environments:
     lambda_values = []
     final_returns = []
-    
+
     # Collect data for plotting
     for lambda_value, env_data in y_values.items():
         epi_ret = env_data[env_name][0]  # index 0 for episode returns
@@ -502,13 +529,17 @@ for env_name in environments:
 
     # Plotting
     plt.figure(figsize=(10, 6))
-    plt.scatter(range(1, len(sorted_lambda_values) + 1), sorted_final_returns, color='blue')
-    plt.title(f'Final Episode Returns vs. Lambda for {env_name}')
-    plt.xlabel('Lambda Value (Indexed)')
-    plt.ylabel('Final Episode Return')
-    plt.xticks(range(1, len(sorted_lambda_values) + 1), [f'{lv:.5f}' for lv in sorted_lambda_values], rotation=45)
+    plt.scatter(range(1, len(sorted_lambda_values) + 1), sorted_final_returns, color="blue")
+    plt.title(f"Final Episode Returns vs. Lambda for {env_name}")
+    plt.xlabel("Lambda Value (Indexed)")
+    plt.ylabel("Final Episode Return")
+    plt.xticks(
+        range(1, len(sorted_lambda_values) + 1),
+        [f"{lv:.5f}" for lv in sorted_lambda_values],
+        rotation=45,
+    )
     plt.grid(True)
 
     # Save and close plot
-    plt.savefig(f"{env_name}_final_episode_returns_vs_lambda.png")
+    plt.savefig(f"{env_name}_final_episode_returns_vs_lambda_sep_byol.png")
     plt.close()  # Close the plot to free up memory

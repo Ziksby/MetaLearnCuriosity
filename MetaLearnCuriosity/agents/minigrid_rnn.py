@@ -19,6 +19,7 @@ from MetaLearnCuriosity.utils import MiniGridTransition as Transition
 from MetaLearnCuriosity.utils import (
     calculate_gae,
     minigrid_ppo_update_networks,
+    process_output_general,
     rnn_rollout,
 )
 from MetaLearnCuriosity.wrappers import (
@@ -45,10 +46,10 @@ environments = [
 config = {
     "NUM_SEEDS": 10,
     "PROJECT": "MetaLearnCuriosity",
-    "RUN_NAME": "minigrid-ppo-baseline_w_cnns",
+    "RUN_NAME": "minigrid-ppo-baseline",
     "BENCHMARK_ID": None,
     "RULESET_ID": None,
-    "USE_CNNS": True,
+    "USE_CNNS": False,
     # Agent
     "ACTION_EMB_DIM": 16,
     "RNN_HIDDEN_DIM": 1024,
@@ -300,7 +301,7 @@ def train(rng, init_hstate, train_state):
     runner_state, loss_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
     metric, loss = loss_info
     return {
-        "runner_state": runner_state,
+        "train_state": runner_state[1],
         "metrics": metric,
         "loss_info": loss,
         "rl_total_loss": loss["total_loss"],
@@ -328,7 +329,6 @@ for env_name in environments:
         t = time.time()
         output = jax.block_until_ready(train_fn(rng, init_hstate, train_state))
         elapsed_time = time.time() - t
-        output = unreplicate(output)
 
     else:
         init_hstate, train_state, rng = make_train(rng)
@@ -336,15 +336,16 @@ for env_name in environments:
         init_hstate = replicate(init_hstate, jax.local_devices())
         train_fn = jax.pmap(train, axis_name="devices")
         output = jax.block_until_ready(train_fn(rng, init_hstate, train_state))
-        output = unreplicate(output)
 
     print(output["rl_total_loss"].shape)
     logger = WBLogger(
         config=config,
         group="minigrid_baseline",
-        tags=["minigrid", config["ENV_NAME"], "baseline", "cnns"],
-        name=config["RUN_NAME"],
+        tags=["minigrid", config["ENV_NAME"], "baseline"],
+        name=f"{config['RUN_NAME']}_{config['ENV_NAME']}",
     )
+    output = process_output_general(output)
+
     logger.log_episode_return(output, config["NUM_SEEDS"])
     logger.log_rl_loss_minigrid(output, config["NUM_SEEDS"])
     output["config"] = config

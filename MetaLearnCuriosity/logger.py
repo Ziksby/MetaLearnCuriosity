@@ -192,6 +192,38 @@ class WBLogger:
                 )
             self.losses.finish()
 
+    def log_pred_losses(self, output, num_seeds):
+        self.losses = wandb.init(
+            project="MetaLearnCuriosity",
+            config=self.config,
+            group=self.group,
+            tags=self.tags,
+            notes=self.notes,
+            name=f"{self.name}_pred_loss",
+        )
+
+        if num_seeds > 1:
+            pred_avg = jnp.mean(output["pred_loss"], axis=0)
+            for loss in range(len(pred_avg.mean(-1).mean(-1))):
+                self.losses.log(
+                    {
+                        f"pred_loss_{self.config['ENV_NAME']}_{num_seeds}_seeds": pred_avg.mean(
+                            -1
+                        ).mean(-1)[loss],
+                    }
+                )
+            self.losses.finish()
+        else:
+            for loss in range(len(output["pred_loss"].mean(-1).mean(-1))):
+                self.losses.log(
+                    {
+                        f"pred_loss_{self.config['ENV_NAME']}": output["pred_loss"]
+                        .mean(-1)
+                        .mean(-1)[loss],
+                    }
+                )
+            self.losses.finish()
+
     def log_rnd_losses(self, output, num_seeds):
         self.losses = wandb.init(
             project="MetaLearnCuriosity",

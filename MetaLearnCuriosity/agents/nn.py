@@ -1,6 +1,7 @@
 # Taken from:
 # https://github.com/corl-team/xland-minigrid/blob/main/training/nn.py
 
+import functools
 import math
 from typing import Sequence, TypedDict
 
@@ -66,6 +67,79 @@ MiniGridBatchedRNNModel = flax.linen.vmap(
     split_rngs={"params": False},
     axis_name="batch",
 )
+
+
+class MiniGridBYOLPredictor(nn.Module):
+    encoder_layer_out_shape: Sequence[int]
+    num_actions: int
+    action_emb_dim: int = 16
+
+    @nn.compact
+    def __call__(self, close_hidden, open_hidden, x):
+        action_encoder = nn.Embed(self.num_actions, self.action_emb_dim)
+
+        bt, obs, action = x
+
+        # Encoder
+        en_obs = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="encoder_layer_1",
+            bias_init=constant(0.0),
+        )(obs)
+        en_obs = nn.relu(en_obs)
+        en_obs = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="encoder_layer_2",
+            bias_init=constant(0.0),
+        )(en_obs)
+
+        # RL AGENT
+        # actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(
+        #     en_obs
+        # )
+        # actor_mean = nn.relu(actor_mean)
+        # actor_mean = nn.Dense(
+        #     self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
+        # )(actor_mean)
+        # pi = distrax.Categorical(logits=actor_mean)
+
+        # critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(en_obs)
+        # critic = nn.relu(critic)
+        # critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(critic)
+
+        # Embed the action
+        act_emb = action_encoder(action)
+
+        # RNN stuff
+        close_rnn_core = MiniGridBatchedRNNModel(self.encoder_layer_out_shape, 1)
+        open_rnn_core = MiniGridBatchedRNNModel(self.encoder_layer_out_shape, 1)
+
+        close_loop_input = jnp.concatenate((bt, en_obs, act_emb), axis=-1)
+        new_bt, new_close_hidden = close_rnn_core(close_loop_input, close_hidden)
+        open_loop_input = jnp.concatenate((new_bt, act_emb), axis=-1)
+        bt_1, new_open_hidden = open_rnn_core(open_loop_input, open_hidden)
+
+        # Predictor
+        pred_fut = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="pred_layer_1",
+            bias_init=constant(0.0),
+        )(bt_1)
+        pred_fut = nn.relu(pred_fut)
+        pred_fut = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="pred_layer_2",
+            bias_init=constant(0.0),
+        )(pred_fut)
+
+        return pred_fut, new_bt, new_close_hidden, new_open_hidden
+
+    def initialize_carry(self, batch_size):
+        return jnp.zeros((batch_size, 1, self.encoder_layer_out_shape))
 
 
 class MiniGridActorCriticInput(TypedDict):
@@ -206,3 +280,206 @@ class PredictorNetwork(nn.Module):
         encoded_obs = nn.Dense(self.encoder_layer_out_shape)(encoded_obs)
 
         return encoded_obs
+
+
+class BYOLEncoder(nn.Module):
+    encoder_layer_out_shape: Sequence[int]
+
+    @nn.compact
+    def __call__(self, x):
+        encoded_obs = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
+        )(x)
+        encoded_obs = nn.relu(encoded_obs)
+        encoded_obs = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
+        )(encoded_obs)
+        # encoded_obs = nn.relu(encoded_obs)
+        return encoded_obs
+
+
+class BYOLTarget(nn.Module):
+    encoder_layer_out_shape: Sequence[int]
+
+    @nn.compact
+    def __call__(self, x):
+        encoded_obs = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
+        )(x)
+        encoded_obs = nn.relu(encoded_obs)
+        encoded_obs = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
+        )(encoded_obs)
+        # encoded_obs = nn.relu(encoded_obs)
+        return encoded_obs
+
+
+class CloseScannedRNN(nn.Module):
+    @functools.partial(
+        nn.scan,
+        variable_broadcast="params",
+        in_axes=0,
+        out_axes=0,
+        split_rngs={"params": False},
+    )
+    @nn.compact
+    def __call__(self, carry, x):
+        """Applies the module. Assumes the action and the
+        encoded observation are concatenated."""
+        features = carry[0].shape[-1]
+        rnn_state = carry
+        new_rnn_state, y = nn.GRUCell(features, kernel_init=orthogonal(np.sqrt(2)))(rnn_state, x)
+        return new_rnn_state, y
+
+    @staticmethod
+    def initialize_carry(batch_size, hidden_size):
+        # Use a dummy key since the default state init fn is just zeros.
+        return nn.GRUCell(hidden_size, parent=None).initialize_carry(
+            jax.random.PRNGKey(0), (*(batch_size,), hidden_size)
+        )
+
+
+class OpenScannedRNN(nn.Module):
+    @functools.partial(
+        nn.scan,
+        variable_broadcast="params",
+        in_axes=0,
+        out_axes=0,
+        split_rngs={"params": False},
+    )
+    @nn.compact
+    def __call__(self, carry, x):
+        """Applies the module. Assumes the action and the
+        previous history representation is concatenated."""
+        features = carry[0].shape[-1]
+        rnn_state = carry
+        new_rnn_state, y = nn.GRUCell(features, kernel_init=orthogonal(np.sqrt(2)))(rnn_state, x)
+        return new_rnn_state, y
+
+    @staticmethod
+    def initialize_carry(batch_size, hidden_size):
+        # Use a dummy key since the default state init fn is just zeros.
+        return nn.GRUCell(hidden_size, parent=None).initialize_carry(
+            jax.random.PRNGKey(0), (*(batch_size,), hidden_size)
+        )
+
+
+class AtariBYOLPredictor(nn.Module):
+    encoder_layer_out_shape: Sequence[int]
+    num_actions: int
+    action_emb_dim: int = 16
+
+    @nn.compact
+    def __call__(self, close_hidden, open_hidden, x):
+        action_encoder = nn.Embed(self.num_actions, self.action_emb_dim)
+
+        bt, obs, action = x
+
+        # Encoder
+        en_obs = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="encoder_layer_1",
+            bias_init=constant(0.0),
+        )(obs)
+        en_obs = nn.relu(en_obs)
+        en_obs = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="encoder_layer_2",
+            bias_init=constant(0.0),
+        )(en_obs)
+
+        # RL AGENT
+        # actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(
+        #     en_obs
+        # )
+        # actor_mean = nn.relu(actor_mean)
+        # actor_mean = nn.Dense(
+        #     self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
+        # )(actor_mean)
+        # pi = distrax.Categorical(logits=actor_mean)
+
+        # critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(en_obs)
+        # critic = nn.relu(critic)
+        # critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(critic)
+
+        # Embed the action
+        act_emb = action_encoder(action)
+
+        # RNN stuff
+        close_loop_input = jnp.concatenate((bt, en_obs, act_emb), axis=-1)
+        new_close_hidden, new_bt = CloseScannedRNN()(close_hidden, close_loop_input)
+        open_loop_input = jnp.concatenate((new_bt, act_emb), axis=-1)
+        new_open_hidden, bt_1 = OpenScannedRNN()(open_hidden, open_loop_input)
+
+        # Predictor
+        pred_fut = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="pred_layer_1",
+            bias_init=constant(0.0),
+        )(bt_1)
+        pred_fut = nn.relu(pred_fut)
+        pred_fut = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="pred_layer_2",
+            bias_init=constant(0.0),
+        )(pred_fut)
+
+        return pred_fut, new_bt, new_close_hidden, new_open_hidden
+
+
+class BraxBYOLPredictor(nn.Module):
+    encoder_layer_out_shape: Sequence[int]
+
+    @nn.compact
+    def __call__(self, close_hidden, open_hidden, x):
+        bt, obs, action = x
+
+        # Encoder
+        en_obs = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="encoder_layer_1",
+            bias_init=constant(0.0),
+        )(obs)
+        en_obs = nn.relu(en_obs)
+        en_obs = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="encoder_layer_2",
+            bias_init=constant(0.0),
+        )(en_obs)
+
+        # RNN stuff
+        close_loop_input = jnp.concatenate((bt, en_obs, action), axis=-1)
+        new_close_hidden, new_bt = CloseScannedRNN()(close_hidden, close_loop_input)
+        open_loop_input = jnp.concatenate((new_bt, action), axis=-1)
+        new_open_hidden, bt_1 = OpenScannedRNN()(open_hidden, open_loop_input)
+
+        # Predictor
+        pred_fut = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="pred_layer_1",
+            bias_init=constant(0.0),
+        )(bt_1)
+        pred_fut = nn.relu(pred_fut)
+        pred_fut = nn.Dense(
+            self.encoder_layer_out_shape,
+            kernel_init=orthogonal(np.sqrt(2)),
+            name="pred_layer_2",
+            bias_init=constant(0.0),
+        )(pred_fut)
+
+        return pred_fut, new_bt, new_close_hidden, new_open_hidden

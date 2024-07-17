@@ -14,6 +14,7 @@ from flax.training.train_state import TrainState
 
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
+from MetaLearnCuriosity.utils import PPOTransition, process_output_general
 from MetaLearnCuriosity.wrappers import (
     BraxGymnaxWrapper,
     ClipAction,
@@ -25,13 +26,13 @@ from MetaLearnCuriosity.wrappers import (
 )
 
 environments = [
-    # 'ant',
-    # 'halfcheetah',
-    # 'hopper',
-    # 'humanoid',
-    # 'humanoidstandup',
-    # 'inverted_pendulum',
-    # 'inverted_double_pendulum',
+    "ant",
+    "halfcheetah",
+    "hopper",
+    "humanoid",
+    "humanoidstandup",
+    "inverted_pendulum",
+    "inverted_double_pendulum",
     "pusher",
     "reacher",
     "walker2d",
@@ -91,16 +92,6 @@ class ActorCritic(nn.Module):
         critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(critic)
 
         return pi, jnp.squeeze(critic, axis=-1)
-
-
-class Transition(NamedTuple):
-    done: jnp.ndarray
-    action: jnp.ndarray
-    value: jnp.ndarray
-    reward: jnp.ndarray
-    log_prob: jnp.ndarray
-    obs: jnp.ndarray
-    info: jnp.ndarray
 
 
 def make_config_env(config, env_name):
@@ -190,7 +181,7 @@ def train(rng, train_state):
             rng, _rng = jax.random.split(rng)
             rng_step = jax.random.split(_rng, config["NUM_ENVS_PER_DEVICE"])
             obsv, env_state, reward, done, info = env.step(rng_step, env_state, action, env_params)
-            transition = Transition(done, action, value, reward, log_prob, last_obs, info)
+            transition = PPOTransition(done, action, value, reward, log_prob, last_obs, info)
             runner_state = (train_state, env_state, obsv, rng)
             return runner_state, transition
 
@@ -320,7 +311,7 @@ def train(rng, train_state):
     runner_state, extra_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
     metric, rl_total_loss = extra_info
     return {
-        "runner_state": runner_state,
+        "train_state": runner_state[0],
         "metrics": metric,
         "rl_total_loss": rl_total_loss[0],
         "rl_value_loss": rl_total_loss[1][0],
@@ -342,23 +333,23 @@ for env_name in environments:
         train_fn = jax.vmap(train, in_axes=(0, 0))
         train_fn = jax.pmap(train_fn, axis_name="devices")
         output = jax.block_until_ready(train_fn(rng, train_state))
-        output = unreplicate(output)
 
     else:
         rng, train_state = make_train(rng)
         train_state = replicate(train_state, jax.local_devices())
         train_fn = jax.pmap(train, axis_name="devices")
         output = jax.block_until_ready(train_fn(rng, train_state))
-        output = unreplicate(output)
 
     elapsed_time = time.time() - t
 
     logger = WBLogger(
         config=config,
-        group="brax_baseline",
-        tags=["baseline", config["ENV_NAME"]],
-        name=config["RUN_NAME"],
+        group="delayed_brax_baseline",
+        tags=["baseline", config["ENV_NAME"], "delayed_brax"],
+        name=f'{config["RUN_NAME"]}_{config["ENV_NAME"]}',
     )
+    output = process_output_general(output)
+
     logger.log_episode_return(output, config["NUM_SEEDS"])
     logger.log_rl_losses(output, config["NUM_SEEDS"])
     output["config"] = config
