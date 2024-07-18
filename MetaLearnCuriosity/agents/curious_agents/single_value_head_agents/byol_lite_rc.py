@@ -9,10 +9,10 @@ import jax.numpy as jnp
 import jax.tree_util
 import numpy as np
 import optax
+import wandb
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 
-import wandb
 from MetaLearnCuriosity.agents.nn import RewardCombiner
 from MetaLearnCuriosity.checkpoints import Restore, Save
 from MetaLearnCuriosity.logger import WBLogger

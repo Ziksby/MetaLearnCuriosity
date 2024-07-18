@@ -110,6 +110,13 @@ class RandomTransition(NamedTuple):
     obs: jnp.ndarray
 
 
+class RandomAgentTransition(NamedTuple):
+    done: jnp.ndarray
+    action: jnp.ndarray
+    reward: jnp.ndarray
+    info: jnp.ndarray
+
+
 class ObsNormParams(NamedTuple):
     count: float
     mean: jnp.ndarray
