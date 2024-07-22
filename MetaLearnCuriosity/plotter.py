@@ -1,3 +1,6 @@
+import os
+import time
+
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
@@ -135,3 +138,91 @@ def plot_sample_std(names, labels, alphas):
     plt.legend(loc="upper center", bbox_to_anchor=(0.5, 1.15), ncols=len(names))
     plt.grid()
     plt.savefig(f"{env_name}_mean_seeds_std.png")
+
+
+def save_episode_return(path_to_extract, path_to_save):
+    start_time = time.time()
+    output = Restore(path_to_extract)
+    metric = output["metrics"]["returned_episode_returns"]
+    config = output["config"]
+
+    # Average among the number of environments
+    metric = jnp.mean(metric, axis=-1)
+
+    # A 2D array of shape (num_seeds, update step)
+    metric = metric.reshape(metric.shape[0], -1)
+
+    # Transpose to make it (update steps, num_seeds)
+    metric = metric.T
+
+    # Initialize lists to store means, confidence intervals, and standard deviations
+    means = []
+    ci_lows = []
+    ci_highs = []
+    stds = []
+
+    for timestep_values in metric:
+        mean_value = jnp.mean(timestep_values)
+        means.append(mean_value)  # Store the mean for the current timestep
+
+        ci = bootstrap(
+            (timestep_values,),
+            jnp.mean,
+            confidence_level=0.95,
+            method="percentile",
+        )
+
+        ci_lows.append(ci.confidence_interval.low)
+        ci_highs.append(ci.confidence_interval.high)
+
+        std_value = jnp.std(timestep_values, ddof=1)  # Sample standard deviation
+        stds.append(std_value)
+
+    # Convert lists to numpy arrays
+    means = np.array(means)
+    ci_highs = np.array(ci_highs)
+    ci_lows = np.array(ci_lows)
+    stds = np.array(stds)
+
+    # Ensure the save directory exists
+    save_path = os.path.join(path_to_save, "baseline", output["config"]["ENV_NAME"])
+    os.makedirs(save_path, exist_ok=True)
+
+    # Save the arrays
+    means_file = os.path.join(save_path, "means_episode_return.npy")
+    ci_highs_file = os.path.join(save_path, "ci_highs_episode_return.npy")
+    ci_lows_file = os.path.join(save_path, "ci_lows_episode_return.npy")
+    stds_file = os.path.join(save_path, "stds_episode_return.npy")
+
+    np.save(means_file, means)
+    np.save(ci_highs_file, ci_highs)
+    np.save(ci_lows_file, ci_lows)
+    np.save(stds_file, stds)
+
+    # Print the sizes of the saved files in MB
+    print(f"Size of means_episode_return.npy: {os.path.getsize(means_file) / (1024 * 1024):.7f} MB")
+    print(
+        f"Size of ci_highs_episode_return.npy: {os.path.getsize(ci_highs_file) / (1024 * 1024):.7f} MB"
+    )
+    print(
+        f"Size of ci_lows_episode_return.npy: {os.path.getsize(ci_lows_file) / (1024 * 1024):.7f} MB"
+    )
+    print(f"Size of stds_episode_return.npy: {os.path.getsize(stds_file) / (1024 * 1024):.7f} MB")
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    print(f"Time taken to run the code: {elapsed_time:.2f} seconds in {config['ENV_NAME']}")
+
+
+environments = [
+    "MiniGrid-BlockedUnlockPickUp",
+    "MiniGrid-Empty-16x16",
+    "MiniGrid-EmptyRandom-16x16",
+    "MiniGrid-FourRooms",
+    "MiniGrid-MemoryS128",
+    "MiniGrid-Unlock",
+]
+for env_name in environments:
+    save_episode_return(
+        f"/home/batsi/Documents/Masters/MetaLearnCuriosity/minigrid-ppo-baseline_{env_name}_flax-checkpoints_v0",
+        "/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments",
+    )
