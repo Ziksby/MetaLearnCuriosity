@@ -17,5 +17,3 @@ get-pip.py
 tpu_curiosax/
 # Ignore gpu_curiosax
 gpu_curiosax/
-# Ignore images
-*.png
