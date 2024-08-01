@@ -285,6 +285,11 @@ def get_normalise_cis_macro_env(paths):
     return metrics.mean(), ci.confidence_interval.low, ci.confidence_interval.high
 
 
+# def plot_error_bars_normalised_envs(envs, curious_paths, save_path,curious_type):
+#     for path in curious_paths:
+#         normalised
+
+
 def plot_error_bars_macro_envs(curious_paths, macro_env_type: str, curious_algo_types):
     means = []
     ci_highs = []
@@ -337,13 +342,14 @@ def plot_error_bars_macro_envs(curious_paths, macro_env_type: str, curious_algo_
 # plot_error_bars_macro_envs(curious_paths, "SomeMacroEnvType", ["Algo1", "Algo2", "Algo3"])
 
 
-# environments = [
-# "MiniGrid-BlockedUnlockPickUp",
-# "MiniGrid-Empty-16x16",
-# "MiniGrid-EmptyRandom-16x16",
-#     "MiniGrid-FourRooms",
-#     "MiniGrid-MemoryS128",
-# ]
+environments = [
+    "MiniGrid-BlockedUnlockPickUp",
+    "MiniGrid-Empty-16x16",
+    "MiniGrid-EmptyRandom-16x16",
+    "MiniGrid-FourRooms",
+    "MiniGrid-MemoryS128",
+    # "MiniGrid-Unlock"
+]
 # environments = [
 #     "Asterix-MinAtar",
 #     "Breakout-MinAtar",
@@ -351,20 +357,24 @@ def plot_error_bars_macro_envs(curious_paths, macro_env_type: str, curious_algo_
 #     "SpaceInvaders-MinAtar",
 # ]
 # for env_name in environments:
-#     # save_episode_return(f"/home/batsi/Documents/Masters/MetaLearnCuriosity/minatar_rnd_{env_name}_flax-checkpoints_v4",
-#     #                     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments",
-#     #                     "rnd")
-#     normalize_curious_agent_returns(f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/baseline/{env_name}/metric_seeds_episode_return.npy",
-#                                     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/random_agents/{env_name}_epi_rets.npy",
-#                                     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/byol/{env_name}/metric_seeds_episode_return.npy",
-#                                     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/byol/{env_name}",
-#                                     )
-# byol_paths = []
-# rnd_paths =[]
-# for env_name in environments:
-#     byol_paths.append(f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/byol/{env_name}/normalized_curious_agent_returns.npy")
-#     rnd_paths.append(f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rnd/{env_name}/normalized_curious_agent_returns.npy")
+# save_episode_return(f"/home/batsi/Documents/Masters/MetaLearnCuriosity/minigrid-ppo-baseline_{env_name}_flax-checkpoints_v0",
+#                     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments",
+#                     "baseline")
+# normalize_curious_agent_returns(f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/baseline/{env_name}/metric_seeds_episode_return.npy",
+#                                 f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/random_agents/{env_name}_epi_rets.npy",
+#                                 f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rnd/{env_name}/metric_seeds_episode_return.npy",
+#                                 f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rnd/{env_name}",
+#                                 )
+byol_paths = []
+rnd_paths = []
+for env_name in environments:
+    byol_paths.append(
+        f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/byol/{env_name}/normalized_curious_agent_returns.npy"
+    )
+    rnd_paths.append(
+        f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rnd/{env_name}/normalized_curious_agent_returns.npy"
+    )
 
-# curious_paths=[byol_paths,rnd_paths]
+curious_paths = [byol_paths, rnd_paths]
 
-# plot_error_bars_macro_envs(curious_paths,"MinAtar",["BYOL-Explore","RND"])
+plot_error_bars_macro_envs(curious_paths, "MiniGrid", ["BYOL-Explore", "RND"])
