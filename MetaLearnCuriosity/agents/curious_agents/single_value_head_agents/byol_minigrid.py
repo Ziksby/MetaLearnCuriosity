@@ -44,8 +44,8 @@ environments = [
     # "MiniGrid-BlockedUnlockPickUp",
     # "MiniGrid-Empty-16x16",
     # "MiniGrid-EmptyRandom-16x16",
-    "MiniGrid-FourRooms",
-    "MiniGrid-MemoryS128",
+    # "MiniGrid-FourRooms",
+    # "MiniGrid-MemoryS128",
     "MiniGrid-Unlock",
 ]
 
@@ -602,7 +602,7 @@ for env_name in environments:
         int_rew = output["int_reward"].mean(0).mean(0).mean(-1).reshape(-1)
         int_norm_rew = output["norm_int_reward"].mean(0).mean(0).mean(-1).reshape(-1)
         pred_loss = unreplicate(output["pred_loss"]).mean(-1).mean(0).mean(-1)
-        # output = unreplicate(output)
+
 
     else:
         (
@@ -633,28 +633,28 @@ for env_name in environments:
                 target_state,
             )
         )
-        # output = unreplicate(output)
 
-    # logger = WBLogger(
-    #     config=config,
-    #     group="delayed_brax_curious",
-    #     tags=["curious_baseline", config["ENV_NAME"], "delayed_brax"],
-    #     name=f'{config["RUN_NAME"]}_{config["ENV_NAME"]}',
-    # )
-    # output = process_output_general(output)
 
-    # logger.log_pred_losses(output, config["NUM_SEEDS"])
-    # logger.log_episode_return(output, config["NUM_SEEDS"])
-    # logger.log_rl_losses(output, config["NUM_SEEDS"])
-    # logger.log_int_rewards(output, config["NUM_SEEDS"])
-    # logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
-    # output["config"] = config
-    # checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
+    logger = WBLogger(
+        config=config,
+        group="delayed_brax_curious",
+        tags=["curious_baseline", config["ENV_NAME"], "delayed_brax"],
+        name=f'{config["RUN_NAME"]}_{config["ENV_NAME"]}',
+    )
+    output = process_output_general(output)
 
-    # # Get the absolute path of the directory
-    # path = os.path.abspath(checkpoint_directory)
-    # Save(path, output)
-    # logger.save_artifact(path)
-    # shutil.rmtree(path)
-    # print(f"Deleted local checkpoint directory: {path}")
-    # print(f"Done in {elapsed_time / 60:.2f}min")
+    logger.log_pred_losses(output, config["NUM_SEEDS"])
+    logger.log_episode_return(output, config["NUM_SEEDS"])
+    logger.log_rl_losses(output, config["NUM_SEEDS"])
+    logger.log_int_rewards(output, config["NUM_SEEDS"])
+    logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
+    output["config"] = config
+    checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
+
+    # Get the absolute path of the directory
+    path = os.path.abspath(checkpoint_directory)
+    Save(path, output)
+    logger.save_artifact(path)
+    shutil.rmtree(path)
+    print(f"Deleted local checkpoint directory: {path}")
+    print(f"Done in {elapsed_time / 60:.2f}min")
