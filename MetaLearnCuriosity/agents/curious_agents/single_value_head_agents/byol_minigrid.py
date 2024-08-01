@@ -603,7 +603,6 @@ for env_name in environments:
         int_norm_rew = output["norm_int_reward"].mean(0).mean(0).mean(-1).reshape(-1)
         pred_loss = unreplicate(output["pred_loss"]).mean(-1).mean(0).mean(-1)
 
-
     else:
         (
             init_hstate,
@@ -633,7 +632,6 @@ for env_name in environments:
                 target_state,
             )
         )
-
 
     logger = WBLogger(
         config=config,
