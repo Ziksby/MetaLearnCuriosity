@@ -230,6 +230,8 @@ def normalize_curious_agent_returns(
 
     # Load random agent data and calculate the mean
     random_agent_returns = np.load(random_agent_path)
+    print(f"Random Last Episode Return: {random_agent_returns}")
+
     random_agent_mean = np.mean(random_agent_returns)
     print(f"Random Agent Mean: {random_agent_mean}")
 
@@ -238,6 +240,7 @@ def normalize_curious_agent_returns(
     baseline_last_episode_return = baseline_returns[-1]
     print(f"Baseline Last Episode Return: {baseline_last_episode_return}")
     print(f"Baseline Last Episode Return SHape: {baseline_last_episode_return.shape}")
+    print(f"Baseline Mean: {baseline_last_episode_return.mean()}")
 
     # Load curious agent data and get the last element (episode return)
     curious_agent_returns = np.load(curious_agent_path)
@@ -247,7 +250,7 @@ def normalize_curious_agent_returns(
 
     # Normalize the curious agent returns between 0 and 1
     normalized_curious_agent_returns = (curious_agent_last_episode_return - random_agent_mean) / (
-        baseline_last_episode_return - random_agent_mean
+        baseline_last_episode_return.mean() - random_agent_mean
     )
     print(f"Normalized Curious Agent Returns: {normalized_curious_agent_returns}")
 
@@ -281,7 +284,6 @@ def get_normalise_cis_macro_env(paths):
         confidence_level=0.95,
         method="percentile",
     )
-
     return metrics.mean(), ci.confidence_interval.low, ci.confidence_interval.high
 
 
@@ -342,13 +344,25 @@ def plot_error_bars_macro_envs(curious_paths, macro_env_type: str, curious_algo_
 # plot_error_bars_macro_envs(curious_paths, "SomeMacroEnvType", ["Algo1", "Algo2", "Algo3"])
 
 
+# environments = [
+#     "MiniGrid-BlockedUnlockPickUp",
+#     "MiniGrid-Empty-16x16",
+#     "MiniGrid-EmptyRandom-16x16",
+#     "MiniGrid-FourRooms",
+#     "MiniGrid-MemoryS128",
+#     "MiniGrid-Unlock"
+# ]
 environments = [
-    "MiniGrid-BlockedUnlockPickUp",
-    "MiniGrid-Empty-16x16",
-    "MiniGrid-EmptyRandom-16x16",
-    "MiniGrid-FourRooms",
-    "MiniGrid-MemoryS128",
-    # "MiniGrid-Unlock"
+    "ant",
+    "halfcheetah",
+    "hopper",
+    "humanoid",
+    "humanoidstandup",
+    "inverted_pendulum",
+    "inverted_double_pendulum",
+    "pusher",
+    "reacher",
+    "walker2d",
 ]
 # environments = [
 #     "Asterix-MinAtar",
@@ -357,14 +371,16 @@ environments = [
 #     "SpaceInvaders-MinAtar",
 # ]
 # for env_name in environments:
-# save_episode_return(f"/home/batsi/Documents/Masters/MetaLearnCuriosity/minigrid-ppo-baseline_{env_name}_flax-checkpoints_v0",
-#                     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments",
-#                     "baseline")
-# normalize_curious_agent_returns(f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/baseline/{env_name}/metric_seeds_episode_return.npy",
-#                                 f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/random_agents/{env_name}_epi_rets.npy",
-#                                 f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rnd/{env_name}/metric_seeds_episode_return.npy",
-#                                 f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rnd/{env_name}",
-#                                 )
+#     save_episode_return(f"/home/batsi/Documents/Masters/MetaLearnCuriosity/rnd_delayed_brax_{env_name}_flax-checkpoints_v0",
+#                         f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments",
+#                         "rnd")
+#     print(env_name)
+#     normalize_curious_agent_returns(f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/baseline/{env_name}/metric_seeds_episode_return.npy",
+#                                     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/random_agents/{env_name}_epi_rets.npy",
+#                                     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rnd/{env_name}/metric_seeds_episode_return.npy",
+#                                     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rnd/{env_name}",
+#                                     )
+#     print()
 byol_paths = []
 rnd_paths = []
 for env_name in environments:
@@ -377,4 +393,4 @@ for env_name in environments:
 
 curious_paths = [byol_paths, rnd_paths]
 
-plot_error_bars_macro_envs(curious_paths, "MiniGrid", ["BYOL-Explore", "RND"])
+plot_error_bars_macro_envs(curious_paths, "Delayed_Brax", ["BYOL-Explore", "RND"])
