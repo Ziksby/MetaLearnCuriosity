@@ -337,7 +337,65 @@ def plot_error_bars_macro_envs(curious_paths, macro_env_type: str, curious_algo_
         f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/images/{macro_env_type}_mean_seeds_CI_normalised.png",
         dpi=300,
     )
-    plt.show()
+
+
+def get_normalise_cis_env(path):
+
+    metrics = np.load(path)
+    ci = bootstrap(
+        (metrics,),
+        jnp.mean,
+        confidence_level=0.95,
+        method="percentile",
+    )
+    return metrics.mean(), ci.confidence_interval.low, ci.confidence_interval.high
+
+
+def plot_error_bars_env(curious_paths, env_name: str, curious_algo_types):
+    means = []
+    ci_highs = []
+    ci_lows = []
+
+    for path in curious_paths:
+        mean, ci_low, ci_high = get_normalise_cis_env(path)
+        means.append(mean)
+        ci_lows.append(ci_low)
+        ci_highs.append(ci_high)
+    means = np.array(means)
+    ci_lows = np.array(ci_lows)
+    ci_highs = np.array(ci_highs)
+    error_bar = np.array([means - ci_lows, ci_highs - means])
+    error_bar = np.array([means - ci_lows, ci_highs - means])
+    plt.rcParams["axes.formatter.useoffset"] = False
+    plt.figure(figsize=(10, 6))
+    plt.errorbar(
+        curious_algo_types,
+        means,
+        yerr=error_bar,
+        fmt="o",
+        capsize=5,
+        capthick=2,
+        elinewidth=1.5,
+        label="Normalised Mean Episode Return",
+        color="blue",
+        markersize=8,
+    )
+
+    plt.xlabel("Curious Algorithm", fontsize=12, fontweight="bold", fontname="DejaVu Sans")
+    plt.ylabel(
+        "Normalised Mean Episode Return", fontsize=12, fontweight="bold", fontname="DejaVu Sans"
+    )
+
+    plt.legend(loc="upper center", bbox_to_anchor=(0.5, 1.15), ncol=2, fontsize=10)
+    plt.grid(True, which="both", linestyle="--", linewidth=0.5)
+    plt.xticks(rotation=45, ha="right", fontsize=10, fontname="DejaVu Sans")
+    plt.yticks(fontsize=10, fontname="DejaVu Sans")
+
+    plt.tight_layout()
+    plt.savefig(
+        f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/images/{env_name}_mean_seeds_CI_normalised.png",
+        dpi=300,
+    )
 
 
 # Example usage
@@ -352,18 +410,18 @@ def plot_error_bars_macro_envs(curious_paths, macro_env_type: str, curious_algo_
 #     "MiniGrid-MemoryS128",
 #     "MiniGrid-Unlock"
 # ]
-environments = [
-    "ant",
-    "halfcheetah",
-    "hopper",
-    "humanoid",
-    "humanoidstandup",
-    "inverted_pendulum",
-    "inverted_double_pendulum",
-    "pusher",
-    "reacher",
-    "walker2d",
-]
+# environments = [
+#     "ant",
+#     "halfcheetah",
+#     "hopper",
+#     "humanoid",
+#     "humanoidstandup",
+#     "inverted_pendulum",
+#     "inverted_double_pendulum",
+#     "pusher",
+#     "reacher",
+#     "walker2d",
+# ]
 # environments = [
 #     "Asterix-MinAtar",
 #     "Breakout-MinAtar",
@@ -380,17 +438,20 @@ environments = [
 #                                     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rnd/{env_name}/metric_seeds_episode_return.npy",
 #                                     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rnd/{env_name}",
 #                                     )
-#     print()
-byol_paths = []
-rnd_paths = []
-for env_name in environments:
-    byol_paths.append(
-        f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/byol/{env_name}/normalized_curious_agent_returns.npy"
-    )
-    rnd_paths.append(
-        f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rnd/{env_name}/normalized_curious_agent_returns.npy"
-    )
+# #     print()
+# byol_paths = []
+# rnd_paths = []
+# for env_name in environments:
+#     byol_paths.append(
+#         f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/byol/{env_name}/normalized_curious_agent_returns.npy"
+#     )
+#     rnd_paths.append(
+#         f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rnd/{env_name}/normalized_curious_agent_returns.npy"
+#     )
 
-curious_paths = [byol_paths, rnd_paths]
+# curious_paths = [byol_paths, rnd_paths]
+# for byol_path, rnd_path,env_name in zip(byol_paths,rnd_paths,environments):
+#     plot_error_bars_env([byol_path,rnd_path],env_name,["BYOL-Explore", "RND"])
 
-plot_error_bars_macro_envs(curious_paths, "Delayed_Brax", ["BYOL-Explore", "RND"])
+# # plot_error_bars_macro_envs(curious_paths, "Delayed_Brax", ["BYOL-Explore", "RND"])
+# print(np.load("MetaLearnCuriosity/experiments/byol/MiniGrid-Empty-16x16/normalized_curious_agent_returns.npy").mean())
