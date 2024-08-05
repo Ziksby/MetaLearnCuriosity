@@ -15,5 +15,9 @@ MetaLearnCuriosity/agents/hyperparameter_versions/
 get-pip.py
 # Ignore tpu_curiosax
 tpu_curiosax/
-# Ignore images
-*.png
+# Ignore gpu_curiosax
+gpu_curiosax/
+# Ignore flax checkpoints
+checkpoint
+_METADATA
+_CHECKPOINT_METADATA

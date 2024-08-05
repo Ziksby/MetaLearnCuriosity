@@ -10,10 +10,10 @@ import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
 import optax
+import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.training.train_state import TrainState
 
-import wandb
 from MetaLearnCuriosity.agents.nn import (
     BYOLTarget,
     CloseScannedRNN,
@@ -44,8 +44,8 @@ environments = [
     # "MiniGrid-BlockedUnlockPickUp",
     # "MiniGrid-Empty-16x16",
     # "MiniGrid-EmptyRandom-16x16",
-    "MiniGrid-FourRooms",
-    "MiniGrid-MemoryS128",
+    # "MiniGrid-FourRooms",
+    # "MiniGrid-MemoryS128",
     "MiniGrid-Unlock",
 ]
 
@@ -602,7 +602,6 @@ for env_name in environments:
         int_rew = output["int_reward"].mean(0).mean(0).mean(-1).reshape(-1)
         int_norm_rew = output["norm_int_reward"].mean(0).mean(0).mean(-1).reshape(-1)
         pred_loss = unreplicate(output["pred_loss"]).mean(-1).mean(0).mean(-1)
-        # output = unreplicate(output)
 
     else:
         (
@@ -633,7 +632,6 @@ for env_name in environments:
                 target_state,
             )
         )
-        # output = unreplicate(output)
 
     logger = WBLogger(
         config=config,
