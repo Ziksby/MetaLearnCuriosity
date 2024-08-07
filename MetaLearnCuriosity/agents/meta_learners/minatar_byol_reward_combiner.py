@@ -79,9 +79,9 @@ class PPOActorCritic(nn.Module):
 
 
 config = {
-    "RUN_NAME": "RC_byol_minatar",
+    "RUN_NAME": "minatar_byol_ppo",
     "SEED": 42,
-    "NUM_SEEDS": 8,
+    "NUM_SEEDS": 10,
     "LR": 5e-3,
     "NUM_ENVS": 64,
     "NUM_STEPS": 128,
@@ -101,10 +101,10 @@ config = {
     "PRED_LR": 0.001,
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
-    "POP_SIZE": 8,
+    "POP_SIZE": 64,
     "ES_SEED": 7,
     "RC_SEED": 23,
-    "NUM_GENERATIONS": 2,
+    "NUM_GENERATIONS": 128,
     # "INT_LAMBDA": 0.001,
 }
 
@@ -120,8 +120,8 @@ def make_config_env(config, env_name):
     config["ENV_NAME"] = env_name
     num_devices = jax.local_device_count()
     assert config["NUM_ENVS"] % num_devices == 0
-    config["NUM_ENVS_PER_DEVICE"] = config["NUM_ENVS"] // num_devices
-    config["TOTAL_TIMESTEPS_PER_DEVICE"] = config["TOTAL_TIMESTEPS"] // num_devices
+    config["NUM_ENVS_PER_DEVICE"] = config["NUM_ENVS"] // 1
+    config["TOTAL_TIMESTEPS_PER_DEVICE"] = config["TOTAL_TIMESTEPS"] // 1
     # config["EVAL_EPISODES_PER_DEVICE"] = config["EVAL_EPISODES"] // num_devices
     config["NUM_UPDATES"] = (
         config["TOTAL_TIMESTEPS_PER_DEVICE"] // config["NUM_STEPS"] // config["NUM_ENVS_PER_DEVICE"]
@@ -668,17 +668,16 @@ def train(
     }
 
 
-def es_step(
-    train_fn,
-    rng,
-    train_state,
-    pred_state,
-    target_state,
-    init_bt,
-    close_init_hstate,
-    open_init_hstate,
-    init_action,
-):
+for env_name in environments:
+    rng = jax.random.PRNGKey(config["SEED"])
+    config, env, env_params = make_config_env(config, env_name)
+    print(f"Training in {config['ENV_NAME']}")
+
+    make_train = jax.jit(jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0, 0)))
+    train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0))
+    train_fn = jax.vmap(train_fn, in_axes=(None, 0, None, None, None, None, None, None, None))
+    train_fn = jax.pmap(train_fn, axis_name="devices")
+
     group = "reward_combiners"
     tags = ["meta-learner", config["ENV_NAME"]]
     name = f'{config["RUN_NAME"]}_{config["ENV_NAME"]}'
@@ -698,7 +697,6 @@ def es_step(
         popsize=config["POP_SIZE"],
         pholder_params=rc_params_pholder,
         opt_name="adam",
-        lrate_init=2e-4,
     )
 
     es_rng, es_rng_init = jax.random.split(es_rng)
@@ -706,12 +704,37 @@ def es_step(
     es_state = strategy.initialize(es_rng_init, es_params)
 
     for _ in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations"):
+        rng, rng_seeds = jax.random.split(rng)
+        rng_train = jax.random.split(rng_seeds, config["NUM_SEEDS"])
+
+        # setting up the RL agents.
+        (
+            rng_train,
+            train_state,
+            pred_state,
+            target_state,
+            init_bt,
+            close_init_hstate,
+            open_init_hstate,
+            init_action,
+        ) = make_train(rng_train)
+
+        # duplicating here for pmap
+        open_init_hstate = replicate(open_init_hstate, jax.local_devices())
+        close_init_hstate = replicate(close_init_hstate, jax.local_devices())
+        train_state = replicate(train_state, jax.local_devices())
+        pred_state = replicate(pred_state, jax.local_devices())
+        target_state = replicate(target_state, jax.local_devices())
+        init_bt = replicate(init_bt, jax.local_devices())
+        init_action = replicate(init_action, jax.local_devices())
         t = time.time()
+
+        # Fitness evaulation
         es_rng, es_rng_ask = jax.random.split(es_rng)
         x, es_state = strategy.ask(es_rng_ask, es_state, es_params)
         output = jax.block_until_ready(
             train_fn(
-                rng,
+                rng_train,
                 x,
                 train_state,
                 pred_state,
@@ -723,8 +746,8 @@ def es_step(
             )
         )
         rewards = output["metrics"]["sum_of_rewards"]
-        # (4, 2, 8, 1220, 128, 16)
-        fitness = rewards.mean(-1).mean(2).reshape(rewards.shape[0], rewards.shape[1], -1).sum(-1)
+        print(rewards.shape)
+        fitness = rewards.mean(-1).mean(2).reshape(rewards.shape[0], rewards.shape[1], -1)[:, :, -1]
         es_state = strategy.tell(x, fitness, es_state, es_params)
         elapsed_time = time.time() - t
         print(f"Done in {elapsed_time / 60:.2f}min")
@@ -742,50 +765,7 @@ def es_step(
     # Get the absolute path of the directory
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
     params = strategy.param_reshaper.reshape_single(es_state.mean[0])
-    print(params)
     path = os.path.abspath(checkpoint_directory)
     Save(path, params)
     logger.save_artifact(path)
     shutil.rmtree(path)
-
-    return es_rng, es_state, fitness, output["rng"]
-
-
-for env_name in environments:
-    rng = jax.random.PRNGKey(config["SEED"])
-    config, env, env_params = make_config_env(config, env_name)
-    print(f"Training in {config['ENV_NAME']}")
-    rng = jax.random.split(rng, config["NUM_SEEDS"])
-    (
-        rng,
-        train_state,
-        pred_state,
-        target_state,
-        init_bt,
-        close_init_hstate,
-        open_init_hstate,
-        init_action,
-    ) = jax.jit(jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0, 0)))(rng)
-    open_init_hstate = replicate(open_init_hstate, jax.local_devices())
-    close_init_hstate = replicate(close_init_hstate, jax.local_devices())
-    train_state = replicate(train_state, jax.local_devices())
-    pred_state = replicate(pred_state, jax.local_devices())
-    target_state = replicate(target_state, jax.local_devices())
-    init_bt = replicate(init_bt, jax.local_devices())
-    init_action = replicate(init_action, jax.local_devices())
-    train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0))
-    train_fn = jax.vmap(train_fn, in_axes=(None, 0, None, None, None, None, None, None, None))
-    train_fn = jax.pmap(train_fn, axis_name="devices")
-    # Set up fitness function
-
-    es_step(
-        train_fn,
-        rng,
-        train_state,
-        pred_state,
-        target_state,
-        init_bt,
-        close_init_hstate,
-        open_init_hstate,
-        init_action,
-    )
