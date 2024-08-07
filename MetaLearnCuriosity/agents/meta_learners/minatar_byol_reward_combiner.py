@@ -654,9 +654,12 @@ def train(
     )
     runner_state, extra_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
     metric, rl_total_loss, int_reward, norm_int_reward = extra_info
+    rewards = metric["sum_of_rewards"].mean(axis=-1)
+    rewards = rewards.reshape(-1)
+    rewards = rewards[-1]
     return {
         # "train_state": runner_state[0],
-        "metrics": metric,
+        "rewards": rewards,
         # "rl_total_loss": rl_total_loss[0],
         # "rl_value_loss": rl_total_loss[1][0],
         # "rl_actor_loss": rl_total_loss[1][1],
@@ -747,8 +750,7 @@ for env_name in environments:
                 init_action,
             )
         )
-        fitness = output["metrics"]["sum_of_rewards"]
-        fitness = fitness.mean(-1).mean(2).reshape(fitness.shape[0], fitness.shape[1], -1)[:, :, -1]
+        fitness = output["rewards"].mean(-1)
         es_state = strategy.tell(x, fitness, es_state, es_params)
         elapsed_time = time.time() - t
         print(f"Done in {elapsed_time / 60:.2f}min")
