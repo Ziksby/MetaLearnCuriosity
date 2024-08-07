@@ -697,6 +697,8 @@ for env_name in environments:
         popsize=config["POP_SIZE"],
         pholder_params=rc_params_pholder,
         opt_name="adam",
+        lrate_decay=1,
+        sigma_decay=0.999,
     )
 
     es_rng, es_rng_init = jax.random.split(es_rng)
