@@ -15,12 +15,12 @@ import jax.numpy as jnp
 import jax.tree_util
 import numpy as np
 import optax
-import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 from tqdm import tqdm
 
+import wandb
 from MetaLearnCuriosity.agents.nn import (
     AtariBYOLPredictor,
     BYOLTarget,
@@ -79,7 +79,7 @@ class PPOActorCritic(nn.Module):
 
 
 config = {
-    "RUN_NAME": "minatar_byol_ppo",
+    "RUN_NAME": "rc_asterix_byol_default",
     "SEED": 42,
     "NUM_SEEDS": 10,
     "LR": 5e-3,
@@ -101,10 +101,10 @@ config = {
     "PRED_LR": 0.001,
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
-    "POP_SIZE": 64,
+    "POP_SIZE": 32,
     "ES_SEED": 7,
     "RC_SEED": 23,
-    "NUM_GENERATIONS": 128,
+    "NUM_GENERATIONS": 64,
     # "INT_LAMBDA": 0.001,
 }
 
@@ -655,16 +655,16 @@ def train(
     runner_state, extra_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
     metric, rl_total_loss, int_reward, norm_int_reward = extra_info
     return {
-        "train_state": runner_state[0],
+        # "train_state": runner_state[0],
         "metrics": metric,
-        "rl_total_loss": rl_total_loss[0],
-        "rl_value_loss": rl_total_loss[1][0],
-        "rl_actor_loss": rl_total_loss[1][1],
-        "rl_entrophy_loss": rl_total_loss[1][2],
-        "pred_loss": rl_total_loss[2],
-        "int_reward": int_reward,
-        "norm_int_reward": norm_int_reward,
-        "rng": runner_state[-1],
+        # "rl_total_loss": rl_total_loss[0],
+        # "rl_value_loss": rl_total_loss[1][0],
+        # "rl_actor_loss": rl_total_loss[1][1],
+        # "rl_entrophy_loss": rl_total_loss[1][2],
+        # "pred_loss": rl_total_loss[2],
+        # "int_reward": int_reward,
+        # "norm_int_reward": norm_int_reward,
+        # "rng": runner_state[-1],
     }
 
 
@@ -747,9 +747,8 @@ for env_name in environments:
                 init_action,
             )
         )
-        rewards = output["metrics"]["sum_of_rewards"]
-        print(rewards.shape)
-        fitness = rewards.mean(-1).mean(2).reshape(rewards.shape[0], rewards.shape[1], -1)[:, :, -1]
+        fitness = output["metrics"]["sum_of_rewards"]
+        fitness = fitness.mean(-1).mean(2).reshape(fitness.shape[0], fitness.shape[1], -1)[:, :, -1]
         es_state = strategy.tell(x, fitness, es_state, es_params)
         elapsed_time = time.time() - t
         print(f"Done in {elapsed_time / 60:.2f}min")
