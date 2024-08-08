@@ -368,7 +368,10 @@ def train(
                 traj_batch.int_reward, byol_reward_norm_params, config["REW_NORM_PARAMETER"]
             )
             norm_ext_reward, ext_reward_norm_params = byol_normalize_prior_int_rewards(
-                traj_batch.norm_reward, ext_reward_norm_params, config["REW_NORM_PARAMETER"]
+                traj_batch.norm_reward,
+                ext_reward_norm_params,
+                config["REW_NORM_PARAMETER"],
+                prior=False,
             )
             norm_traj_batch = Transition(
                 traj_batch.done,
