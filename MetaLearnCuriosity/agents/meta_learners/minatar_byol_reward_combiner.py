@@ -603,6 +603,7 @@ def train(
             traj_batch.action,
             traj_batch.value,
             traj_batch.reward,
+            traj_batch.norm_reward,
             traj_batch.int_reward,
             traj_batch.log_prob,
             traj_batch.obs,
