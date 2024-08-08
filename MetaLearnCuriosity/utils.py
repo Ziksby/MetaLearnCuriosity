@@ -26,6 +26,7 @@ class RCBYOLTransition(NamedTuple):
     action: jnp.ndarray
     value: jnp.ndarray
     reward: jnp.ndarray
+    norm_reward: jnp.ndarray  # will be normalised in batch
     int_reward: jnp.ndarray
     log_prob: jnp.ndarray
     obs: jnp.ndarray
@@ -786,22 +787,21 @@ def byol_update_reward_norm_params(byol_reward_norm_params, int_reward, rew_norm
     return BYOLRewardNorm(new_ema_mean, new_ema_mean_sq, new_c, byol_reward_norm_params.mu_l)
 
 
-def byol_normalize_prior_int_rewards(int_reward, byol_reward_norm_params, rew_norm_param):
+def byol_normalize_prior_int_rewards(
+    int_reward, byol_reward_norm_params, rew_norm_param, prior: bool = True
+):
     # Update reward normalization parameters
     byol_reward_norm_params = byol_update_reward_norm_params(
         byol_reward_norm_params, int_reward, rew_norm_param
     )
-
     # Compute the adjusted EMA mean and mean square
     mu_r = byol_reward_norm_params.ema_mean / (1 - (rew_norm_param**byol_reward_norm_params.c))
     mu_r_sq = byol_reward_norm_params.ema_mean_sq / (
         1 - (rew_norm_param**byol_reward_norm_params.c)
     )
-
     # Compute standard deviation
     mu_array = jnp.array([0, mu_r_sq - jnp.square(mu_r)])
     sigma_r = jnp.sqrt(jnp.max(mu_array) + 1e-8)  # 1e-8 as a small numerical regularization
-
     # Normalize intrinsic reward
     norm_int_reward = int_reward / sigma_r
 
@@ -810,8 +810,17 @@ def byol_normalize_prior_int_rewards(int_reward, byol_reward_norm_params, rew_no
         norm_int_reward, byol_reward_norm_params, rew_norm_param
     )
 
-    # Compute prior normalized intrinsic reward
-    prior_norm_int_reward = jnp.maximum(norm_int_reward - byol_reward_norm_params.mu_l, 0)
+    def prior_norm_step(norm_int_reward, byol_reward_norm_params):
+        # Compute prior normalized intrinsic reward
+        prior_norm_int_reward = jnp.maximum(norm_int_reward - byol_reward_norm_params.mu_l, 0)
+        return prior_norm_int_reward, byol_reward_norm_params
+
+    def no_prior_norm_step(norm_int_reward, byol_reward_norm_params):
+        return norm_int_reward, byol_reward_norm_params
+
+    prior_norm_int_reward, byol_reward_norm_params = jax.lax.cond(
+        prior, prior_norm_step, no_prior_norm_step, norm_int_reward, byol_reward_norm_params
+    )
 
     return prior_norm_int_reward, byol_reward_norm_params
 

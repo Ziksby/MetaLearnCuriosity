@@ -81,7 +81,7 @@ class PPOActorCritic(nn.Module):
 config = {
     "RUN_NAME": "rc_asterix_byol_default",
     "SEED": 42,
-    "NUM_SEEDS": 10,
+    "NUM_SEEDS": 3,
     "LR": 5e-3,
     "NUM_ENVS": 64,
     "NUM_STEPS": 128,
@@ -250,6 +250,7 @@ def train(
     # INIT STUFF FOR OPTIMIZATION AND NORMALIZATION
     update_target_counter = 0
     byol_reward_norm_params = BYOLRewardNorm(0, 0, 1, 0)
+    ext_reward_norm_params = BYOLRewardNorm(0, 0, 1, 0)
 
     # INIT ENV
     rng, _rng = jax.random.split(rng)
@@ -271,6 +272,7 @@ def train(
                 env_state,
                 last_obs,
                 byol_reward_norm_params,
+                ext_reward_norm_params,
                 update_target_counter,
                 rng,
             ) = runner_state
@@ -312,6 +314,7 @@ def train(
                 action,
                 value,
                 reward,
+                reward,
                 int_reward,
                 log_prob,
                 last_obs,
@@ -331,6 +334,7 @@ def train(
                 env_state,
                 obsv,
                 byol_reward_norm_params,
+                ext_reward_norm_params,
                 update_target_counter,
                 rng,
             )
@@ -351,6 +355,7 @@ def train(
             env_state,
             last_obs,
             byol_reward_norm_params,
+            ext_reward_norm_params,
             update_target_counter,
             rng,
         ) = runner_state
@@ -358,9 +363,12 @@ def train(
         # update_target_counter+=1
         _, last_val = train_state.apply_fn(train_state.params, last_obs[np.newaxis, :])
 
-        def _calculate_gae(traj_batch, last_val, byol_reward_norm_params):
+        def _calculate_gae(traj_batch, last_val, byol_reward_norm_params, ext_reward_norm_params):
             norm_int_reward, byol_reward_norm_params = byol_normalize_prior_int_rewards(
                 traj_batch.int_reward, byol_reward_norm_params, config["REW_NORM_PARAMETER"]
+            )
+            norm_ext_reward, ext_reward_norm_params = byol_normalize_prior_int_rewards(
+                traj_batch.norm_reward, ext_reward_norm_params, config["REW_NORM_PARAMETER"]
             )
             norm_traj_batch = Transition(
                 traj_batch.done,
@@ -368,6 +376,7 @@ def train(
                 traj_batch.action,
                 traj_batch.value,
                 traj_batch.reward,
+                norm_ext_reward,
                 norm_int_reward,
                 traj_batch.log_prob,
                 traj_batch.obs,
@@ -379,15 +388,17 @@ def train(
 
             def _get_advantages(gae_and_next_value, transition):
                 gae, next_value = gae_and_next_value
-                done, value, reward, int_reward, norm_time_step = (
+                done, value, reward, int_reward, norm_time_step, norm_ext_reward = (
                     transition.done,
                     transition.value,
                     transition.reward,
                     transition.int_reward,
                     transition.norm_time_step,
+                    transition.norm_reward,
                 )
                 rc_input = jnp.concatenate(
-                    (reward[:, None], int_reward[:, None], norm_time_step[:, None]), axis=-1
+                    (norm_ext_reward[:, None], int_reward[:, None], norm_time_step[:, None]),
+                    axis=-1,
                 )
                 int_lambda = rc_network.apply(rc_params, rc_input)
                 delta = (
@@ -410,10 +421,17 @@ def train(
                 advantages + traj_batch.value,
                 norm_int_reward,
                 byol_reward_norm_params,
+                ext_reward_norm_params,
             )
 
-        advantages, targets, norm_int_reward, byol_reward_norm_params = _calculate_gae(
-            traj_batch, last_val.squeeze(0), byol_reward_norm_params
+        (
+            advantages,
+            targets,
+            norm_int_reward,
+            byol_reward_norm_params,
+            ext_reward_norm_params,
+        ) = _calculate_gae(
+            traj_batch, last_val.squeeze(0), byol_reward_norm_params, ext_reward_norm_params
         )
 
         # UPDATE NETWORK
@@ -632,6 +650,7 @@ def train(
             env_state,
             last_obs,
             byol_reward_norm_params,
+            ext_reward_norm_params,
             update_target_counter,
             rng,
         )
@@ -649,6 +668,7 @@ def train(
         env_state,
         obsv,
         byol_reward_norm_params,
+        ext_reward_norm_params,
         update_target_counter,
         _rng,
     )
