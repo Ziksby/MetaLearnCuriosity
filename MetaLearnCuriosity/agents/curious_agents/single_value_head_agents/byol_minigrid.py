@@ -16,10 +16,8 @@ from flax.training.train_state import TrainState
 
 from MetaLearnCuriosity.agents.nn import (
     BYOLTarget,
-    CloseScannedRNN,
     MiniGridActorCriticRNN,
     MiniGridBYOLPredictor,
-    OpenScannedRNN,
 )
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
@@ -41,11 +39,11 @@ from MetaLearnCuriosity.wrappers import (
 jax.config.update("jax_threefry_partitionable", True)
 
 environments = [
-    # "MiniGrid-BlockedUnlockPickUp",
-    # "MiniGrid-Empty-16x16",
-    # "MiniGrid-EmptyRandom-16x16",
-    # "MiniGrid-FourRooms",
-    # "MiniGrid-MemoryS128",
+    "MiniGrid-BlockedUnlockPickUp",
+    "MiniGrid-Empty-16x16",
+    "MiniGrid-EmptyRandom-16x16",
+    "MiniGrid-FourRooms",
+    "MiniGrid-MemoryS128",
     "MiniGrid-Unlock",
 ]
 
@@ -598,10 +596,6 @@ for env_name in environments:
             )
         )
         elapsed_time = time.time() - t
-        epi_ret = output["metrics"]["returned_episode_returns"].mean(0).mean(0).mean(-1).reshape(-1)
-        int_rew = output["int_reward"].mean(0).mean(0).mean(-1).reshape(-1)
-        int_norm_rew = output["norm_int_reward"].mean(0).mean(0).mean(-1).reshape(-1)
-        pred_loss = unreplicate(output["pred_loss"]).mean(-1).mean(0).mean(-1)
 
     else:
         (
