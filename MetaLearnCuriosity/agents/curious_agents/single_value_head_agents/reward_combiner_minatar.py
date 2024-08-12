@@ -28,7 +28,7 @@ from MetaLearnCuriosity.agents.nn import (
     OpenScannedRNN,
     TemporalRewardCombiner,
 )
-from MetaLearnCuriosity.checkpoints import Save
+from MetaLearnCuriosity.checkpoints import Restore, Save
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.pmapped_open_es import OpenES
 from MetaLearnCuriosity.utils import BYOLRewardNorm
@@ -41,10 +41,10 @@ from MetaLearnCuriosity.utils import (
 from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper, VecEnv
 
 environments = [
-    "Asterix-MinAtar",
-    # "Breakout-MinAtar",
-    # "Freeway-MinAtar",
-    # "SpaceInvaders-MinAtar",
+    # "Asterix-MinAtar",
+    "Breakout-MinAtar",
+    "Freeway-MinAtar",
+    "SpaceInvaders-MinAtar",
 ]
 
 
@@ -79,9 +79,9 @@ class PPOActorCritic(nn.Module):
 
 
 config = {
-    "RUN_NAME": "rc_asterix_byol_default",
+    "RUN_NAME": "rc_default_byol_minatar",
     "SEED": 42,
-    "NUM_SEEDS": 3,
+    "NUM_SEEDS": 10,
     "LR": 5e-3,
     "NUM_ENVS": 64,
     "NUM_STEPS": 128,
@@ -101,19 +101,8 @@ config = {
     "PRED_LR": 0.001,
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
-    "POP_SIZE": 32,
-    "ES_SEED": 7,
-    "RC_SEED": 23,
-    "NUM_GENERATIONS": 128,
     # "INT_LAMBDA": 0.001,
 }
-
-environments = [
-    "Asterix-MinAtar",
-    # "Breakout-MinAtar",
-    # "Freeway-MinAtar",
-    # "SpaceInvaders-MinAtar",
-]
 
 
 def make_config_env(config, env_name):
@@ -410,9 +399,9 @@ def train(
                     - value
                 )
                 gae = delta + config["GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
-                return (gae, value), gae
+                return (gae, value), (gae, int_lambda)
 
-            _, advantages = jax.lax.scan(
+            _, (advantages, int_lambdas) = jax.lax.scan(
                 _get_advantages,
                 (jnp.zeros_like(last_val), last_val),
                 norm_traj_batch,
@@ -423,16 +412,20 @@ def train(
                 advantages,
                 advantages + traj_batch.value,
                 norm_int_reward,
+                norm_ext_reward,
                 byol_reward_norm_params,
                 ext_reward_norm_params,
+                int_lambdas,
             )
 
         (
             advantages,
             targets,
             norm_int_reward,
+            norm_ext_reward,
             byol_reward_norm_params,
             ext_reward_norm_params,
+            int_lambdas,
         ) = _calculate_gae(
             traj_batch, last_val.squeeze(0), byol_reward_norm_params, ext_reward_norm_params
         )
@@ -504,10 +497,10 @@ def train(
                     init_close_hstate,
                     init_open_hstate,
                 )
-                # (loss, vloss, aloss, entropy, pred_losses, grads, pred_grads) = jax.lax.pmean(
-                #     (loss, vloss, aloss, entropy, pred_losses, grads, pred_grads),
-                #     axis_name="devices",
-                # )
+                (loss, vloss, aloss, entropy, pred_losses, grads, pred_grads) = jax.lax.pmean(
+                    (loss, vloss, aloss, entropy, pred_losses, grads, pred_grads),
+                    axis_name="devices",
+                )
 
                 def update_target(
                     target_state, pred_state, update_target_counter=update_target_counter
@@ -658,7 +651,14 @@ def train(
             update_target_counter,
             rng,
         )
-        return runner_state, (metric, loss_info, norm_int_reward, traj_batch.int_reward)
+        return runner_state, (
+            metric,
+            loss_info,
+            norm_int_reward,
+            traj_batch.int_reward,
+            norm_ext_reward,
+            int_lambdas,
+        )
 
     rng, _rng = jax.random.split(rng)
     runner_state = (
@@ -677,69 +677,63 @@ def train(
         _rng,
     )
     runner_state, extra_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
-    metric, rl_total_loss, int_reward, norm_int_reward = extra_info
-    rewards = metric["sum_of_rewards"].mean(axis=-1)
-    rewards = rewards.reshape(-1)
-    rewards = rewards[-1]
+    metric, rl_total_loss, norm_int_reward, int_reward, norm_ext_reward, int_lambdas = extra_info
+    # rewards = metric["sum_of_rewards"].mean(axis=-1)
+    # rewards = rewards.reshape(-1)
+    # rewards = rewards[-1]
     return {
-        # "train_state": runner_state[0],
-        "rewards": rewards,
-        # "rl_total_loss": rl_total_loss[0],
-        # "rl_value_loss": rl_total_loss[1][0],
-        # "rl_actor_loss": rl_total_loss[1][1],
-        # "rl_entrophy_loss": rl_total_loss[1][2],
-        # "pred_loss": rl_total_loss[2],
-        # "int_reward": int_reward,
-        # "norm_int_reward": norm_int_reward,
-        # "rng": runner_state[-1],
+        "train_state": runner_state[0],
+        "metrics": metric,
+        "rl_total_loss": rl_total_loss[0],
+        "rl_value_loss": rl_total_loss[1][0],
+        "rl_actor_loss": rl_total_loss[1][1],
+        "rl_entrophy_loss": rl_total_loss[1][2],
+        "pred_loss": rl_total_loss[2],
+        "int_reward": int_reward,
+        "norm_int_reward": norm_int_reward,
+        "norm_ext_reward": norm_ext_reward,
+        "int_lambdas": int_lambdas,
     }
 
 
+make_train = jax.jit(jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0, 0)))
+train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0))
+train_fn = jax.pmap(train_fn, axis_name="devices")
 for env_name in environments:
+    rc_params = Restore(
+        "/home/batsy/MetaLearnCuriosity/rc_asterix_byol_default_Asterix-MinAtar_flax-checkpoints_v0"
+    )
     rng = jax.random.PRNGKey(config["SEED"])
+    rng = jax.random.split(rng, config["NUM_SEEDS"])
     config, env, env_params = make_config_env(config, env_name)
     print(f"Training in {config['ENV_NAME']}")
 
-    make_train = jax.jit(jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0, 0)))
-    train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0))
-    train_fn = jax.vmap(train_fn, in_axes=(None, 0, None, None, None, None, None, None, None))
-    train_fn = jax.pmap(train_fn, axis_name="devices")
+    (
+        rng,
+        train_state,
+        pred_state,
+        target_state,
+        init_bt,
+        close_init_hstate,
+        open_init_hstate,
+        init_action,
+    ) = make_train(rng)
 
-    group = "reward_combiners"
-    tags = ["meta-learner", config["ENV_NAME"]]
-    name = f'{config["RUN_NAME"]}_{config["ENV_NAME"]}'
-    fit_log = wandb.init(
-        project="MetaLearnCuriosity",
-        config=config,
-        group=group,
-        tags=tags,
-        name=f"{name}_fitness",
-    )
-    reward_combiner_network = TemporalRewardCombiner()
-    rc_params_pholder = reward_combiner_network.init(
-        jax.random.PRNGKey(config["RC_SEED"]), jnp.zeros((1, 3))
-    )
-    es_rng = jax.random.PRNGKey(config["ES_SEED"])
-    strategy = OpenES(
-        popsize=config["POP_SIZE"],
-        pholder_params=rc_params_pholder,
-        opt_name="adam",
-        lrate_decay=1,
-        sigma_decay=0.999,
-        sigma_init=0.04,
-    )
+    open_init_hstate = replicate(open_init_hstate, jax.local_devices())
+    close_init_hstate = replicate(close_init_hstate, jax.local_devices())
+    train_state = replicate(train_state, jax.local_devices())
+    pred_state = replicate(pred_state, jax.local_devices())
+    target_state = replicate(target_state, jax.local_devices())
+    init_bt = replicate(init_bt, jax.local_devices())
+    init_action = replicate(init_action, jax.local_devices())
+    rc_params = replicate(rc_params, jax.local_devices())
 
-    es_rng, es_rng_init = jax.random.split(es_rng)
-    es_params = strategy.default_params
-    es_state = strategy.initialize(es_rng_init, es_params)
-
-    for _ in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations"):
-        rng, rng_seeds = jax.random.split(rng)
-        rng_train = jax.random.split(rng_seeds, config["NUM_SEEDS"])
-
-        # setting up the RL agents.
-        (
-            rng_train,
+    print(f"Training in {config['ENV_NAME']}")
+    t = time.time()
+    output = jax.block_until_ready(
+        train_fn(
+            rng,
+            rc_params,
             train_state,
             pred_state,
             target_state,
@@ -747,53 +741,32 @@ for env_name in environments:
             close_init_hstate,
             open_init_hstate,
             init_action,
-        ) = make_train(rng_train)
-
-        # duplicating here for pmap
-        open_init_hstate = replicate(open_init_hstate, jax.local_devices())
-        close_init_hstate = replicate(close_init_hstate, jax.local_devices())
-        train_state = replicate(train_state, jax.local_devices())
-        pred_state = replicate(pred_state, jax.local_devices())
-        target_state = replicate(target_state, jax.local_devices())
-        init_bt = replicate(init_bt, jax.local_devices())
-        init_action = replicate(init_action, jax.local_devices())
-        t = time.time()
-
-        # Fitness evaulation
-        es_rng, es_rng_ask = jax.random.split(es_rng)
-        x, es_state = strategy.ask(es_rng_ask, es_state, es_params)
-        output = jax.block_until_ready(
-            train_fn(
-                rng_train,
-                x,
-                train_state,
-                pred_state,
-                target_state,
-                init_bt,
-                close_init_hstate,
-                open_init_hstate,
-                init_action,
-            )
         )
-        fitness = output["rewards"].mean(-1)
-        es_state = strategy.tell(x, fitness, es_state, es_params)
-        elapsed_time = time.time() - t
-        print(f"Done in {elapsed_time / 60:.2f}min")
-        fit_log.log(
-            {f"{name}_mean_fitness": fitness.mean(), f"{name}_best_fitness": jnp.max(fitness)}
-        )
+    )
+    elapsed_time = time.time() - t
 
-    fit_log.finish()
     logger = WBLogger(
         config=config,
-        group=group,
-        tags=tags,
-        name=name,
+        group="minatar_curious",
+        tags=["reward_combiner_trained", config["ENV_NAME"], "minatar"],
+        name=f'{config["RUN_NAME"]}_{config["ENV_NAME"]}',
     )
-    # Get the absolute path of the directory
+    output = process_output_general(output)
+
+    logger.log_pred_losses(output, config["NUM_SEEDS"])
+    logger.log_episode_return(output, config["NUM_SEEDS"])
+    logger.log_rl_losses(output, config["NUM_SEEDS"])
+    logger.log_int_rewards(output, config["NUM_SEEDS"])
+    logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
+    logger.log_norm_ext_rewards(output, config["NUM_SEEDS"])
+    logger.log_int_lambdas(output, config["NUM_SEEDS"])
+    output["config"] = config
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
-    params = strategy.param_reshaper.reshape_single(es_state.mean[0])
+
+    # Get the absolute path of the directory
     path = os.path.abspath(checkpoint_directory)
-    Save(path, params)
+    Save(path, output)
     logger.save_artifact(path)
     shutil.rmtree(path)
+    print(f"Deleted local checkpoint directory: {path}")
+    print(f"Done in {elapsed_time / 60:.2f}min")

@@ -1,6 +1,7 @@
 import jax.numpy as jnp
-import wandb
 from flax.jax_utils import unreplicate
+
+import wandb
 
 
 class WBLogger:
@@ -78,6 +79,30 @@ class WBLogger:
                     {f"norm_int_rewards_{self.config['ENV_NAME']}": returns}
                 )
             self.episode_norm_int_rewards.finish()
+
+    def log_norm_ext_rewards(self, output, num_seeds):
+        self.episode_norm_ext_rewards = wandb.init(
+            project="MetaLearnCuriosity",
+            config=self.config,
+            group=self.group,
+            tags=self.tags,
+            notes=self.notes,
+            name=f"{self.name}_norm_ext_rew",
+        )
+
+        if num_seeds > 1:
+            outs_avg = jnp.mean(output["norm_ext_reward"], axis=0)
+            for returns in outs_avg.mean(-1).reshape(-1):
+                self.episode_norm_ext_rewards.log(
+                    {f"norm_ext_rewards_{self.config['ENV_NAME']}_{num_seeds}_seeds": returns}
+                )
+            self.episode_norm_ext_rewards.finish()
+        else:
+            for returns in output["norm_ext_reward"].mean(-1).reshape(-1):
+                self.episode_norm_ext_rewards.log(
+                    {f"norm_ext_rewards_{self.config['ENV_NAME']}": returns}
+                )
+            self.episode_norm_ext_rewards.finish()
 
     def log_byol_losses(self, output, num_seeds):
         self.losses = wandb.init(
