@@ -15,12 +15,12 @@ import jax.numpy as jnp
 import jax.tree_util
 import numpy as np
 import optax
+import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 from tqdm import tqdm
 
-import wandb
 from MetaLearnCuriosity.agents.nn import (
     AtariBYOLPredictor,
     BYOLTarget,
@@ -41,8 +41,8 @@ from MetaLearnCuriosity.utils import (
 from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper, VecEnv
 
 environments = [
-    "Asterix-MinAtar",
-    # "Breakout-MinAtar",
+    # "Asterix-MinAtar",
+    "Breakout-MinAtar",
     # "Freeway-MinAtar",
     # "SpaceInvaders-MinAtar",
 ]
@@ -79,7 +79,7 @@ class PPOActorCritic(nn.Module):
 
 
 config = {
-    "RUN_NAME": "rc_asterix_byol_default",
+    "RUN_NAME": "rc_breakout_byol_default",
     "SEED": 42,
     "NUM_SEEDS": 3,
     "LR": 5e-3,
@@ -107,13 +107,6 @@ config = {
     "NUM_GENERATIONS": 128,
     # "INT_LAMBDA": 0.001,
 }
-
-environments = [
-    "Asterix-MinAtar",
-    # "Breakout-MinAtar",
-    # "Freeway-MinAtar",
-    # "SpaceInvaders-MinAtar",
-]
 
 
 def make_config_env(config, env_name):
