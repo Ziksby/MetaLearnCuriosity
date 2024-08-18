@@ -20,6 +20,19 @@ class RNDTransition(NamedTuple):
     info: jnp.ndarray
 
 
+class RCRNDTransition(NamedTuple):
+    done: jnp.ndarray
+    action: jnp.ndarray
+    value: jnp.ndarray
+    reward: jnp.ndarray
+    norm_reward: jnp.ndarray
+    int_reward: jnp.ndarray
+    log_prob: jnp.ndarray
+    obs: jnp.ndarray
+    norm_time_step: jnp.ndarray
+    info: jnp.ndarray
+
+
 class RCBYOLTransition(NamedTuple):
     done: jnp.ndarray
     prev_action: jnp.ndarray
@@ -731,6 +744,40 @@ def rnd_normalise_int_rewards(traj_batch, rnd_int_return_norm_params, int_gamma)
     )
     norm_int_reward = int_reward / jnp.sqrt(rnd_int_return_norm_params.var + 1e-8)
     return norm_int_reward, rnd_int_return_norm_params
+
+
+def rnd_normalise_ext_rewards(traj_batch, rnd_ext_return_norm_params, ext_gamma):
+    def _multiply_rewems_w_dones(rewems, dones_row):
+        rewems = rewems * (1 - dones_row)
+        return rewems, rewems
+
+    def _update_rewems(rewems, ext_reward_row):
+        rewems = rewems * ext_gamma + ext_reward_row
+        return rewems, rewems
+
+    # Shape (num_steps, num_envs)
+    ext_reward = traj_batch.norm_reward
+
+    # Shape (num_envs,num_steps)
+    ext_reward_transpose = jnp.transpose(ext_reward)
+
+    rewems, _ = jax.lax.scan(
+        _multiply_rewems_w_dones,
+        rnd_ext_return_norm_params.rewems,
+        jnp.transpose(traj_batch.done),  # Shape (num_envs,num_steps)
+    )
+
+    rewems, _ = jax.lax.scan(_update_rewems, rewems, ext_reward_transpose)
+
+    batch_count = len(rewems)
+    batch_mean = rewems.mean()
+    batch_var = jnp.var(rewems)
+
+    rnd_ext_return_norm_params = update_rnd_int_norm_params(
+        batch_count, batch_mean, batch_var, rewems, rnd_ext_return_norm_params
+    )
+    norm_ext_reward = ext_reward / jnp.sqrt(rnd_ext_return_norm_params.var + 1e-8)
+    return norm_ext_reward, rnd_ext_return_norm_params
 
 
 def process_output_general(output):
