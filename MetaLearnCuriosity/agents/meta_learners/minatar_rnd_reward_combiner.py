@@ -448,9 +448,9 @@ def train(rng, rc_params, train_state, pred_state, target_params, init_obs_rng):
                 )
 
                 rnd_loss, rnd_grads = jax.value_and_grad(_rnd_loss)(pred_state.params, rnd_obs)
-                (loss, vloss, aloss, entropy, rnd_loss, grads, rnd_grads) = jax.lax.pmean(
-                    (loss, vloss, aloss, entropy, rnd_loss, grads, rnd_grads), axis_name="devices"
-                )
+                # (loss, vloss, aloss, entropy, rnd_loss, grads, rnd_grads) = jax.lax.pmean(
+                #     (loss, vloss, aloss, entropy, rnd_loss, grads, rnd_grads), axis_name="devices"
+                # )
                 train_state = train_state.apply_gradients(grads=grads)
                 pred_state = pred_state.apply_gradients(grads=rnd_grads)
                 return (train_state, pred_state), (loss, (vloss, aloss, entropy, rnd_loss))
