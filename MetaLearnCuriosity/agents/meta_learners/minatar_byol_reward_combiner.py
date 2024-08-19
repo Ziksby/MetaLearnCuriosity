@@ -15,18 +15,18 @@ import jax.numpy as jnp
 import jax.tree_util
 import numpy as np
 import optax
-import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 from tqdm import tqdm
 
+import wandb
 from MetaLearnCuriosity.agents.nn import (
     AtariBYOLPredictor,
     BYOLTarget,
     CloseScannedRNN,
     OpenScannedRNN,
-    TemporalRewardCombiner,
+    RewardCombiner,
 )
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
@@ -42,9 +42,9 @@ from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper, V
 
 environments = [
     # "Asterix-MinAtar",
-    "Breakout-MinAtar",
+    # "Breakout-MinAtar",
     # "Freeway-MinAtar",
-    # "SpaceInvaders-MinAtar",
+    "SpaceInvaders-MinAtar",
 ]
 
 
@@ -79,7 +79,7 @@ class PPOActorCritic(nn.Module):
 
 
 config = {
-    "RUN_NAME": "rc_breakout_byol_default",
+    "RUN_NAME": "rc_meta",
     "SEED": 42,
     "NUM_SEEDS": 3,
     "LR": 5e-3,
@@ -239,7 +239,7 @@ def train(
     init_action,
 ):
     # REWARD COMBINER
-    rc_network = TemporalRewardCombiner()
+    rc_network = RewardCombiner()
     # INIT STUFF FOR OPTIMIZATION AND NORMALIZATION
     update_target_counter = 0
     byol_reward_norm_params = BYOLRewardNorm(0, 0, 1, 0)
@@ -708,9 +708,9 @@ for env_name in environments:
         tags=tags,
         name=f"{name}_fitness",
     )
-    reward_combiner_network = TemporalRewardCombiner()
+    reward_combiner_network = RewardCombiner()
     rc_params_pholder = reward_combiner_network.init(
-        jax.random.PRNGKey(config["RC_SEED"]), jnp.zeros((1, 3))
+        jax.random.PRNGKey(config["RC_SEED"]), jnp.zeros((1, 2))
     )
     es_rng = jax.random.PRNGKey(config["ES_SEED"])
     strategy = OpenES(
