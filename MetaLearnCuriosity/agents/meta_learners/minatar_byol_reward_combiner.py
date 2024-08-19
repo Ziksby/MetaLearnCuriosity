@@ -79,7 +79,7 @@ class PPOActorCritic(nn.Module):
 
 
 config = {
-    "RUN_NAME": "rc_meta",
+    "RUN_NAME": "rc_meta_default",
     "SEED": 42,
     "NUM_SEEDS": 3,
     "LR": 5e-3,
@@ -384,7 +384,7 @@ def train(
 
             def _get_advantages(gae_and_next_value, transition):
                 gae, next_value = gae_and_next_value
-                done, value, reward, int_reward, norm_time_step, norm_ext_reward = (
+                done, value, reward, int_reward, _, norm_ext_reward = (
                     transition.done,
                     transition.value,
                     transition.reward,
@@ -393,7 +393,7 @@ def train(
                     transition.norm_reward,
                 )
                 rc_input = jnp.concatenate(
-                    (norm_ext_reward[:, None], int_reward[:, None], norm_time_step[:, None]),
+                    (norm_ext_reward[:, None], int_reward[:, None]),
                     axis=-1,
                 )
                 int_lambda = rc_network.apply(rc_params, rc_input)
