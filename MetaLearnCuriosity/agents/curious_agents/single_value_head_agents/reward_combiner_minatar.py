@@ -41,7 +41,7 @@ from MetaLearnCuriosity.utils import (
 from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper, VecEnv
 
 environments = [
-    # "Asterix-MinAtar",
+    "Asterix-MinAtar",
     "Breakout-MinAtar",
     "Freeway-MinAtar",
     "SpaceInvaders-MinAtar",
@@ -727,8 +727,6 @@ for env_name in environments:
     init_bt = replicate(init_bt, jax.local_devices())
     init_action = replicate(init_action, jax.local_devices())
     rc_params = replicate(rc_params, jax.local_devices())
-
-    print(f"Training in {config['ENV_NAME']}")
     t = time.time()
     output = jax.block_until_ready(
         train_fn(
@@ -769,3 +767,4 @@ for env_name in environments:
     shutil.rmtree(path)
     print(f"Deleted local checkpoint directory: {path}")
     print(f"Done in {elapsed_time / 60:.2f}min")
+    print()
