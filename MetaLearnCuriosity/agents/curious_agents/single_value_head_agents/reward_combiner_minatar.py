@@ -658,6 +658,7 @@ def train(
             traj_batch.int_reward,
             norm_ext_reward,
             int_lambdas,
+            traj_batch.reward,
         )
 
     rng, _rng = jax.random.split(rng)
@@ -677,7 +678,7 @@ def train(
         _rng,
     )
     runner_state, extra_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
-    metric, _, norm_int_reward, int_reward, norm_ext_reward, int_lambdas = extra_info
+    metric, _, norm_int_reward, int_reward, norm_ext_reward, int_lambdas, reward = extra_info
     # rewards = metric["sum_of_rewards"].mean(axis=-1)
     # rewards = rewards.reshape(-1)
     # rewards = rewards[-1]
@@ -693,6 +694,7 @@ def train(
         "norm_int_reward": norm_int_reward,
         "norm_ext_reward": norm_ext_reward,
         "int_lambdas": int_lambdas,
+        "reward": reward,
     }
 
 

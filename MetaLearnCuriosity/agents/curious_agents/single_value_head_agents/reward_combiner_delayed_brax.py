@@ -1,36 +1,27 @@
-# Taken from:
-# https://github.com/corl-team/xland-minigrid/blob/main/training/train_single_task.py
-
 import os
 import shutil
 import time
-from typing import Sequence
+from typing import Any, NamedTuple, Sequence
 
 import distrax
-import flax
 import flax.linen as nn
-import gymnax
 import jax
 import jax.numpy as jnp
-import jax.tree_util
 import numpy as np
 import optax
 from flax.jax_utils import replicate, unreplicate
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
-from tqdm import tqdm
 
-import wandb
 from MetaLearnCuriosity.agents.nn import (
-    AtariBYOLPredictor,
+    BraxBYOLPredictor,
     BYOLTarget,
     CloseScannedRNN,
     OpenScannedRNN,
     RewardCombiner,
 )
-from MetaLearnCuriosity.checkpoints import Save
+from MetaLearnCuriosity.checkpoints import Restore, Save
 from MetaLearnCuriosity.logger import WBLogger
-from MetaLearnCuriosity.pmapped_open_es import OpenES
 from MetaLearnCuriosity.utils import BYOLRewardNorm
 from MetaLearnCuriosity.utils import RCBYOLTransition as Transition
 from MetaLearnCuriosity.utils import (
@@ -38,14 +29,57 @@ from MetaLearnCuriosity.utils import (
     process_output_general,
     update_target_state_with_ema,
 )
-from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper, VecEnv
+from MetaLearnCuriosity.wrappers import (
+    BraxGymnaxWrapper,
+    ClipAction,
+    DelayedReward,
+    LogWrapper,
+    NormalizeVecObservation,
+    NormalizeVecReward,
+    VecEnv,
+)
 
 environments = [
-    # "Asterix-MinAtar",
-    # "Breakout-MinAtar",
-    # "Freeway-MinAtar",
-    "SpaceInvaders-MinAtar",
+    "ant",
+    "halfcheetah",
+    "hopper",
+    "humanoid",
+    "humanoidstandup",
+    "inverted_pendulum",
+    "inverted_double_pendulum",
+    "pusher",
+    "reacher",
+    "walker2d",
 ]
+
+config = {
+    "RUN_NAME": "rc_delayed_brax_byol_default",
+    "SEED": 42,
+    "NUM_SEEDS": 10,
+    "LR": 3e-4,
+    "NUM_ENVS": 2048,
+    "NUM_STEPS": 10,  # unroll length
+    "TOTAL_TIMESTEPS": 5e7,
+    "UPDATE_EPOCHS": 4,
+    "NUM_MINIBATCHES": 32,
+    "GAMMA": 0.99,
+    "GAE_LAMBDA": 0.95,
+    "CLIP_EPS": 0.2,
+    "ENT_COEF": 0.0,
+    "VF_COEF": 0.5,
+    "MAX_GRAD_NORM": 0.5,
+    "ACTIVATION": "tanh",
+    "ANNEAL_LR": False,
+    "NORMALIZE_ENV": True,
+    "DELAY_REWARDS": True,
+    "STEP_INTERVAL": 10,
+    "ANNEAL_PRED_LR": False,
+    "DEBUG": False,
+    "PRED_LR": 0.001,
+    "REW_NORM_PARAMETER": 0.99,
+    "EMA_PARAMETER": 0.99,
+    # "INT_LAMBDA": 0.0003,
+}
 
 
 class PPOActorCritic(nn.Module):
@@ -58,63 +92,34 @@ class PPOActorCritic(nn.Module):
             activation = nn.relu
         else:
             activation = nn.tanh
-        actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
+        actor_mean = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
         actor_mean = activation(actor_mean)
-        actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(
+        actor_mean = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(
             actor_mean
         )
         actor_mean = activation(actor_mean)
         actor_mean = nn.Dense(
             self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
-        pi = distrax.Categorical(logits=actor_mean)
+        actor_logtstd = self.param("log_std", nn.initializers.zeros, (self.action_dim,))
+        pi = distrax.MultivariateNormalDiag(actor_mean, jnp.exp(actor_logtstd))
 
-        critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
+        critic = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
         critic = activation(critic)
-        critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(critic)
+        critic = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(critic)
         critic = activation(critic)
         critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(critic)
 
         return pi, jnp.squeeze(critic, axis=-1)
 
 
-config = {
-    "RUN_NAME": "rc_meta_default",
-    "SEED": 42,
-    "NUM_SEEDS": 3,
-    "LR": 5e-3,
-    "NUM_ENVS": 64,
-    "NUM_STEPS": 128,
-    "TOTAL_TIMESTEPS": 1e7,
-    "UPDATE_EPOCHS": 4,
-    "NUM_MINIBATCHES": 8,
-    "GAMMA": 0.99,
-    "GAE_LAMBDA": 0.95,
-    "CLIP_EPS": 0.2,
-    "ENT_COEF": 0.01,
-    "VF_COEF": 0.5,
-    "MAX_GRAD_NORM": 0.5,
-    "ACTIVATION": "relu",
-    "ANNEAL_LR": True,
-    "ANNEAL_PRED_LR": False,
-    "DEBUG": False,
-    "PRED_LR": 0.001,
-    "REW_NORM_PARAMETER": 0.99,
-    "EMA_PARAMETER": 0.99,
-    "POP_SIZE": 32,
-    "ES_SEED": 7,
-    "RC_SEED": 23,
-    "NUM_GENERATIONS": 128,
-    # "INT_LAMBDA": 0.001,
-}
-
-
 def make_config_env(config, env_name):
     config["ENV_NAME"] = env_name
+    env, env_params = BraxGymnaxWrapper(config["ENV_NAME"]), None
     num_devices = jax.local_device_count()
     assert config["NUM_ENVS"] % num_devices == 0
-    config["NUM_ENVS_PER_DEVICE"] = config["NUM_ENVS"] // 1
-    config["TOTAL_TIMESTEPS_PER_DEVICE"] = config["TOTAL_TIMESTEPS"] // 1
+    config["NUM_ENVS_PER_DEVICE"] = config["NUM_ENVS"] // num_devices
+    config["TOTAL_TIMESTEPS_PER_DEVICE"] = config["TOTAL_TIMESTEPS"] // num_devices
     # config["EVAL_EPISODES_PER_DEVICE"] = config["EVAL_EPISODES"] // num_devices
     config["NUM_UPDATES"] = (
         config["TOTAL_TIMESTEPS_PER_DEVICE"] // config["NUM_STEPS"] // config["NUM_ENVS_PER_DEVICE"]
@@ -125,10 +130,14 @@ def make_config_env(config, env_name):
     config["TRAINING_HORIZON"] = (
         config["TOTAL_TIMESTEPS_PER_DEVICE"] // config["NUM_ENVS_PER_DEVICE"]
     )
-    env, env_params = gymnax.make(config["ENV_NAME"])
-    env = FlattenObservationWrapper(env)
     env = LogWrapper(env)
+    env = ClipAction(env)
+    if config["DELAY_REWARDS"]:
+        env = DelayedReward(env, config["STEP_INTERVAL"])
     env = VecEnv(env)
+    if config["NORMALIZE_ENV"]:
+        env = NormalizeVecObservation(env)
+        env = NormalizeVecReward(env, config["GAMMA"])
 
     return config, env, env_params
 
@@ -151,9 +160,9 @@ def ppo_make_train(rng):
         return config["PRED_LR"] * frac
 
     # INIT NETWORK
-    network = PPOActorCritic(env.action_space(env_params).n, activation=config["ACTIVATION"])
-    target = BYOLTarget(128)
-    pred = AtariBYOLPredictor(128, env.action_space(env_params).n)
+    network = PPOActorCritic(env.action_space(env_params).shape[0], activation=config["ACTIVATION"])
+    target = BYOLTarget(256)
+    pred = BraxBYOLPredictor(256)
 
     # KEYS
     rng, _rng = jax.random.split(rng)
@@ -163,10 +172,12 @@ def ppo_make_train(rng):
 
     # INIT INPUT
     init_x = jnp.zeros((1, config["NUM_ENVS_PER_DEVICE"], *env.observation_space(env_params).shape))
-    init_action = jnp.zeros((config["NUM_ENVS_PER_DEVICE"],), dtype=jnp.int32)
-    close_init_hstate = CloseScannedRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 128)
-    open_init_hstate = OpenScannedRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 128)
-    init_bt = jnp.zeros((1, config["NUM_ENVS_PER_DEVICE"], 128))
+    init_action = jnp.zeros(
+        (config["NUM_ENVS_PER_DEVICE"], *env.action_space(env_params).shape), dtype=jnp.float32
+    )
+    close_init_hstate = CloseScannedRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 256)
+    open_init_hstate = OpenScannedRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 256)
+    init_bt = jnp.zeros((1, config["NUM_ENVS_PER_DEVICE"], 256))
 
     init_pred_input = (init_bt, init_x, init_action[np.newaxis, :])
 
@@ -238,8 +249,10 @@ def train(
     open_init_hstate,
     init_action,
 ):
-    # REWARD COMBINER
+    # RC NETWORK
+
     rc_network = RewardCombiner()
+
     # INIT STUFF FOR OPTIMIZATION AND NORMALIZATION
     update_target_counter = 0
     byol_reward_norm_params = BYOLRewardNorm(0, 0, 1, 0)
@@ -282,8 +295,6 @@ def train(
             obsv, env_state, reward, done, info = env.step(
                 rng_step, env_state, action.squeeze(0), env_params
             )
-
-            # TIME STEP
 
             norm_time_step = info["timestep"] / config["TRAINING_HORIZON"]
 
@@ -361,10 +372,7 @@ def train(
                 traj_batch.int_reward, byol_reward_norm_params, config["REW_NORM_PARAMETER"]
             )
             norm_ext_reward, ext_reward_norm_params = byol_normalize_prior_int_rewards(
-                traj_batch.norm_reward,
-                ext_reward_norm_params,
-                config["REW_NORM_PARAMETER"],
-                prior=False,
+                traj_batch.reward, ext_reward_norm_params, config["REW_NORM_PARAMETER"], prior=False
             )
             norm_traj_batch = Transition(
                 traj_batch.done,
@@ -378,25 +386,26 @@ def train(
                 traj_batch.obs,
                 traj_batch.next_obs,
                 traj_batch.bt,
-                traj_batch.norm_time_step,
                 traj_batch.info,
             )
 
             def _get_advantages(gae_and_next_value, transition):
                 gae, next_value = gae_and_next_value
-                done, value, reward, int_reward, _, norm_ext_reward = (
+                done, value, reward, int_reward, norm_ext_reward, _ = (
                     transition.done,
                     transition.value,
                     transition.reward,
                     transition.int_reward,
-                    transition.norm_time_step,
                     transition.norm_reward,
+                    transition.norm_time_step,
                 )
+
                 rc_input = jnp.concatenate(
                     (norm_ext_reward[:, None], int_reward[:, None]),
                     axis=-1,
                 )
                 int_lambda = rc_network.apply(rc_params, rc_input)
+
                 delta = (
                     (reward + (int_reward * int_lambda))
                     + config["GAMMA"] * next_value * (1 - done)
@@ -416,6 +425,7 @@ def train(
                 advantages,
                 advantages + traj_batch.value,
                 norm_int_reward,
+                norm_ext_reward,
                 byol_reward_norm_params,
                 ext_reward_norm_params,
             )
@@ -424,6 +434,7 @@ def train(
             advantages,
             targets,
             norm_int_reward,
+            norm_ext_reward,
             byol_reward_norm_params,
             ext_reward_norm_params,
         ) = _calculate_gae(
@@ -497,10 +508,10 @@ def train(
                     init_close_hstate,
                     init_open_hstate,
                 )
-                # (loss, vloss, aloss, entropy, pred_losses, grads, pred_grads) = jax.lax.pmean(
-                #     (loss, vloss, aloss, entropy, pred_losses, grads, pred_grads),
-                #     axis_name="devices",
-                # )
+                (loss, vloss, aloss, entropy, pred_losses, grads, pred_grads) = jax.lax.pmean(
+                    (loss, vloss, aloss, entropy, pred_losses, grads, pred_grads),
+                    axis_name="devices",
+                )
 
                 def update_target(
                     target_state, pred_state, update_target_counter=update_target_counter
@@ -519,7 +530,9 @@ def train(
 
                     # Conditionally update every 10 steps
                     return jax.lax.cond(
-                        update_target_counter % 320 == 0,
+                        update_target_counter
+                        % (10 * config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"])
+                        == 0,
                         true_fun,
                         false_fun,
                         None,  # The argument passed to true_fun and false_fun, `_` in this case is unused
@@ -651,7 +664,14 @@ def train(
             update_target_counter,
             rng,
         )
-        return runner_state, (metric, loss_info, norm_int_reward, traj_batch.int_reward)
+        return runner_state, (
+            metric,
+            loss_info,
+            norm_int_reward,
+            traj_batch.int_reward,
+            norm_ext_reward,
+            traj_batch.reward,
+        )
 
     rng, _rng = jax.random.split(rng)
     runner_state = (
@@ -670,69 +690,35 @@ def train(
         _rng,
     )
     runner_state, extra_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
-    metric, _, _, _ = extra_info
-    rewards = metric["sum_of_rewards"].mean(axis=-1)
-    rewards = rewards.reshape(-1)
-    rewards = rewards[-1]
+    metric, _, norm_int_reward, int_reward, norm_ext_reward, reward = extra_info
     return {
         # "train_state": runner_state[0],
-        "rewards": rewards,
+        "metrics": metric,
         # "rl_total_loss": rl_total_loss[0],
         # "rl_value_loss": rl_total_loss[1][0],
         # "rl_actor_loss": rl_total_loss[1][1],
         # "rl_entrophy_loss": rl_total_loss[1][2],
         # "pred_loss": rl_total_loss[2],
-        # "int_reward": int_reward,
-        # "norm_int_reward": norm_int_reward,
-        # "rng": runner_state[-1],
+        "int_reward": int_reward,
+        "norm_int_reward": norm_int_reward,
+        "reward": reward,
+        "norm_ext_reward": norm_ext_reward,
     }
 
 
 for env_name in environments:
     rng = jax.random.PRNGKey(config["SEED"])
+    t = time.time()
     config, env, env_params = make_config_env(config, env_name)
     print(f"Training in {config['ENV_NAME']}")
-
-    make_train = jax.jit(jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0, 0)))
-    train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0))
-    train_fn = jax.vmap(train_fn, in_axes=(None, 0, None, None, None, None, None, None, None))
-    train_fn = jax.pmap(train_fn, axis_name="devices")
-
-    group = "reward_combiners"
-    tags = ["meta-learner", config["ENV_NAME"]]
-    name = f'{config["RUN_NAME"]}_{config["ENV_NAME"]}'
-    fit_log = wandb.init(
-        project="MetaLearnCuriosity",
-        config=config,
-        group=group,
-        tags=tags,
-        name=f"{name}_fitness",
-    )
-    reward_combiner_network = RewardCombiner()
-    rc_params_pholder = reward_combiner_network.init(
-        jax.random.PRNGKey(config["RC_SEED"]), jnp.zeros((1, 2))
-    )
-    es_rng = jax.random.PRNGKey(config["ES_SEED"])
-    strategy = OpenES(
-        popsize=config["POP_SIZE"],
-        pholder_params=rc_params_pholder,
-        opt_name="adam",
-        lrate_decay=1,
-        sigma_decay=0.999,
-        sigma_init=0.04,
+    rc_params = Restore(
+        "/home/batsy/MetaLearnCuriosity/rc_meta_default_SpaceInvaders-MinAtar_flax-checkpoints_v0"
     )
 
-    es_rng, es_rng_init = jax.random.split(es_rng)
-    es_params = strategy.default_params
-    es_state = strategy.initialize(es_rng_init, es_params)
-
-    for _ in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations"):
-        rng, rng_seeds = jax.random.split(rng)
-        rng_train = jax.random.split(rng_seeds, config["NUM_SEEDS"])
-
-        # setting up the RL agents.
+    if config["NUM_SEEDS"] > 1:
+        rng = jax.random.split(rng, config["NUM_SEEDS"])
         (
-            rng_train,
+            rng,
             train_state,
             pred_state,
             target_state,
@@ -740,9 +726,7 @@ for env_name in environments:
             close_init_hstate,
             open_init_hstate,
             init_action,
-        ) = make_train(rng_train)
-
-        # duplicating here for pmap
+        ) = jax.jit(jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0, 0)))(rng)
         open_init_hstate = replicate(open_init_hstate, jax.local_devices())
         close_init_hstate = replicate(close_init_hstate, jax.local_devices())
         train_state = replicate(train_state, jax.local_devices())
@@ -750,15 +734,14 @@ for env_name in environments:
         target_state = replicate(target_state, jax.local_devices())
         init_bt = replicate(init_bt, jax.local_devices())
         init_action = replicate(init_action, jax.local_devices())
-        t = time.time()
+        rc_params = replicate(rc_params, jax.local_devices())
 
-        # Fitness evaulation
-        es_rng, es_rng_ask = jax.random.split(es_rng)
-        x, es_state = strategy.ask(es_rng_ask, es_state, es_params)
+        train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0))
+        train_fn = jax.pmap(train_fn, axis_name="devices")
+        t = time.time()
         output = jax.block_until_ready(
             train_fn(
-                rng_train,
-                x,
+                rng,
                 train_state,
                 pred_state,
                 target_state,
@@ -768,25 +751,66 @@ for env_name in environments:
                 init_action,
             )
         )
-        fitness = output["rewards"].mean(-1)
-        es_state = strategy.tell(x, fitness, es_state, es_params)
         elapsed_time = time.time() - t
-        print(f"Done in {elapsed_time / 60:.2f}min")
-        fit_log.log(
-            {f"{name}_mean_fitness": fitness.mean(), f"{name}_best_fitness": jnp.max(fitness)}
-        )
 
-    fit_log.finish()
+    else:
+        (
+            rng,
+            train_state,
+            pred_state,
+            target_state,
+            init_bt,
+            close_init_hstate,
+            open_init_hstate,
+            init_action,
+        ) = ppo_make_train(rng)
+        open_init_hstate = replicate(open_init_hstate, jax.local_devices())
+        close_init_hstate = replicate(close_init_hstate, jax.local_devices())
+        train_state = replicate(train_state, jax.local_devices())
+        pred_state = replicate(pred_state, jax.local_devices())
+        target_state = replicate(target_state, jax.local_devices())
+        init_bt = replicate(init_bt, jax.local_devices())
+        init_action = replicate(init_action, jax.local_devices())
+        rc_params = replicate(rc_params, jax.local_devices())
+
+        train_fn = jax.pmap(train, axis_name="devices")
+        t = time.time()
+        output = jax.block_until_ready(
+            train_fn(
+                rng,
+                train_state,
+                pred_state,
+                target_state,
+                init_bt,
+                close_init_hstate,
+                open_init_hstate,
+                init_action,
+            )
+        )
+        elapsed_time = time.time() - t
+
     logger = WBLogger(
         config=config,
-        group=group,
-        tags=tags,
-        name=name,
+        group="delayed_brax_curious",
+        tags=["reward_combiner", config["ENV_NAME"], "delayed_brax"],
+        name=f'{config["RUN_NAME"]}_{config["ENV_NAME"]}',
     )
-    # Get the absolute path of the directory
+    output = process_output_general(output)
+
+    logger.log_pred_losses(output, config["NUM_SEEDS"])
+    logger.log_episode_return(output, config["NUM_SEEDS"])
+    logger.log_rl_losses(output, config["NUM_SEEDS"])
+    logger.log_int_rewards(output, config["NUM_SEEDS"])
+    logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
+    logger.log_norm_ext_rewards(output, config["NUM_SEEDS"])
+    logger.log_reward(output, config["NUM_SEEDS"])
+    output["config"] = config
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
-    params = strategy.param_reshaper.reshape_single(es_state.mean[0])
+
+    # Get the absolute path of the directory
     path = os.path.abspath(checkpoint_directory)
-    Save(path, params)
+    Save(path, output)
     logger.save_artifact(path)
     shutil.rmtree(path)
+    print(f"Deleted local checkpoint directory: {path}")
+    print(f"Done in {elapsed_time / 60:.2f}min")
