@@ -386,6 +386,7 @@ def train(
                 traj_batch.obs,
                 traj_batch.next_obs,
                 traj_batch.bt,
+                traj_batch.norm_time_step,
                 traj_batch.info,
             )
 
@@ -742,6 +743,7 @@ for env_name in environments:
         output = jax.block_until_ready(
             train_fn(
                 rng,
+                rc_params,
                 train_state,
                 pred_state,
                 target_state,
@@ -797,9 +799,7 @@ for env_name in environments:
     )
     output = process_output_general(output)
 
-    logger.log_pred_losses(output, config["NUM_SEEDS"])
     logger.log_episode_return(output, config["NUM_SEEDS"])
-    logger.log_rl_losses(output, config["NUM_SEEDS"])
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
     logger.log_norm_ext_rewards(output, config["NUM_SEEDS"])
