@@ -109,8 +109,8 @@ def make_config_env(config, env_name):
     config["ENV_NAME"] = env_name
     num_devices = jax.local_device_count()
     assert config["NUM_ENVS"] % num_devices == 0
-    config["NUM_ENVS_PER_DEVICE"] = config["NUM_ENVS"] // 1
-    config["TOTAL_TIMESTEPS_PER_DEVICE"] = config["TOTAL_TIMESTEPS"] // 1
+    config["NUM_ENVS_PER_DEVICE"] = config["NUM_ENVS"] // num_devices
+    config["TOTAL_TIMESTEPS_PER_DEVICE"] = config["TOTAL_TIMESTEPS"] // num_devices
     # config["EVAL_EPISODES_PER_DEVICE"] = config["EVAL_EPISODES"] // num_devices
     config["NUM_UPDATES"] = (
         config["TOTAL_TIMESTEPS_PER_DEVICE"] // config["NUM_STEPS"] // config["NUM_ENVS_PER_DEVICE"]
@@ -701,7 +701,7 @@ train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0))
 train_fn = jax.pmap(train_fn, axis_name="devices")
 for env_name in environments:
     rc_params = Restore(
-        "/home/batsy/MetaLearnCuriosity/rc_asterix_byol_default_Asterix-MinAtar_flax-checkpoints_v0"
+        "/home/batsy/MetaLearnCuriosity/rc_meta_default_SpaceInvaders-MinAtar_flax-checkpoints_v0"
     )
     rng = jax.random.PRNGKey(config["SEED"])
     rng = jax.random.split(rng, config["NUM_SEEDS"])
