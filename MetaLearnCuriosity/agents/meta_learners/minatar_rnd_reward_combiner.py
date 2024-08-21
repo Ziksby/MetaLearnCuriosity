@@ -21,11 +21,7 @@ from flax.training.train_state import TrainState
 from tqdm import tqdm
 
 import wandb
-from MetaLearnCuriosity.agents.nn import (
-    PredictorNetwork,
-    TargetNetwork,
-    TemporalRewardCombiner,
-)
+from MetaLearnCuriosity.agents.nn import PredictorNetwork, RewardCombiner, TargetNetwork
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.pmapped_open_es import OpenES
@@ -196,7 +192,7 @@ def ppo_make_train(rng):
 
 def train(rng, rc_params, train_state, pred_state, target_params, init_obs_rng):
     # REWARD COMBINER
-    rc_network = TemporalRewardCombiner()
+    rc_network = RewardCombiner()
 
     # INIT OBS NORM PARAMS:
     random_rollout = make_obs_gymnax_discrete(
@@ -576,7 +572,7 @@ for env_name in environments:
         tags=tags,
         name=f"{name}_fitness",
     )
-    reward_combiner_network = TemporalRewardCombiner()
+    reward_combiner_network = RewardCombiner()
     rc_params_pholder = reward_combiner_network.init(
         jax.random.PRNGKey(config["RC_SEED"]), jnp.zeros((1, 3))
     )

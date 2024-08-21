@@ -26,7 +26,7 @@ from MetaLearnCuriosity.agents.nn import (
     BYOLTarget,
     CloseScannedRNN,
     OpenScannedRNN,
-    TemporalRewardCombiner,
+    RewardCombiner,
 )
 from MetaLearnCuriosity.checkpoints import Restore, Save
 from MetaLearnCuriosity.logger import WBLogger
@@ -235,7 +235,7 @@ def train(
     init_action,
 ):
     # REWARD COMBINER
-    rc_network = TemporalRewardCombiner()
+    rc_network = RewardCombiner()
     # INIT STUFF FOR OPTIMIZATION AND NORMALIZATION
     update_target_counter = 0
     byol_reward_norm_params = BYOLRewardNorm(0, 0, 1, 0)
