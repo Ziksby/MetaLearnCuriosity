@@ -413,9 +413,9 @@ def train(
                     - value
                 )
                 gae = delta + config["GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
-                return (gae, value), gae
+                return (gae, value), (gae, int_lambda)
 
-            _, advantages = jax.lax.scan(
+            _, (advantages, int_lambda) = jax.lax.scan(
                 _get_advantages,
                 (jnp.zeros_like(last_val), last_val),
                 norm_traj_batch,
@@ -429,6 +429,7 @@ def train(
                 norm_ext_reward,
                 byol_reward_norm_params,
                 ext_reward_norm_params,
+                int_lambda,
             )
 
         (
@@ -438,6 +439,7 @@ def train(
             norm_ext_reward,
             byol_reward_norm_params,
             ext_reward_norm_params,
+            int_lambda,
         ) = _calculate_gae(
             traj_batch, last_val.squeeze(0), byol_reward_norm_params, ext_reward_norm_params
         )
@@ -672,6 +674,7 @@ def train(
             traj_batch.int_reward,
             norm_ext_reward,
             traj_batch.reward,
+            int_lambda,
         )
 
     rng, _rng = jax.random.split(rng)
@@ -691,7 +694,7 @@ def train(
         _rng,
     )
     runner_state, extra_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
-    metric, _, norm_int_reward, int_reward, norm_ext_reward, reward = extra_info
+    metric, _, norm_int_reward, int_reward, norm_ext_reward, reward, int_lambda = extra_info
     return {
         # "train_state": runner_state[0],
         "metrics": metric,
@@ -704,6 +707,7 @@ def train(
         "norm_int_reward": norm_int_reward,
         "reward": reward,
         "norm_ext_reward": norm_ext_reward,
+        "int_lambdas": int_lambda,
     }
 
 
@@ -804,6 +808,7 @@ for env_name in environments:
     logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
     logger.log_norm_ext_rewards(output, config["NUM_SEEDS"])
     logger.log_reward(output, config["NUM_SEEDS"])
+    logger.log_int_lambdas(output, config["NUM_SEEDS"])
     output["config"] = config
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
