@@ -438,13 +438,9 @@ class WBLogger:
             for rew in range(len(reward_avg.mean(-1).reshape(-1))):
                 self.reward.log(
                     {
-                        f"total_reward_{self.config['ENV_NAME']}_{num_seeds}_seeds": reward_avg.mean(
+                        f"ext_reward_{self.config['ENV_NAME']}_{num_seeds}_seeds": reward_avg.mean(
                             -1
-                        ).reshape(
-                            -1
-                        )[
-                            rew
-                        ]
+                        ).reshape(-1)[rew]
                     }
                 )
             self.reward.finish()

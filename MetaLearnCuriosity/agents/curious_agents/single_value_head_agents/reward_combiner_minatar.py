@@ -380,7 +380,7 @@ def train(
 
             def _get_advantages(gae_and_next_value, transition):
                 gae, next_value = gae_and_next_value
-                done, value, reward, int_reward, norm_time_step, norm_ext_reward = (
+                done, value, reward, int_reward, _, norm_ext_reward = (
                     transition.done,
                     transition.value,
                     transition.reward,
@@ -389,7 +389,7 @@ def train(
                     transition.norm_reward,
                 )
                 rc_input = jnp.concatenate(
-                    (norm_ext_reward[:, None], int_reward[:, None], norm_time_step[:, None]),
+                    (norm_ext_reward[:, None], int_reward[:, None]),
                     axis=-1,
                 )
                 int_lambda = rc_network.apply(rc_params, rc_input)
@@ -677,18 +677,18 @@ def train(
         _rng,
     )
     runner_state, extra_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
-    metric, rl_total_loss, norm_int_reward, int_reward, norm_ext_reward, int_lambdas = extra_info
+    metric, _, norm_int_reward, int_reward, norm_ext_reward, int_lambdas = extra_info
     # rewards = metric["sum_of_rewards"].mean(axis=-1)
     # rewards = rewards.reshape(-1)
     # rewards = rewards[-1]
     return {
-        "train_state": runner_state[0],
+        # "train_state": runner_state[0],
         "metrics": metric,
-        "rl_total_loss": rl_total_loss[0],
-        "rl_value_loss": rl_total_loss[1][0],
-        "rl_actor_loss": rl_total_loss[1][1],
-        "rl_entrophy_loss": rl_total_loss[1][2],
-        "pred_loss": rl_total_loss[2],
+        # "rl_total_loss": rl_total_loss[0],
+        # "rl_value_loss": rl_total_loss[1][0],
+        # "rl_actor_loss": rl_total_loss[1][1],
+        # "rl_entrophy_loss": rl_total_loss[1][2],
+        # "pred_loss": rl_total_loss[2],
         "int_reward": int_reward,
         "norm_int_reward": norm_int_reward,
         "norm_ext_reward": norm_ext_reward,
@@ -696,10 +696,10 @@ def train(
     }
 
 
-make_train = jax.jit(jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0, 0)))
-train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0))
-train_fn = jax.pmap(train_fn, axis_name="devices")
 for env_name in environments:
+    make_train = jax.jit(jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0, 0)))
+    train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0))
+    train_fn = jax.pmap(train_fn, axis_name="devices")
     rc_params = Restore(
         "/home/batsy/MetaLearnCuriosity/rc_meta_default_SpaceInvaders-MinAtar_flax-checkpoints_v0"
     )
@@ -753,13 +753,12 @@ for env_name in environments:
     )
     output = process_output_general(output)
 
-    logger.log_pred_losses(output, config["NUM_SEEDS"])
     logger.log_episode_return(output, config["NUM_SEEDS"])
-    logger.log_rl_losses(output, config["NUM_SEEDS"])
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
     logger.log_norm_ext_rewards(output, config["NUM_SEEDS"])
     logger.log_int_lambdas(output, config["NUM_SEEDS"])
+    logger.log_reward(output, config["NUM_SEEDS"])
     output["config"] = config
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
