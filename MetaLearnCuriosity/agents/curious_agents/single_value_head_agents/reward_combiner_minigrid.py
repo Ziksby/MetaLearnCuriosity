@@ -634,6 +634,7 @@ for env_name in environments:
         output = jax.block_until_ready(
             train_fn(
                 rng,
+                rc_params,
                 init_hstate,
                 close_init_hstate,
                 open_init_hstate,
