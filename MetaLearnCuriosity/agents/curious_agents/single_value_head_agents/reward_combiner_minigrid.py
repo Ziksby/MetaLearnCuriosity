@@ -104,6 +104,9 @@ def make_env_config(config, env_name):
     config["NUM_UPDATES"] = (
         config["TOTAL_TIMESTEPS_PER_DEVICE"] // config["NUM_STEPS"] // config["NUM_ENVS_PER_DEVICE"]
     )
+    config["TRAINING_HORIZON"] = (
+        config["TOTAL_TIMESTEPS_PER_DEVICE"] // config["NUM_ENVS_PER_DEVICE"]
+    )
     print(f"Num devices: {num_devices}, Num updates: {config['NUM_UPDATES']}")
     return observations_shape, config, env, env_params
 
