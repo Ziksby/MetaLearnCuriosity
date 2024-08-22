@@ -21,9 +21,9 @@ from MetaLearnCuriosity.agents.nn import (
 )
 from MetaLearnCuriosity.checkpoints import Restore, Save
 from MetaLearnCuriosity.logger import WBLogger
-from MetaLearnCuriosity.utils import BYOLMiniGridTransition as Transition
+from MetaLearnCuriosity.utils import BYOLRewardNorm
+from MetaLearnCuriosity.utils import RCBYOLMiniGridTransition as Transition
 from MetaLearnCuriosity.utils import (
-    BYOLRewardNorm,
     byol_minigrid_ppo_update_networks,
     process_output_general,
     rc_byol_calculate_gae,
