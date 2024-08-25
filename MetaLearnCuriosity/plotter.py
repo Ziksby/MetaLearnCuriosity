@@ -140,11 +140,10 @@ def plot_sample_std(names, labels, alphas):
     plt.savefig(f"{env_name}_mean_seeds_std.png")
 
 
-def save_episode_return(path_to_extract, path_to_save, type_agent):
+def save_episode_return(path_to_extract, path_to_save, type_agent, env_name):
     start_time = time.time()
     output = Restore(path_to_extract)
     metric = output["metrics"]["returned_episode_returns"]
-    config = output["config"]
 
     # Average among the number of environments
     metric = jnp.mean(metric, axis=-1)
@@ -186,7 +185,7 @@ def save_episode_return(path_to_extract, path_to_save, type_agent):
     stds = np.array(stds)
 
     # Ensure the save directory exists
-    save_path = os.path.join(path_to_save, type_agent, output["config"]["ENV_NAME"])
+    save_path = os.path.join(path_to_save, type_agent, env_name)
     os.makedirs(save_path, exist_ok=True)
 
     # Save the arrays
@@ -217,7 +216,7 @@ def save_episode_return(path_to_extract, path_to_save, type_agent):
     print(f"Size of stds_episode_return.npy: {os.path.getsize(stds_file) / (1024 * 1024):.7f} MB")
     end_time = time.time()
     elapsed_time = end_time - start_time
-    print(f"Time taken to run the code: {elapsed_time:.2f} seconds in {config['ENV_NAME']}")
+    print(f"Time taken to run the code: {elapsed_time:.2f} seconds in {env_name}")
 
 
 def normalize_curious_agent_returns(
@@ -402,14 +401,14 @@ def plot_error_bars_env(curious_paths, env_name: str, curious_algo_types):
 # plot_error_bars_macro_envs(curious_paths, "SomeMacroEnvType", ["Algo1", "Algo2", "Algo3"])
 
 
-# environments = [
-#     "MiniGrid-BlockedUnlockPickUp",
-#     "MiniGrid-Empty-16x16",
-#     "MiniGrid-EmptyRandom-16x16",
-#     "MiniGrid-FourRooms",
-#     "MiniGrid-MemoryS128",
-#     "MiniGrid-Unlock"
-# ]
+environments = [
+    "MiniGrid-BlockedUnlockPickUp",
+    "MiniGrid-Empty-16x16",
+    "MiniGrid-EmptyRandom-16x16",
+    "MiniGrid-FourRooms",
+    "MiniGrid-MemoryS128",
+    "MiniGrid-Unlock",
+]
 # environments = [
 #     "ant",
 #     "halfcheetah",
@@ -428,30 +427,34 @@ def plot_error_bars_env(curious_paths, env_name: str, curious_algo_types):
 #     "Freeway-MinAtar",
 #     "SpaceInvaders-MinAtar",
 # ]
-# for env_name in environments:
-#     save_episode_return(f"/home/batsi/Documents/Masters/MetaLearnCuriosity/rnd_delayed_brax_{env_name}_flax-checkpoints_v0",
-#                         f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments",
-#                         "rnd")
-#     print(env_name)
-#     normalize_curious_agent_returns(f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/baseline/{env_name}/metric_seeds_episode_return.npy",
-#                                     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/random_agents/{env_name}_epi_rets.npy",
-#                                     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rnd/{env_name}/metric_seeds_episode_return.npy",
-#                                     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rnd/{env_name}",
-#                                     )
+for env_name in environments:
+    save_episode_return(
+        f"/home/batsi/Documents/Masters/MetaLearnCuriosity/minigrid-byol_{env_name}_flax-checkpoints_v0",
+        "/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments",
+        "byol",
+        env_name,
+    )
+    print(env_name)
+    normalize_curious_agent_returns(
+        f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/baseline/{env_name}/metric_seeds_episode_return.npy",
+        f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/random_agents/{env_name}_epi_rets.npy",
+        f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/byol/{env_name}/metric_seeds_episode_return.npy",
+        f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/byol/{env_name}",
+    )
 # #     print()
-# byol_paths = []
-# rnd_paths = []
-# for env_name in environments:
-#     byol_paths.append(
-#         f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/byol/{env_name}/normalized_curious_agent_returns.npy"
-#     )
-#     rnd_paths.append(
-#         f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rnd/{env_name}/normalized_curious_agent_returns.npy"
-#     )
+byol_paths = []
+rnd_paths = []
+for env_name in environments:
+    byol_paths.append(
+        f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/byol/{env_name}/normalized_curious_agent_returns.npy"
+    )
+    rnd_paths.append(
+        f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rnd/{env_name}/normalized_curious_agent_returns.npy"
+    )
 
-# curious_paths = [byol_paths, rnd_paths]
-# for byol_path, rnd_path,env_name in zip(byol_paths,rnd_paths,environments):
-#     plot_error_bars_env([byol_path,rnd_path],env_name,["BYOL-Explore", "RND"])
+curious_paths = [byol_paths, rnd_paths]
+for byol_path, rnd_path, env_name in zip(byol_paths, rnd_paths, environments):
+    plot_error_bars_env([byol_path, rnd_path], env_name, ["BYOL-Explore", "RND"])
 
-# # plot_error_bars_macro_envs(curious_paths, "Delayed_Brax", ["BYOL-Explore", "RND"])
+plot_error_bars_macro_envs(curious_paths, "MiniGrid", ["BYOL-Explore", "RND"])
 # print(np.load("MetaLearnCuriosity/experiments/byol/MiniGrid-Empty-16x16/normalized_curious_agent_returns.npy").mean())
