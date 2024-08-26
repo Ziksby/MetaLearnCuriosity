@@ -226,8 +226,6 @@ class RewardCombiner(nn.Module):
 
         int_lambda = nn.Dense(64, use_bias=True)(x)
         int_lambda = nn.relu(int_lambda)
-        int_lambda = nn.Dense(64, use_bias=True)(int_lambda)
-        int_lambda = nn.relu(int_lambda)
         int_lambda = nn.Dense(1, use_bias=True)(int_lambda)
         int_lambda = nn.sigmoid(int_lambda)
 
