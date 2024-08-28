@@ -813,8 +813,10 @@ for env_name in environments:
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
     # Get the absolute path of the directory
+    episode_returns = {}
+    episode_returns["returned_episode_returns"] = output["metrics"]["returned_episode_returns"]
     path = os.path.abspath(checkpoint_directory)
-    Save(path, output)
+    Save(path, episode_returns)
     logger.save_artifact(path)
     shutil.rmtree(path)
     print(f"Deleted local checkpoint directory: {path}")

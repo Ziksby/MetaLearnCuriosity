@@ -10,10 +10,10 @@ import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
 import optax
+import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.training.train_state import TrainState
 
-import wandb
 from MetaLearnCuriosity.agents.nn import (
     BYOLTarget,
     MiniGridActorCriticRNN,
@@ -696,8 +696,10 @@ for env_name in environments:
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
     # Get the absolute path of the directory
+    episode_returns = {}
+    episode_returns["returned_episode_returns"] = output["metrics"]["returned_episode_returns"]
     path = os.path.abspath(checkpoint_directory)
-    Save(path, output)
+    Save(path, episode_returns)
     logger.save_artifact(path)
     shutil.rmtree(path)
     print(f"Deleted local checkpoint directory: {path}")
