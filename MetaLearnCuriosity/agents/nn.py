@@ -224,9 +224,9 @@ class RewardCombiner(nn.Module):
     @nn.compact
     def __call__(self, x):
 
-        int_lambda = nn.Dense(64, use_bias=True)(x)
+        int_lambda = nn.Dense(128, use_bias=False)(x)
         int_lambda = nn.relu(int_lambda)
-        int_lambda = nn.Dense(1, use_bias=True)(int_lambda)
+        int_lambda = nn.Dense(1, use_bias=False)(int_lambda)
         int_lambda = nn.sigmoid(int_lambda)
 
         return jnp.squeeze(int_lambda, axis=-1)
