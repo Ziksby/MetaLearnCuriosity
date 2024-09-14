@@ -986,3 +986,21 @@ def update_target_state_with_ema(predictor_state, target_state, ema_param):
     target_state = target_state.replace(params=new_target_params)
 
     return target_state
+
+
+def compress_output_for_reasoning(output):
+    output_compressed = {}
+
+    # Copy train_states as is
+    output_compressed["train_states"] = output["train_states"]
+
+    # Compress loss values
+    for key, value in output.items():
+        if "loss" in key.lower():
+            output_compressed[key] = value.mean(-1).mean(-1)
+
+    # Compress metrics
+    if "metrics" in output:
+        output_compressed["metrics"] = {k: v.mean(-1) for k, v in output["metrics"].items()}
+
+    return output_compressed
