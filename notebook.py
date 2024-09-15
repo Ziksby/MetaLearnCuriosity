@@ -7,20 +7,28 @@ import time
 import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
+import matplotlib.pyplot as plt
+import numpy as np
 import optax
 import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.training.train_state import TrainState
-import numpy as np
-from MetaLearnCuriosity.agents.nn import MiniGridActorCriticRNN, MiniGridBYOLPredictor, BYOLTarget,OpenScannedRNN,CloseScannedRNN
+
+from MetaLearnCuriosity.agents.nn import (
+    BYOLTarget,
+    CloseScannedRNN,
+    MiniGridActorCriticRNN,
+    MiniGridBYOLPredictor,
+    OpenScannedRNN,
+)
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import BYOLMiniGridTransition as Transition
 from MetaLearnCuriosity.utils import (
+    BYOLRewardNorm,
     byol_calculate_gae,
     byol_minigrid_ppo_update_networks,
     rnn_rollout,
-    BYOLRewardNorm
 )
 from MetaLearnCuriosity.wrappers import (
     FlattenObservationWrapper,
@@ -32,16 +40,16 @@ from MetaLearnCuriosity.wrappers import (
 jax.config.update("jax_threefry_partitionable", True)
 
 environments = [
-    # "MiniGrid-BlockedUnlockPickUp",
+    "MiniGrid-BlockedUnlockPickUp",
     # "MiniGrid-Empty-16x16",
     # "MiniGrid-EmptyRandom-16x16",
-    "MiniGrid-FourRooms",
-    "MiniGrid-MemoryS128",
-    "MiniGrid-Unlock",
+    # "MiniGrid-FourRooms",
+    # "MiniGrid-MemoryS128",
+    # "MiniGrid-Unlock",
 ]
 
 config = {
-    "NUM_SEEDS": 10,
+    "NUM_SEEDS": 2,
     "PROJECT": "MetaLearnCuriosity",
     "RUN_NAME": "minigrid-ppo-baseline",
     "BENCHMARK_ID": None,
@@ -106,6 +114,7 @@ def make_train(rng):
     # rng, _en_rng = jax.random.split(rng)
     rng, _pred_rng = jax.random.split(rng)
     num_actions = env.action_space(env_params).n
+
     def pred_linear_schedule(count):
         frac = (
             1.0
@@ -113,6 +122,7 @@ def make_train(rng):
             / config["NUM_UPDATES"]
         )
         return config["PRED_LR"] * frac
+
     def linear_schedule(count):
         frac = (
             1.0
@@ -121,6 +131,7 @@ def make_train(rng):
         )
         return config["LR"] * frac
         # INIT network
+
     target = BYOLTarget(256)
     pred = MiniGridBYOLPredictor(256, num_actions)
     network = MiniGridActorCriticRNN(
@@ -138,11 +149,11 @@ def make_train(rng):
     }
     init_hstate = network.initialize_carry(batch_size=config["NUM_ENVS_PER_DEVICE"])
     init_x = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1, *observations_shape))
-    init_action = jnp.zeros((config["NUM_ENVS_PER_DEVICE"],1), dtype=jnp.int32)
+    init_action = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1), dtype=jnp.int32)
     close_init_hstate = pred.initialize_carry(config["NUM_ENVS_PER_DEVICE"])
     open_init_hstate = pred.initialize_carry(config["NUM_ENVS_PER_DEVICE"])
-    print(init_hstate.shape, close_init_hstate.shape,open_init_hstate.shape)
-    init_bt = jnp.zeros((config["NUM_ENVS_PER_DEVICE"],1, 256))
+    print(init_hstate.shape, close_init_hstate.shape, open_init_hstate.shape)
+    init_bt = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1, 256))
     init_pred_input = (init_bt, init_x, init_action)
     pred_params = pred.init(_pred_rng, close_init_hstate, open_init_hstate, init_pred_input)
     target_params = target.init(_tar_rng, init_x)
@@ -180,21 +191,31 @@ def make_train(rng):
     # env = VecEnv(env)
     rng = jax.random.split(rng, jax.local_device_count())
 
-    return init_hstate,close_init_hstate,open_init_hstate, train_state,pred_state,target_state,rng
+    return (
+        init_hstate,
+        close_init_hstate,
+        open_init_hstate,
+        train_state,
+        pred_state,
+        target_state,
+        rng,
+    )
 
 
-def train(rng, init_hstate,close_init_hstate,open_init_hstate, train_state,pred_state,target_state):
+def train(
+    rng, init_hstate, close_init_hstate, open_init_hstate, train_state, pred_state, target_state
+):
     rng, _rng = jax.random.split(rng)
 
     reset_rng = jax.random.split(_rng, config["NUM_ENVS_PER_DEVICE"])
     # INIT STUFF FOR OPTIMIZATION AND NORMALIZATION
     update_target_counter = 0
     byol_reward_norm_params = BYOLRewardNorm(0, 0, 1, 0)
-    
+
     obsv, env_state = jax.vmap(env.reset, in_axes=(0, None))(reset_rng, env_params)
     prev_action = jnp.zeros(config["NUM_ENVS_PER_DEVICE"], dtype=jnp.int32)
     prev_reward = jnp.zeros(config["NUM_ENVS_PER_DEVICE"])
-    prev_bt = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1,256))
+    prev_bt = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1, 256))
 
     # TRAIN LOOP
 
@@ -242,8 +263,8 @@ def train(rng, init_hstate,close_init_hstate,open_init_hstate, train_state,pred_
                 rng_step, env_state, action, env_params
             )
             # INT REWARD
-            tar_obs = target_state.apply_fn(target_state.params, obsv[:,None])
-            pred_input = (prev_bt, prev_obs[:,None], prev_action[:,None])
+            tar_obs = target_state.apply_fn(target_state.params, obsv[:, None])
+            pred_input = (prev_bt, prev_obs[:, None], prev_action[:, None])
             pred_obs, new_bt, new_close_hstate, new_open_hstate = pred_state.apply_fn(
                 pred_state.params, close_prev_hstate, open_prev_hstate, pred_input
             )
@@ -269,15 +290,45 @@ def train(rng, init_hstate,close_init_hstate,open_init_hstate, train_state,pred_
                 prev_bt=prev_bt,
                 info=info,
             )
-            runner_state = (rng, train_state, pred_state,target_state,env_state, obsv, action, reward, new_bt,hstate,new_close_hstate,new_open_hstate,byol_reward_norm_params,update_target_counter)
+            runner_state = (
+                rng,
+                train_state,
+                pred_state,
+                target_state,
+                env_state,
+                obsv,
+                action,
+                reward,
+                new_bt,
+                hstate,
+                new_close_hstate,
+                new_open_hstate,
+                byol_reward_norm_params,
+                update_target_counter,
+            )
             return runner_state, transition
 
-        initial_hstate,close_initial_hstate,open_initial_hstate = runner_state[9:12]
+        initial_hstate, close_initial_hstate, open_initial_hstate = runner_state[9:12]
         runner_state, transitions = jax.lax.scan(_env_step, runner_state, None, config["NUM_STEPS"])
 
         # CALCULATE ADVANTAGE
 
-        rng, train_state,pred_state,target_state, env_state, prev_obs, prev_action, prev_reward,prev_bt, hstate,close_hstate,open_hstate,byol_reward_norm_params,update_target_counter = runner_state
+        (
+            rng,
+            train_state,
+            pred_state,
+            target_state,
+            env_state,
+            prev_obs,
+            prev_action,
+            prev_reward,
+            prev_bt,
+            hstate,
+            close_hstate,
+            open_hstate,
+            byol_reward_norm_params,
+            update_target_counter,
+        ) = runner_state
 
         _, last_val, _ = train_state.apply_fn(
             train_state.params,
@@ -289,16 +340,34 @@ def train(rng, init_hstate,close_init_hstate,open_init_hstate, train_state,pred_
             hstate,
         )
 
-        advantages, targets,norm_int_reward, byol_reward_norm_params = byol_calculate_gae(
-            transitions, last_val.squeeze(1), config["GAMMA"], config["GAE_LAMBDA"],config["INT_LAMBDA"],config["REW_NORM_PARAMETER"],byol_reward_norm_params
+        advantages, targets, norm_int_reward, byol_reward_norm_params = byol_calculate_gae(
+            transitions,
+            last_val.squeeze(1),
+            config["GAMMA"],
+            config["GAE_LAMBDA"],
+            config["INT_LAMBDA"],
+            config["REW_NORM_PARAMETER"],
+            byol_reward_norm_params,
         )
 
         # UPDATE NETWORK
         def _update_epoch(update_state, _):
             def _update_minbatch(train_states, batch_info):
-                init_hstate, close_init_hstate,open_init_hstate,transitions, advantages, targets = batch_info
-                train_state,pred_state,target_state,update_target_counter = train_states
-                (new_train_state,pred_state,target_state,update_target_counter) ,update_info = byol_minigrid_ppo_update_networks(
+                (
+                    init_hstate,
+                    close_init_hstate,
+                    open_init_hstate,
+                    transitions,
+                    advantages,
+                    targets,
+                ) = batch_info
+                train_state, pred_state, target_state, update_target_counter = train_states
+                (
+                    new_train_state,
+                    pred_state,
+                    target_state,
+                    update_target_counter,
+                ), update_info = byol_minigrid_ppo_update_networks(
                     train_state=train_state,
                     pred_state=pred_state,
                     target_state=target_state,
@@ -314,15 +383,39 @@ def train(rng, init_hstate,close_init_hstate,open_init_hstate, train_state,pred_
                     update_target_counter=update_target_counter,
                     ema_param=config["EMA_PARAMETER"],
                 )
-                return (new_train_state,pred_state,target_state,update_target_counter), update_info
+                return (
+                    new_train_state,
+                    pred_state,
+                    target_state,
+                    update_target_counter,
+                ), update_info
 
-            rng, train_state,pred_state,target_state,update_target_counter, init_hstate,close_init_hstate,open_init_hstate, transitions, advantages, targets = update_state
+            (
+                rng,
+                train_state,
+                pred_state,
+                target_state,
+                update_target_counter,
+                init_hstate,
+                close_init_hstate,
+                open_init_hstate,
+                transitions,
+                advantages,
+                targets,
+            ) = update_state
 
             # MINIBATCHES PREPARATION
             rng, _rng = jax.random.split(rng)
             permutation = jax.random.permutation(_rng, config["NUM_ENVS_PER_DEVICE"])
             # [seq_len, batch_size, ...]
-            batch = (init_hstate,close_init_hstate,open_init_hstate, transitions, advantages, targets)
+            batch = (
+                init_hstate,
+                close_init_hstate,
+                open_init_hstate,
+                transitions,
+                advantages,
+                targets,
+            )
             # [batch_size, seq_len, ...], as our model assumes
             batch = jtu.tree_map(lambda x: x.swapaxes(0, 1), batch)
 
@@ -332,16 +425,49 @@ def train(rng, init_hstate,close_init_hstate,open_init_hstate, train_state,pred_
                 lambda x: jnp.reshape(x, (config["NUM_MINIBATCHES"], -1) + x.shape[1:]),
                 shuffled_batch,
             )
-            (train_state,pred_state,target_state,update_target_counter), update_info = jax.lax.scan(_update_minbatch, (train_state,pred_state,target_state,update_target_counter), minibatches)
+            (
+                train_state,
+                pred_state,
+                target_state,
+                update_target_counter,
+            ), update_info = jax.lax.scan(
+                _update_minbatch,
+                (train_state, pred_state, target_state, update_target_counter),
+                minibatches,
+            )
 
-            update_state = (rng, train_state,pred_state,target_state,update_target_counter, init_hstate,close_init_hstate,open_init_hstate, transitions, advantages, targets)
+            update_state = (
+                rng,
+                train_state,
+                pred_state,
+                target_state,
+                update_target_counter,
+                init_hstate,
+                close_init_hstate,
+                open_init_hstate,
+                transitions,
+                advantages,
+                targets,
+            )
             return update_state, update_info
 
         # [seq_len, batch_size, num_layers, hidden_dim]
         init_hstate = initial_hstate[None, :]
-        close_init_hstate = close_initial_hstate[None,:]
-        open_init_hstate = open_initial_hstate[None,:]
-        update_state = (rng, train_state,pred_state,target_state,update_target_counter, init_hstate,close_init_hstate,open_init_hstate, transitions, advantages, targets)
+        close_init_hstate = close_initial_hstate[None, :]
+        open_init_hstate = open_initial_hstate[None, :]
+        update_state = (
+            rng,
+            train_state,
+            pred_state,
+            target_state,
+            update_target_counter,
+            init_hstate,
+            close_init_hstate,
+            open_init_hstate,
+            transitions,
+            advantages,
+            targets,
+        )
         update_state, loss_info = jax.lax.scan(
             _update_epoch, update_state, None, config["UPDATE_EPOCHS"]
         )
@@ -372,16 +498,48 @@ def train(rng, init_hstate,close_init_hstate,open_init_hstate, train_state,pred_
         #     }
         # )
 
-        rng, train_state,pred_state,target_state,update_target_counter = update_state[:5]
+        rng, train_state, pred_state, target_state, update_target_counter = update_state[:5]
         traj_batch = update_state[-3]
         metric = traj_batch.info
-        int_reward=traj_batch.int_reward
-        runner_state = (rng, train_state, pred_state,target_state,env_state, prev_obs, prev_action, prev_reward,prev_bt, hstate,close_hstate,open_hstate, byol_reward_norm_params,update_target_counter)
-        return runner_state, (metric, loss_info,int_reward,norm_int_reward)
+        int_reward = traj_batch.int_reward
+        runner_state = (
+            rng,
+            train_state,
+            pred_state,
+            target_state,
+            env_state,
+            prev_obs,
+            prev_action,
+            prev_reward,
+            prev_bt,
+            hstate,
+            close_hstate,
+            open_hstate,
+            byol_reward_norm_params,
+            update_target_counter,
+        )
+        return runner_state, (metric, loss_info, int_reward, norm_int_reward)
 
-    runner_state = (rng, train_state, pred_state,target_state,env_state, obsv, prev_action, prev_reward, prev_bt, init_hstate, close_init_hstate,open_init_hstate,byol_reward_norm_params,update_target_counter)
-    runner_state, (metric,loss,int_reward,norm_int_reward) = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
-  
+    runner_state = (
+        rng,
+        train_state,
+        pred_state,
+        target_state,
+        env_state,
+        obsv,
+        prev_action,
+        prev_reward,
+        prev_bt,
+        init_hstate,
+        close_init_hstate,
+        open_init_hstate,
+        byol_reward_norm_params,
+        update_target_counter,
+    )
+    runner_state, (metric, loss, int_reward, norm_int_reward) = jax.lax.scan(
+        _update_step, runner_state, None, config["NUM_UPDATES"]
+    )
+
     return {
         "runner_state": runner_state,
         "metrics": metric,
@@ -392,16 +550,14 @@ def train(rng, init_hstate,close_init_hstate,open_init_hstate, train_state,pred_
         "rl_entrophy_loss": loss["entropy"],
         "int_reward": int_reward,
         "norm_int_reward": norm_int_reward,
-        "pred_loss":loss["pred_loss"],
+        "pred_loss": loss["pred_loss"],
     }
 
 
-lambda_values = jnp.array(
-    [0.001, 0.0001, 0.0003, 0.0005, 0.0008, 0.01, 0.1, 0.003, 0.005, 0.02, 0.03, 0.05]
-).sort()
 # lambda_values = jnp.array(
-#     [0.001]
+#     [0.001, 0.0001, 0.0003, 0.0005, 0.0008, 0.01, 0.1, 0.003, 0.005, 0.02, 0.03, 0.05]
 # ).sort()
+lambda_values = jnp.array([0.001]).sort()
 y_values = {}
 for lambda_value in lambda_values:
     y_values[
@@ -414,132 +570,122 @@ for lambda_value in lambda_values:
 
         # experiments
         rng = jax.random.PRNGKey(config["SEED"])
+        rng = jax.random.split(rng, config["NUM_SEEDS"])
+        (
+            init_hstate,
+            close_init_hstate,
+            open_init_hstate,
+            train_state,
+            pred_state,
+            target_state,
+            rng,
+        ) = jax.jit(jax.vmap(make_train, out_axes=(0, 0, 0, 0, 0, 0, 1)))(rng)
+        init_hstate = replicate(init_hstate, jax.local_devices())
 
-        if config["NUM_SEEDS"] > 1:
-            rng = jax.random.split(rng, config["NUM_SEEDS"])
-            init_hstate,close_init_hstate,open_init_hstate, train_state,pred_state,target_state,rng= jax.jit(jax.vmap(make_train, out_axes=(0, 0, 0,0,0,0,1)))(rng)
-            init_hstate = replicate(init_hstate, jax.local_devices())
+        open_init_hstate = replicate(open_init_hstate, jax.local_devices())
+        close_init_hstate = replicate(close_init_hstate, jax.local_devices())
+        train_state = replicate(train_state, jax.local_devices())
+        pred_state = replicate(pred_state, jax.local_devices())
+        target_state = replicate(target_state, jax.local_devices())
 
-            open_init_hstate = replicate(open_init_hstate, jax.local_devices())
-            close_init_hstate = replicate(close_init_hstate, jax.local_devices())
-            train_state = replicate(train_state, jax.local_devices())
-            pred_state = replicate(pred_state, jax.local_devices())
-            target_state = replicate(target_state, jax.local_devices())
-
-            train_fn = jax.vmap(train)
-            train_fn = jax.pmap(train_fn, axis_name="devices")
-            print(f"Training in {config['ENV_NAME']}")
-            t = time.time()
-            output = jax.block_until_ready(train_fn(rng, init_hstate,close_init_hstate,open_init_hstate, train_state, pred_state, target_state))
-            elapsed_time = time.time() - t
-            epi_ret = (
-                output["metrics"]["returned_episode_returns"].mean(0).mean(0).mean(-1).reshape(-1)
+        train_fn = jax.vmap(train)
+        train_fn = jax.pmap(train_fn, axis_name="devices")
+        print(f"Training in {config['ENV_NAME']}")
+        t = time.time()
+        output = jax.block_until_ready(
+            train_fn(
+                rng,
+                init_hstate,
+                close_init_hstate,
+                open_init_hstate,
+                train_state,
+                pred_state,
+                target_state,
             )
-            int_rew = output["int_reward"].mean(0).mean(0).mean(-1).reshape(-1)
-            int_norm_rew = output["norm_int_reward"].mean(0).mean(0).mean(-1).reshape(-1)
-            pred_loss = unreplicate(output["pred_loss"]).mean(-1).mean(0).mean(-1)
-            # output = unreplicate(output)
-
-        else:
-            init_hstate,close_init_hstate,open_init_hstate, train_state,pred_state,target_state,rng = make_train(rng)
-            init_hstate = replicate(init_hstate, jax.local_devices())
-            open_init_hstate = replicate(open_init_hstate, jax.local_devices())
-            close_init_hstate = replicate(close_init_hstate, jax.local_devices())
-            train_state = replicate(train_state, jax.local_devices())
-            pred_state = replicate(pred_state, jax.local_devices())
-            target_state = replicate(target_state, jax.local_devices())
-            train_fn = jax.pmap(train, axis_name="devices")
-            t = time.time()
-            output = jax.block_until_ready(train_fn(rng, init_hstate,close_init_hstate,open_init_hstate, train_state, pred_state, target_state))
-            # output = unreplicate(output)
-            epi_ret = output["metrics"]["returned_episode_returns"].mean(0).mean(-1).reshape(-1)
-            int_rew = output["int_reward"].mean(0).mean(-1).reshape(-1)
-            int_norm_rew = output["norm_int_reward"].mean(0).mean(-1).reshape(-1)
-            pred_loss = unreplicate(output["pred_loss"]).mean(-1).mean(-1)
+        )
+        elapsed_time = time.time() - t
+        epi_ret = output["metrics"]["returned_episode_returns"].mean(0).mean(-1).reshape(-1)
 
         print((time.time() - t) / 60)
         # Assuming `output` is your array
 
         # Use the last element of each row from 'epi_ret' as y-values
-        y_values[float(lambda_value)][env_name] = (epi_ret, int_rew, int_norm_rew, pred_loss)
+        y_values[float(lambda_value)][env_name] = epi_ret
+        print(epi_ret.shape)
 
-import matplotlib.pyplot as plt
 
 # Metric names corresponding to the data stored in y_values
 metric_names = [
     "Episode Returns",
-    "Intrinsic Reward",
-    "Normalized Intrinsic Reward",
-    "Pred Loss",
 ]
 
 # Initialize plotting
-for env_name in environments:
-    num_metrics = len(metric_names)
-    fig, axs = plt.subplots(num_metrics, 1, figsize=(12, 6 * num_metrics), sharex=False)
-    fig.suptitle(f"Training Metrics Over Time for {env_name}")
+# for env_name in environments:
+#     num_metrics = len(metric_names)
+#     fig, axs = plt.subplots(num_metrics, 1, figsize=(12, 6 * num_metrics), sharex=False)
+#     fig.suptitle(f"Training Metrics Over Time for {env_name}")
 
-    # Iterate over each metric
-    for idx, metric_name in enumerate(metric_names):
-        ax = axs[idx] if num_metrics > 1 else axs
+#     # Iterate over each metric
+#     for idx, metric_name in enumerate(metric_names):
+#         ax = axs[idx] if num_metrics > 1 else axs
 
-        # Plot each lambda's data for this metric
-        plotted = False
-        for lambda_value in lambda_values:
-            lambda_key = float(lambda_value)  # Ensure float key matches dictionary keys
-            if lambda_key in y_values and env_name in y_values[lambda_key]:
-                metric_data = y_values[lambda_key][env_name][idx]
-                if len(metric_data) > 0:
-                    x_axis = range(1, len(metric_data) + 1)
-                    ax.plot(x_axis, metric_data, label=f"Lambda={lambda_value:.5f}")
-                    plotted = True
+#         # Plot each lambda's data for this metric
+#         plotted = False
+#         for lambda_value in lambda_values:
+#             lambda_key = float(lambda_value)  # Ensure float key matches dictionary keys
+#             if lambda_key in y_values and env_name in y_values[lambda_key]:
+#                 metric_data = y_values[lambda_key][env_name][idx]
+#                 if len(metric_data) > 0:
+#                     x_axis = range(1, len(metric_data) + 1)
+#                     ax.plot(x_axis, metric_data, label=f"Lambda={lambda_value:.5f}")
+#                     plotted = True
 
-        # Only add a legend if data was actually plotted
-        if plotted:
-            ax.set_title(metric_name)
-            ax.set_xlabel("Training Steps")
-            ax.set_ylabel(metric_name)
-            ax.legend()
-        else:
-            ax.set_title(f"{metric_name} (no data)")
-            ax.set_xlabel("Training Steps")
-            ax.set_ylabel(metric_name)
+#         # Only add a legend if data was actually plotted
+#         if plotted:
+#             ax.set_title(metric_name)
+#             ax.set_xlabel("Training Steps")
+#             ax.set_ylabel(metric_name)
+#             ax.legend()
+#         else:
+#             ax.set_title(f"{metric_name} (no data)")
+#             ax.set_xlabel("Training Steps")
+#             ax.set_ylabel(metric_name)
 
-    # Adjust layout and save the figure
-    plt.subplots_adjust(hspace=0.4)  # Adjust vertical spacing between plots
-    plt.savefig(f"{env_name}_metrics_over_time_sep_byol.png")
-    plt.close(fig)
+#     # Adjust layout and save the figure
+#     plt.subplots_adjust(hspace=0.4)  # Adjust vertical spacing between plots
+#     plt.savefig(f"MetaLearnCuriosity/hyperparameter_sweep/MiniGrid/{env_name}_metrics_over_time_byol.png")
+#     plt.close(fig)
 
-# Scatter plot for final episode returns vs. lambda values
-for env_name in environments:
-    lambda_values = []
-    final_returns = []
+# # Scatter plot for final episode returns vs. lambda values
+# for env_name in environments:
+#     lambda_values = []
+#     final_returns = []
 
-    # Collect data for plotting
-    for lambda_value, env_data in y_values.items():
-        epi_ret = env_data[env_name][0]  # index 0 for episode returns
-        if epi_ret.size > 0:  # Ensure there is at least one return value
-            final_returns.append(epi_ret[-1])
-            lambda_values.append(lambda_value)
+#     # Collect data for plotting
+#     for lambda_value, env_data in y_values.items():
+#         epi_ret = env_data[env_name][0]  # index 0 for episode returns
+#         if epi_ret.size > 0:  # Ensure there is at least one return value
+#             final_returns.append(epi_ret[-1])
+#             lambda_values.append(lambda_value)
 
-    # Sort lambda values for consistent plotting
-    sorted_indices = sorted(range(len(lambda_values)), key=lambda k: lambda_values[k])
-    sorted_lambda_values = [lambda_values[i] for i in sorted_indices]
-    sorted_final_returns = [final_returns[i] for i in sorted_indices]
+#     # Sort lambda values for consistent plotting
+#     sorted_indices = sorted(range(len(lambda_values)), key=lambda k: lambda_values[k])
+#     sorted_lambda_values = [lambda_values[i] for i in sorted_indices]
+#     sorted_final_returns = [final_returns[i] for i in sorted_indices]
 
-    # Plotting
-    plt.figure(figsize=(10, 6))
-    plt.scatter(range(1, len(sorted_lambda_values) + 1), sorted_final_returns, color="blue")
-    plt.title(f"Final Episode Returns vs. Lambda for {env_name}")
-    plt.xlabel("Lambda Value (Indexed)")
-    plt.ylabel("Final Episode Return")
-    plt.xticks(
-        range(1, len(sorted_lambda_values) + 1),
-        [f"{lv:.5f}" for lv in sorted_lambda_values],
-        rotation=45,
-    )
-    plt.grid(True)
+#     # Plotting
+#     plt.figure(figsize=(10, 6))
+#     plt.scatter(range(1, len(sorted_lambda_values) + 1), sorted_final_returns, color="blue")
+#     plt.title(f"Final Episode Returns vs. Lambda for {env_name}")
+#     plt.xlabel("Lambda Value (Indexed)")
+#     plt.ylabel("Final Episode Return")
+#     plt.xticks(
+#         range(1, len(sorted_lambda_values) + 1),
+#         [f"{lv:.5f}" for lv in sorted_lambda_values],
+#         rotation=45,
+#     )
+#     plt.grid(True)
 
-    # Save and close plot
-    plt.savefig(f"{env_name}_final_episode_returns_vs_lambda_sep_byol.png")
-    plt.close()  # Close the plot to free up memory
+#     # Save and close plot
+#     plt.savefig(f"MetaLearnCuriosity/hyperparameter_sweep/MiniGrid/{env_name}_final_episode_returns_vs_lambda_byol.png")
+#     plt.close()  # Close the plot to free up memory
