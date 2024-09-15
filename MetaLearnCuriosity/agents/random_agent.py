@@ -17,19 +17,30 @@ from MetaLearnCuriosity.wrappers import (
 
 environments = [
     "MiniGrid-BlockedUnlockPickUp",
-    "MiniGrid-DoorKey-16x16",
     "MiniGrid-Empty-16x16",
     "MiniGrid-EmptyRandom-16x16",
     "MiniGrid-FourRooms",
-    "MiniGrid-LockedRoom",
     "MiniGrid-MemoryS128",
     "MiniGrid-Unlock",
-    "MiniGrid-UnlockPickUp",
+    "ant",
+    "halfcheetah",
+    "hopper",
+    "humanoid",
+    "humanoidstandup",
+    "inverted_pendulum",
+    "inverted_double_pendulum",
+    "pusher",
+    "reacher",
+    "walker2d",
+    "Asterix-MinAtar",
+    "Breakout-MinAtar",
+    "Freeway-MinAtar",
+    "SpaceInvaders-MinAtar",
 ]
 
 
 def random_rollout(rng, env, env_params):
-    total_episodes = 10
+    total_episodes = 30
 
     @jax.jit
     def step(runner_state, tmp):
@@ -49,7 +60,7 @@ def random_rollout(rng, env, env_params):
 
     runner_state = (env_state, obsv, rng)
     epi_num = 0
-    epi_rets = np.zeros(10)
+    epi_rets = np.zeros(total_episodes)
     while epi_num < total_episodes:
         runner_state, trans = step(runner_state, None)
         epi_num += trans.done
@@ -70,7 +81,7 @@ for env_name in environments:
     epi_rets = random_rollout(rng, env, env_params)
     elapsed_time = time.time() - t
     print(elapsed_time)
-    print(epi_rets)
+    print(f"{env_name}: {epi_rets.mean()}\n")
 
     # Create the directory if it doesn't exist
     output_dir = os.path.expanduser(
@@ -81,5 +92,4 @@ for env_name in environments:
     # Save the numpy array
     file_path = os.path.join(output_dir, f"{env_name}_epi_rets.npy")
     np.save(file_path, epi_rets)
-
 print("Metrics saved successfully")
