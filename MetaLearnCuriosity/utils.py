@@ -991,19 +991,22 @@ def update_target_state_with_ema(predictor_state, target_state, ema_param):
 def compress_output_for_reasoning(output, minigrid=False):
     output_compressed = {}
 
-    # Copy train_states as is
-    output_compressed["train_states"] = output["train_states"]
-
-    # Handle loss values based on minigrid flag
     for key, value in output.items():
-        if "loss" in key.lower():
+        if key == "train_states":
+            # Keep train_states as is
+            output_compressed[key] = value
+        elif "loss" in key.lower():
             if minigrid:
-                output_compressed[key] = value  # Leave loss as is for minigrid
+                # Leave loss as is for minigrid
+                output_compressed[key] = value
             else:
+                # Apply double mean for loss values in non-minigrid case
                 output_compressed[key] = value.mean(-1).mean(-1)
-
-    # Compress metrics
-    if "metrics" in output:
-        output_compressed["metrics"] = {k: v.mean(-1) for k, v in output["metrics"].items()}
+        elif key == "metrics" and isinstance(value, dict):
+            # Apply mean to each value in the metrics dictionary
+            output_compressed[key] = {k: v.mean(-1) for k, v in value.items()}
+        else:
+            # For all other keys, take mean along the last axis
+            output_compressed[key] = value.mean(-1)
 
     return output_compressed

@@ -1,13 +1,13 @@
 #!/bin/bash
 
 # Run the first Python script
-python MetaLearnCuriosity/agents/curious_agents/single_value_head_agents/rnd_minatar.py
+python MetaLearnCuriosity/agents/curious_agents/single_value_head_agents/rnd_gymnax.py
 
 # Check if the previous command was successful
 if [ $? -eq 0 ]; then
-    echo "rnd_minatar.py ran successfully."
+    echo "rnd_gymnax.py ran successfully."
 else
-    echo "rnd_minatar.py failed to run."
+    echo "rnd_gymnax.py failed to run."
     exit 1
 fi
 
