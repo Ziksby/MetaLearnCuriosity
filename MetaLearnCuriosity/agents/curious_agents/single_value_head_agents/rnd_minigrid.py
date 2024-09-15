@@ -466,7 +466,7 @@ def train(rng, init_hstate, train_state, pred_state, target_params, init_obs_rng
     runner_state, loss_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
     metric, loss, int_reward, norm_int_reward = loss_info
     return {
-        "train_state": runner_state[1:3],
+        "train_states": runner_state[1],
         "metrics": metric,
         "loss_info": loss,
         "norm_int_reward": norm_int_reward,
