@@ -24,13 +24,11 @@ from MetaLearnCuriosity.utils import (
     ObsNormParams,
     RNDMiniGridTransition,
     RNDNormIntReturnParams,
-    RNDTransition,
+    compress_output_for_reasoning,
     make_obs_gymnax_discrete,
     process_output_general,
     rnd_calculate_gae,
     rnd_minigrid_ppo_update_networks,
-    rnd_normalise_int_rewards,
-    rnn_rollout,
     update_obs_norm_params,
 )
 from MetaLearnCuriosity.wrappers import (
@@ -43,19 +41,16 @@ from MetaLearnCuriosity.wrappers import (
 jax.config.update("jax_threefry_partitionable", True)
 
 environments = [
-    # "MiniGrid-BlockedUnlockPickUp",
-    "MiniGrid-DoorKey-16x16",
+    "MiniGrid-BlockedUnlockPickUp",
     "MiniGrid-Empty-16x16",
     "MiniGrid-EmptyRandom-16x16",
     "MiniGrid-FourRooms",
-    "MiniGrid-LockedRoom",
     "MiniGrid-MemoryS128",
     "MiniGrid-Unlock",
-    "MiniGrid-UnlockPickUp",
 ]
 
 config = {
-    "NUM_SEEDS": 10,
+    "NUM_SEEDS": 30,
     "PROJECT": "MetaLearnCuriosity",
     "RUN_NAME": "rnd_minigrid",
     "BENCHMARK_ID": None,
@@ -529,10 +524,12 @@ for env_name in environments:
     logger.log_rl_losses(output, config["NUM_SEEDS"])
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
-    output["config"] = config
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
     # Get the absolute path of the directory
+    output = compress_output_for_reasoning(output, minigrid=True)
+    output["config"] = config
+
     path = os.path.abspath(checkpoint_directory)
     Save(path, output)
     logger.save_artifact(path)
