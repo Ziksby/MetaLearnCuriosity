@@ -20,7 +20,7 @@ environments = [
     "MiniGrid-Empty-16x16",
     "MiniGrid-EmptyRandom-16x16",
     "MiniGrid-FourRooms",
-    "MiniGrid-MemoryS128",
+    "MiniGrid-MemoryS16",
     "MiniGrid-Unlock",
     "ant",
     "halfcheetah",
@@ -69,7 +69,7 @@ def random_rollout(rng, env, env_params):
     return epi_rets
 
 
-for env_name in environments:
+for env_name in environments[:6]:
     rng = jax.random.PRNGKey(42)
     env = MiniGridGymnax(env_name)
     env_params = env._env_params
@@ -81,11 +81,62 @@ for env_name in environments:
     epi_rets = random_rollout(rng, env, env_params)
     elapsed_time = time.time() - t
     print(elapsed_time)
-    print(f"{env_name}: {epi_rets.mean()}\n")
+    print(f"{env_name}: {epi_rets.mean()}\t {epi_rets.shape}\n")
 
     # Create the directory if it doesn't exist
     output_dir = os.path.expanduser(
-        "~/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/random_agents/"
+        "~/MetaLearnCuriosity/MetaLearnCuriosity/experiments/random_agents/"
+    )
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Save the numpy array
+    file_path = os.path.join(output_dir, f"{env_name}_epi_rets.npy")
+    np.save(file_path, epi_rets)
+print("Metrics saved successfully")
+
+for env_name in environments[6:16]:
+    rng = jax.random.PRNGKey(42)
+    env, env_params = BraxGymnaxWrapper(env_name), None
+    env = LogWrapper(env)
+    env = ClipAction(env)
+    env = DelayedReward(env, 10)
+    # env_params = env._env_params
+    rng, reset_rng = jax.random.split(rng)
+    obsv, env_state = env.reset(reset_rng, env_params)
+
+    t = time.time()
+    epi_rets = random_rollout(rng, env, env_params)
+    elapsed_time = time.time() - t
+    print(elapsed_time)
+    print(f"{env_name}: {epi_rets.mean()}\t {epi_rets.shape}\n")
+
+    # Create the directory if it doesn't exist
+    output_dir = os.path.expanduser(
+        "~/MetaLearnCuriosity/MetaLearnCuriosity/experiments/random_agents/"
+    )
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Save the numpy array
+    file_path = os.path.join(output_dir, f"{env_name}_epi_rets.npy")
+    np.save(file_path, epi_rets)
+print("Metrics saved successfully")
+
+for env_name in environments[16:]:
+    rng = jax.random.PRNGKey(42)
+    env, env_params = gymnax.make(env_name)
+    env = LogWrapper(env)
+    rng, reset_rng = jax.random.split(rng)
+    obsv, env_state = env.reset(reset_rng, env_params)
+
+    t = time.time()
+    epi_rets = random_rollout(rng, env, env_params)
+    elapsed_time = time.time() - t
+    print(elapsed_time)
+    print(f"{env_name}: {epi_rets.mean()}\t {epi_rets.shape}\n")
+
+    # Create the directory if it doesn't exist
+    output_dir = os.path.expanduser(
+        "~/MetaLearnCuriosity/MetaLearnCuriosity/experiments/random_agents/"
     )
     os.makedirs(output_dir, exist_ok=True)
 
