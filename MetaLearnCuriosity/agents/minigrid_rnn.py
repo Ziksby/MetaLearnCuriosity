@@ -2,6 +2,7 @@
 # https://github.com/corl-team/xland-minigrid/blob/main/training/train_single_task.py
 
 import os
+import shutil
 import time
 
 import jax
@@ -18,6 +19,7 @@ from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import MiniGridTransition as Transition
 from MetaLearnCuriosity.utils import (
     calculate_gae,
+    compress_output_for_reasoning,
     minigrid_ppo_update_networks,
     process_output_general,
     rnn_rollout,
@@ -33,18 +35,15 @@ jax.config.update("jax_threefry_partitionable", True)
 
 environments = [
     "MiniGrid-BlockedUnlockPickUp",
-    "MiniGrid-DoorKey-16x16",
     "MiniGrid-Empty-16x16",
     "MiniGrid-EmptyRandom-16x16",
     "MiniGrid-FourRooms",
-    "MiniGrid-LockedRoom",
     "MiniGrid-MemoryS128",
     "MiniGrid-Unlock",
-    "MiniGrid-UnlockPickUp",
 ]
 
 config = {
-    "NUM_SEEDS": 10,
+    "NUM_SEEDS": 30,
     "PROJECT": "MetaLearnCuriosity",
     "RUN_NAME": "minigrid-ppo-baseline",
     "BENCHMARK_ID": None,
@@ -301,7 +300,7 @@ def train(rng, init_hstate, train_state):
     runner_state, loss_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
     metric, loss = loss_info
     return {
-        "train_state": runner_state[1],
+        "train_states": runner_state[1],
         "metrics": metric,
         "loss_info": loss,
         "rl_total_loss": loss["total_loss"],
@@ -352,7 +351,11 @@ for env_name in environments:
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
     # Get the absolute path of the directory
+    output = compress_output_for_reasoning(output, minigrid=True)
+
     path = os.path.abspath(checkpoint_directory)
     Save(path, output)
     logger.save_artifact(path)
+    shutil.rmtree(path)
+    print(f"Deleted local checkpoint directory: {path}")
     print(f"Done in {elapsed_time / 60:.2f}min")
