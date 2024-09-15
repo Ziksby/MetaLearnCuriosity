@@ -127,13 +127,13 @@ def make_train(rng):
         )
         return config["LR"] * frac
 
-    def pred_linear_schedule(count):
-        frac = (
-            1.0
-            - (count // (config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"]))
-            / config["NUM_UPDATES"]
-        )
-        return config["PRED_LR"] * frac
+    # def pred_linear_schedule(count):
+    #     frac = (
+    #         1.0
+    #         - (count // (config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"]))
+    #         / config["NUM_UPDATES"]
+    #     )
+    #     return config["PRED_LR"] * frac
 
     network = MiniGridActorCriticRNN(
         num_actions=num_actions,
