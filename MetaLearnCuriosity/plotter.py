@@ -143,11 +143,12 @@ def plot_sample_std(names, labels, alphas):
 def save_episode_return(path_to_extract, path_to_save, type_agent, env_name):
     start_time = time.time()
     output = Restore(path_to_extract)
-    metric = output["returned_episode_returns"]
+    metric = output["metrics"]["returned_episode_returns"]
+    # env_name = output["config"]["ENV_NAME"]
     print(f"\n Here's the shape:\n {metric.shape}")
 
-    # Average among the number of environments
-    metric = jnp.mean(metric, axis=-1)
+    # # Average among the number of environments
+    # metric = jnp.mean(metric, axis=-1)
 
     # A 2D array of shape (num_seeds, update step)
     metric = metric.reshape(metric.shape[0], -1)
@@ -161,9 +162,9 @@ def save_episode_return(path_to_extract, path_to_save, type_agent, env_name):
     # ci_highs = []
     # stds = []
 
-    # for timestep_values in metric:
-    #     mean_value = jnp.mean(timestep_values)
-    #     means.append(mean_value)  # Store the mean for the current timestep
+    for timestep_values in metric:
+        mean_value = jnp.mean(timestep_values)
+        means.append(mean_value)  # Store the mean for the current timestep
 
     #     ci = bootstrap(
     #         (timestep_values,),
@@ -712,47 +713,45 @@ def plot_grouped_histogram(
 # plot_error_bars_macro_envs(curious_paths, "SomeMacroEnvType", ["Algo1", "Algo2", "Algo3"])
 
 
-environments = [
-    "Asterix-MinAtar",
-    "Breakout-MinAtar",
-    "Freeway-MinAtar",
-    "SpaceInvaders-MinAtar",
-]
+# environments = [
+# 0,1,2,3
+# ]
 
 
-# name_to_normalises=["rc_simpler","rc_bias_off","rc_128_arch_bias_off", "rc_128_arch" ]
-# name_to_normalises=['rc_simpler_100']
+# # name_to_normalises=["rc_simpler","rc_bias_off","rc_128_arch_bias_off", "rc_128_arch" ]
+name_to_normalises = ["baseline"]
 
-# #MinAtar
+# # #MinAtar
 # for name_to_normalise in name_to_normalises:
 #     for env_name in environments:
 #         save_episode_return(
-#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/{name_to_normalise}/{name_to_normalise}_byol_minatar_{env_name}_flax-checkpoints_v0",
+#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/minatar_baseline_ppo_flax-checkpoints_v{env_name}",
 #             "/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments",
 #             name_to_normalise,
-#             env_name,
 #         )
+
+#         normalize_curious_agent_returns(
 #             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/baseline/{env_name}/metric_seeds_episode_return.npy",
 #             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/random_agents/{env_name}_epi_rets.npy",
 #             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/{name_to_normalise}/{env_name}/metric_seeds_episode_return.npy",
 #             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/{name_to_normalise}/{env_name}",
 #         )
-# environments = [
-#     "MiniGrid-BlockedUnlockPickUp",
-#     "MiniGrid-Empty-16x16",
-#     "MiniGrid-EmptyRandom-16x16",
-#     "MiniGrid-FourRooms",
-#     "MiniGrid-MemoryS128",
-#     "MiniGrid-Unlock",
-# ]
-# for name_to_normalise in name_to_normalises:
-#     for env_name in environments:
-#         save_episode_return(
-#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/{name_to_normalise}/{name_to_normalise}_minigrid_byol_{env_name}_flax-checkpoints_v0",
-#             "/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments",
-#             name_to_normalise,
-#             env_name,
-#         )
+environments = [
+    "MiniGrid-DoorKey-8x8",
+    # "MiniGrid-Empty-16x16",
+    # "MiniGrid-EmptyRandom-16x16",
+    # "MiniGrid-FourRooms",
+    # "MiniGrid-MemoryS16",
+    # "MiniGrid-Unlock",
+]
+for name_to_normalise in name_to_normalises:
+    for env_name in environments:
+        save_episode_return(
+            f"/home/batsi/Documents/Masters/MetaLearnCuriosity/minigrid-ppo-baseline_{env_name}_flax-checkpoints_v0",
+            "/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments",
+            name_to_normalise,
+            env_name,
+        )
 
 #         normalize_curious_agent_returns(
 #             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/baseline/{env_name}/metric_seeds_episode_return.npy",
@@ -772,135 +771,6 @@ environments = [
 #     "reacher",
 #     "walker2d",
 # ]
-environments = [
-    "MiniGrid-BlockedUnlockPickUp",
-    "MiniGrid-Empty-16x16",
-    "MiniGrid-EmptyRandom-16x16",
-    "MiniGrid-FourRooms",
-    "MiniGrid-MemoryS128",
-    "MiniGrid-Unlock",
-    "ant",
-    "halfcheetah",
-    "hopper",
-    "humanoid",
-    "humanoidstandup",
-    "inverted_pendulum",
-    "inverted_double_pendulum",
-    "pusher",
-    "reacher",
-    "walker2d",
-    "Asterix-MinAtar",
-    "Breakout-MinAtar",
-    "Freeway-MinAtar",
-    "SpaceInvaders-MinAtar",
-]
-# for env_name in environments:
-
-#     old_folder = f"/home/batsi/Documents/Masters/MetaLearnCuriosity/rc_128_arch_bias_off_temporal/rc_128_arch_bias_off_temporal_brax_byol_default_{env_name}_flax-checkpoints_v0"
-#     new_folder = f"/home/batsi/Documents/Masters/MetaLearnCuriosity/rc_128_arch_bias_off_temporal_/rc_128_arch_bias_off_temporal_delayed_brax_byol_{env_name}_flax-checkpoints_v0"
-
-#     if os.path.exists(old_folder):
-#         os.rename(old_folder, new_folder)
-#         print(f"Renamed: {old_folder} to {new_folder}")
-#     else:
-#         print(f"Folder not found: {old_folder}")
-# name_to_normalises=["rc_128_arch_bias_off_temporal"]
-# for name_to_normalise in name_to_normalises:
-#     for env_name in environments:
-#         save_episode_return(
-#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/rc_simpler_100/rc_simpler_100_delayed_brax_byol_{env_name}_flax-checkpoints_v0",
-#             "/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments",
-#             name_to_normalise,
-#             env_name,
-#         )
-
-#         normalize_curious_agent_returns(
-#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/baseline/{env_name}/metric_seeds_episode_return.npy",
-#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/random_agents/{env_name}_epi_rets.npy",
-#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/{name_to_normalise}/{env_name}/metric_seeds_episode_return.npy",
-#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/{name_to_normalise}/{env_name}",
-#         )
-#     print()
-byol_paths = []
-byol_zero_paths = []
-rnd_paths = []
-rc_simpler_paths = []
-rc_simpler_100_paths = []
-# rc_bias_off_paths=[]
-rc_128_arch_bias_off_paths = []
-# rc_128_arch_paths=[]
-rc_simpler_paths_temporal = []
-rc_128_arch_bias_off_paths_temporal = []
-# rc_128_arch_paths_temporal=[]
-for env_name in environments:
-    # byol_paths.append(
-    #     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/byol/{env_name}/normalized_curious_agent_returns.npy"
-    # )
-    # byol_zero_paths.append(
-    #     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/byol_zero/{env_name}/normalized_curious_agent_returns.npy"
-    # )
-    # rnd_paths.append(
-    #     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rnd/{env_name}/normalized_curious_agent_returns.npy"
-    # )
-    rc_simpler_paths.append(
-        f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_simpler/{env_name}/normalized_curious_agent_returns.npy"
-    )
-    # rc_128_arch_bias_off_paths.append(
-    #     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_128_arch_bias_off/{env_name}/normalized_curious_agent_returns.npy"
-    # )
-    # rc_128_arch_paths.append(
-    #     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_128_arch/{env_name}/normalized_curious_agent_returns.npy"
-    # )
-    # rc_bias_off_paths.append(
-    #     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_bias_off/{env_name}/normalized_curious_agent_returns.npy"
-    # )
-    # rc_simpler_paths_temporal.append(
-    #     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_simpler/{env_name}/normalized_curious_agent_returns.npy"
-    # )
-    rc_simpler_100_paths.append(
-        f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_simpler_100/{env_name}/normalized_curious_agent_returns.npy"
-    )
-    # rc_128_arch_bias_off_paths_temporal.append(
-    #     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_128_arch_bias_off/{env_name}/normalized_curious_agent_returns.npy"
-    # )
-    # rc_128_arch_paths_temporal.append(
-    #     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_128_arch/{env_name}/normalized_curious_agent_returns.npy"
-    # )
-
-curious_paths = [
-    # byol_paths,
-    # byol_zero_paths,                    # Paths for the BYOL algorithm
-    # rnd_paths,                     # Paths for the RND algorithm
-    rc_simpler_paths,  # Paths for the RC-Simpler algorithm
-    rc_simpler_100_paths,  # Paths for the RC-Simpler algorithm
-    # rc_128_arch_bias_off_paths,    # Paths for the RC-128-Arch-Bias-Off algorithm
-    # rc_simpler_paths_temporal,     # Paths for the RC-Simpler-Temporal algorithm
-    # rc_128_arch_bias_off_paths_temporal  # Paths for the RC-128-Arch-Bias-Off-Temporal algorithm
-]
-curious_algo_types = [
-    # 'BYOL',                     # BYOL algorithm
-    # 'BYOL-Zero',
-    # 'RND',                      # RND algorithm
-    "RC-Simpler",  # RC-Simpler algorithm
-    "RC-Simpler_100"
-    # 'RC-128-Arch-Bias-Off',      # RC-128-Arch-Bias-Off algorithm
-    # 'RC-Simpler-Temporal',       # RC-Simpler-Temporal algorithm
-    # 'RC-128-Arch-Bias-Off-Temporal'  # RC-128-Arch-Bias-Off-Temporal algorithm
-]
-
-# curious_paths = [rnd_paths,byol_paths,rc_128_arch_bias_off]
-# curious_paths =[rnd_paths, byol_paths,rc_simpler_paths, rc_128_arch_bias_off_paths,rc_128_arch_paths,rc_bias_off_paths]
-# plot_error_bars_macro_envs(curious_paths, "RCs_brax", ["RND","BYOL","rc_simpler","rc_128_arch_bias_off","rc_128_arch","rc_bias_off"])
-# for rnd_path,byol_path,rc_simpler_path,rc_bias_off_path,rc_128_arch_bias_off_path,rc_128_arch_path, env_name in zip(rnd_paths,byol_paths,rc_simpler_paths,rc_bias_off_paths,rc_128_arch_bias_off_paths,rc_128_arch_paths, environments):
-#     plot_error_bars_env([rnd_path,byol_path,rc_simpler_path,rc_bias_off_path,rc_128_arch_bias_off_path,rc_128_arch_path], env_name, ["rnd","byol","rc_simpler","rc_bias_off","rc_128_arch_bias_off", "rc_128_arch"])
-plot_grouped_histogram(curious_paths, curious_algo_types)
-# plot_error_bars_macro_envs(curious_paths, "RCs_simpler_curious_mini", ["RND","BYOL","rc_simpler"])
-# for rnd_path,byol_path,rc_simpler_path, env_name in zip(rnd_paths,byol_paths,rc_simpler_paths, environments):
-#     plot_error_bars_env([rnd_path,byol_path,rc_simpler_path], env_name, ["rnd","byol","rc_simpler"])
-
-# plot_error_bars_macro_envs(curious_paths, "RCs_simpler_curious_mini", ["RND","BYOL","rc_simpler"])
-# print(np.load("MetaLearnCuriosity/experiments/byol/MiniGrid-Empty-16x16/normalized_curious_agent_returns.npy").mean())
-
 # environments = [
 #     "MiniGrid-BlockedUnlockPickUp",
 #     "MiniGrid-Empty-16x16",
@@ -923,6 +793,135 @@ plot_grouped_histogram(curious_paths, curious_algo_types)
 #     "Freeway-MinAtar",
 #     "SpaceInvaders-MinAtar",
 # ]
+# for env_name in environments:
+
+#     old_folder = f"/home/batsi/Documents/Masters/MetaLearnCuriosity/rc_128_arch_bias_off_temporal/rc_128_arch_bias_off_temporal_brax_byol_default_{env_name}_flax-checkpoints_v0"
+#     new_folder = f"/home/batsi/Documents/Masters/MetaLearnCuriosity/rc_128_arch_bias_off_temporal_/rc_128_arch_bias_off_temporal_delayed_brax_byol_{env_name}_flax-checkpoints_v0"
+
+#     if os.path.exists(old_folder):
+#         os.rename(old_folder, new_folder)
+#         print(f"Renamed: {old_folder} to {new_folder}")
+#     else:
+#         print(f"Folder not found: {old_folder}")
+# name_to_normalises=["rc_128_arch_bias_off_temporal"]
+# for name_to_normalise in name_to_normalises:
+#     for env_name in environments:
+#         save_episode_return(
+#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/delayed_brax_baseline_ppo_{env_name}_flax-checkpoints_v0",
+#             "/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments",
+#             name_to_normalise,
+#             env_name
+#         )
+
+#         normalize_curious_agent_returns(
+#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/baseline/{env_name}/metric_seeds_episode_return.npy",
+#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/random_agents/{env_name}_epi_rets.npy",
+#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/{name_to_normalise}/{env_name}/metric_seeds_episode_return.npy",
+#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/{name_to_normalise}/{env_name}",
+#         )
+#     print()
+# byol_paths = []
+# byol_zero_paths = []
+# rnd_paths = []
+# rc_simpler_paths = []
+# rc_simpler_100_paths = []
+# # rc_bias_off_paths=[]
+# rc_128_arch_bias_off_paths = []
+# # rc_128_arch_paths=[]
+# rc_simpler_paths_temporal = []
+# rc_128_arch_bias_off_paths_temporal = []
+# # rc_128_arch_paths_temporal=[]
+# for env_name in environments:
+# byol_paths.append(
+#     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/byol/{env_name}/normalized_curious_agent_returns.npy"
+# )
+# byol_zero_paths.append(
+#     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/byol_zero/{env_name}/normalized_curious_agent_returns.npy"
+# )
+# rnd_paths.append(
+#     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rnd/{env_name}/normalized_curious_agent_returns.npy"
+# )
+# rc_simpler_paths.append(
+#     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_simpler/{env_name}/normalized_curious_agent_returns.npy"
+# )
+# rc_128_arch_bias_off_paths.append(
+#     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_128_arch_bias_off/{env_name}/normalized_curious_agent_returns.npy"
+# )
+# rc_128_arch_paths.append(
+#     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_128_arch/{env_name}/normalized_curious_agent_returns.npy"
+# )
+# rc_bias_off_paths.append(
+#     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_bias_off/{env_name}/normalized_curious_agent_returns.npy"
+# )
+# rc_simpler_paths_temporal.append(
+#     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_simpler/{env_name}/normalized_curious_agent_returns.npy"
+# )
+# rc_simpler_100_paths.append(
+#     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_simpler_100/{env_name}/normalized_curious_agent_returns.npy"
+# )
+# rc_128_arch_bias_off_paths_temporal.append(
+#     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_128_arch_bias_off/{env_name}/normalized_curious_agent_returns.npy"
+# )
+# rc_128_arch_paths_temporal.append(
+#     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_128_arch/{env_name}/normalized_curious_agent_returns.npy"
+# )
+
+curious_paths = [
+    # byol_paths,
+    # byol_zero_paths,                    # Paths for the BYOL algorithm
+    # rnd_paths,                     # Paths for the RND algorithm
+    # rc_simpler_paths,  # Paths for the RC-Simpler algorithm
+    # rc_simpler_100_paths,  # Paths for the RC-Simpler algorithm
+    # rc_128_arch_bias_off_paths,    # Paths for the RC-128-Arch-Bias-Off algorithm
+    # rc_simpler_paths_temporal,     # Paths for the RC-Simpler-Temporal algorithm
+    # rc_128_arch_bias_off_paths_temporal  # Paths for the RC-128-Arch-Bias-Off-Temporal algorithm
+]
+# curious_algo_types = [
+#     # 'BYOL',                     # BYOL algorithm
+#     # 'BYOL-Zero',
+#     # 'RND',                      # RND algorithm
+#     "RC-Simpler",  # RC-Simpler algorithm
+#     "RC-Simpler_100"
+#     # 'RC-128-Arch-Bias-Off',      # RC-128-Arch-Bias-Off algorithm
+#     # 'RC-Simpler-Temporal',       # RC-Simpler-Temporal algorithm
+#     # 'RC-128-Arch-Bias-Off-Temporal'  # RC-128-Arch-Bias-Off-Temporal algorithm
+# ]
+
+# curious_paths = [rnd_paths,byol_paths,rc_128_arch_bias_off]
+# curious_paths =[rnd_paths, byol_paths,rc_simpler_paths, rc_128_arch_bias_off_paths,rc_128_arch_paths,rc_bias_off_paths]
+# plot_error_bars_macro_envs(curious_paths, "RCs_brax", ["RND","BYOL","rc_simpler","rc_128_arch_bias_off","rc_128_arch","rc_bias_off"])
+# for rnd_path,byol_path,rc_simpler_path,rc_bias_off_path,rc_128_arch_bias_off_path,rc_128_arch_path, env_name in zip(rnd_paths,byol_paths,rc_simpler_paths,rc_bias_off_paths,rc_128_arch_bias_off_paths,rc_128_arch_paths, environments):
+#     plot_error_bars_env([rnd_path,byol_path,rc_simpler_path,rc_bias_off_path,rc_128_arch_bias_off_path,rc_128_arch_path], env_name, ["rnd","byol","rc_simpler","rc_bias_off","rc_128_arch_bias_off", "rc_128_arch"])
+# plot_grouped_histogram(curious_paths, curious_algo_types)
+# plot_error_bars_macro_envs(curious_paths, "RCs_simpler_curious_mini", ["RND","BYOL","rc_simpler"])
+# for rnd_path,byol_path,rc_simpler_path, env_name in zip(rnd_paths,byol_paths,rc_simpler_paths, environments):
+#     plot_error_bars_env([rnd_path,byol_path,rc_simpler_path], env_name, ["rnd","byol","rc_simpler"])
+
+# plot_error_bars_macro_envs(curious_paths, "RCs_simpler_curious_mini", ["RND","BYOL","rc_simpler"])
+# print(np.load("MetaLearnCuriosity/experiments/byol/MiniGrid-Empty-16x16/normalized_curious_agent_returns.npy").mean())
+
+environments = [
+    "MiniGrid-BlockedUnlockPickUp",
+    "MiniGrid-Empty-16x16",
+    "MiniGrid-EmptyRandom-16x16",
+    "MiniGrid-FourRooms",
+    "MiniGrid-MemoryS128",
+    "MiniGrid-Unlock",
+    "ant",
+    "halfcheetah",
+    "hopper",
+    "humanoid",
+    "humanoidstandup",
+    "inverted_pendulum",
+    "inverted_double_pendulum",
+    "pusher",
+    "reacher",
+    "walker2d",
+    "Asterix-MinAtar",
+    "Breakout-MinAtar",
+    "Freeway-MinAtar",
+    "SpaceInvaders-MinAtar",
+]
 # x_algo_paths,y_algo_paths=[],[]
 # for name in name_to_normalises:
 #     for env_name in environments:
@@ -938,3 +937,25 @@ plot_grouped_histogram(curious_paths, curious_algo_types)
 #                             name,
 #                             environments)
 #     x_algo_paths,y_algo_paths=[],[]
+# List of environment names
+# env_names = ['Asterix-MinAtar', 'Breakout-MinAtar', 'SpaceInvaders-MinAtar']  # Add the other environments here
+
+# Base directory path
+# base_dir = "/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/baseline/"
+
+# # File to delete in each environment folder
+# file_to_delete = "means_episode_return.npy"
+
+# for env in environments:
+#     # Construct the full path to the file
+#     file_path = os.path.join(base_dir, env, file_to_delete)
+
+#     # Check if the file exists before attempting to delete it
+#     if os.path.exists(file_path):
+#         try:
+#             os.remove(file_path)
+#             print(f"Deleted: {file_path}")
+#         except Exception as e:
+#             print(f"Error deleting {file_path}: {e}")
+#     else:
+#         print(f"File not found: {file_path}")
