@@ -70,7 +70,7 @@ def random_rollout(rng, env, env_params):
 
 
 for env_name in environments[:6]:
-    rng = jax.random.PRNGKey(42)
+    rng = jax.random.PRNGKey(123)
     env = MiniGridGymnax(env_name)
     env_params = env._env_params
     env = LogWrapper(env)
@@ -95,7 +95,7 @@ for env_name in environments[:6]:
 print("Metrics saved successfully")
 
 for env_name in environments[6:16]:
-    rng = jax.random.PRNGKey(42)
+    rng = jax.random.PRNGKey(123)
     env, env_params = BraxGymnaxWrapper(env_name), None
     env = LogWrapper(env)
     env = ClipAction(env)
@@ -122,7 +122,7 @@ for env_name in environments[6:16]:
 print("Metrics saved successfully")
 
 for env_name in environments[16:]:
-    rng = jax.random.PRNGKey(42)
+    rng = jax.random.PRNGKey(123)
     env, env_params = gymnax.make(env_name)
     env = LogWrapper(env)
     rng, reset_rng = jax.random.split(rng)

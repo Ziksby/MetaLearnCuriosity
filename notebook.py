@@ -1,6 +1,7 @@
 # Taken from:
 # https://github.com/corl-team/xland-minigrid/blob/main/training/train_single_task.py
 
+import gc
 import os
 import time
 
@@ -13,6 +14,7 @@ import optax
 import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.training.train_state import TrainState
+from scipy.stats import bootstrap
 
 from MetaLearnCuriosity.agents.nn import (
     BYOLTarget,
@@ -40,11 +42,11 @@ from MetaLearnCuriosity.wrappers import (
 jax.config.update("jax_threefry_partitionable", True)
 
 environments = [
-    "MiniGrid-BlockedUnlockPickUp",
-    # "MiniGrid-Empty-16x16",
+    # "MiniGrid-DoorKey-8x8",
+    "MiniGrid-Empty-16x16",
     # "MiniGrid-EmptyRandom-16x16",
     # "MiniGrid-FourRooms",
-    # "MiniGrid-MemoryS128",
+    # "MiniGrid-MemoryS16",
     # "MiniGrid-Unlock",
 ]
 
@@ -557,7 +559,7 @@ def train(
 # lambda_values = jnp.array(
 #     [0.001, 0.0001, 0.0003, 0.0005, 0.0008, 0.01, 0.1, 0.003, 0.005, 0.02, 0.03, 0.05]
 # ).sort()
-lambda_values = jnp.array([0.001]).sort()
+lambda_values = jnp.array([0.001, 0.0001, 0.0003, 0.0005, 0.0008, 0.01, 0.1]).sort()
 y_values = {}
 for lambda_value in lambda_values:
     y_values[
@@ -604,7 +606,13 @@ for lambda_value in lambda_values:
             )
         )
         elapsed_time = time.time() - t
-        epi_ret = output["metrics"]["returned_episode_returns"].mean(0).mean(-1).reshape(-1)
+        print(output["metrics"]["returned_episode_returns"].shape)
+        epi_ret = (
+            output["metrics"]["returned_episode_returns"]
+            .mean(0)
+            .mean(-1)
+            .reshape(output["metrics"]["returned_episode_returns"].shape[1], -1)
+        )
 
         print((time.time() - t) / 60)
         # Assuming `output` is your array
@@ -619,73 +627,227 @@ metric_names = [
     "Episode Returns",
 ]
 
+
+def normalize_curious_agent_returns(baseline_path, random_agent_path, curious_agent_returns):
+    start_time = time.time()
+
+    # Ensure the save directory exists
+
+    # Load random agent data and calculate the mean
+    random_agent_returns = np.load(random_agent_path)
+    print(f"Random Last Episode Return: {random_agent_returns}")
+
+    random_agent_mean = random_agent_returns.mean()
+    print(f"Random Agent Mean: {random_agent_mean}")
+
+    # Load baseline data and get the last element (episode return)
+    baseline_returns = np.load(baseline_path)
+    baseline_last_episode_return = baseline_returns[-1]
+    print(f"Baseline Last Episode Return: {baseline_last_episode_return}")
+    print(f"Baseline Last Episode Return SHape: {baseline_last_episode_return.shape}")
+    print(f"Baseline Mean: {baseline_last_episode_return.mean()}")
+
+    # Load curious agent data and get the last element (episode return)
+    curious_agent_last_episode_return = curious_agent_returns[-1]
+    print(f"Curious Agent Last Episode Return: {curious_agent_last_episode_return}")
+    print(f"Curious Agent Last Episode Return Shape: {curious_agent_last_episode_return.shape}")
+
+    # Normalize the curious agent returns between 0 and 1
+    normalized_curious_agent_returns = (curious_agent_last_episode_return - random_agent_mean) / (
+        baseline_last_episode_return.mean() - random_agent_mean
+    )
+    print(f"Normalized Curious Agent Returns: {normalized_curious_agent_returns}")
+
+    # Construct the save path using the curious algorithm type
+    # os.makedirs(save_path, exist_ok=True)
+
+    # Save the normalized curious agent returns
+    # normalized_curious_agent_file = os.path.join(save_path, "normalized_curious_agent_returns.npy")
+    # np.save(normalized_curious_agent_file, normalized_curious_agent_returns)
+
+    # Print the size of the saved file in MB
+    # print(
+    #     f"Size of normalized_curious_agent_returns.npy: {os.path.getsize(normalized_curious_agent_file) / (1024 * 1024):.2f} MB"
+    # )
+
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    print(f"Time taken to run the code: {elapsed_time:.2f} seconds")
+
+    return normalized_curious_agent_returns
+
+
 # Initialize plotting
-# for env_name in environments:
-#     num_metrics = len(metric_names)
-#     fig, axs = plt.subplots(num_metrics, 1, figsize=(12, 6 * num_metrics), sharex=False)
-#     fig.suptitle(f"Training Metrics Over Time for {env_name}")
+for env_name in environments:
+    num_metrics = len(metric_names)
+    fig, axs = plt.subplots(num_metrics, 1, figsize=(12, 6 * num_metrics), sharex=False)
+    fig.suptitle(f"Training Metrics Over Time for {env_name}")
 
-#     # Iterate over each metric
-#     for idx, metric_name in enumerate(metric_names):
-#         ax = axs[idx] if num_metrics > 1 else axs
+    # Iterate over each metric
+    for idx, metric_name in enumerate(metric_names):
+        ax = axs[idx] if num_metrics > 1 else axs
 
-#         # Plot each lambda's data for this metric
-#         plotted = False
-#         for lambda_value in lambda_values:
-#             lambda_key = float(lambda_value)  # Ensure float key matches dictionary keys
-#             if lambda_key in y_values and env_name in y_values[lambda_key]:
-#                 metric_data = y_values[lambda_key][env_name][idx]
-#                 if len(metric_data) > 0:
-#                     x_axis = range(1, len(metric_data) + 1)
-#                     ax.plot(x_axis, metric_data, label=f"Lambda={lambda_value:.5f}")
-#                     plotted = True
+        # Plot each lambda's data for this metric
+        plotted = False
+        for lambda_value in lambda_values:
+            lambda_key = float(lambda_value)  # Ensure float key matches dictionary keys
+            if lambda_key in y_values and env_name in y_values[lambda_key]:
+                metric_data = y_values[lambda_key][env_name][idx]
 
-#         # Only add a legend if data was actually plotted
-#         if plotted:
-#             ax.set_title(metric_name)
-#             ax.set_xlabel("Training Steps")
-#             ax.set_ylabel(metric_name)
-#             ax.legend()
-#         else:
-#             ax.set_title(f"{metric_name} (no data)")
-#             ax.set_xlabel("Training Steps")
-#             ax.set_ylabel(metric_name)
+                # Convert JAX array to NumPy array to ensure it can be used with len()
+                metric_data = np.array(metric_data)  # Ensure it's a NumPy array
+                if len(metric_data) > 0:
+                    x_axis = range(1, len(metric_data) + 1)
+                    ax.plot(x_axis, metric_data, label=f"Lambda={lambda_value:.5f}")
+                    plotted = True
 
-#     # Adjust layout and save the figure
-#     plt.subplots_adjust(hspace=0.4)  # Adjust vertical spacing between plots
-#     plt.savefig(f"MetaLearnCuriosity/hyperparameter_sweep/MiniGrid/{env_name}_metrics_over_time_byol.png")
-#     plt.close(fig)
+        # Only add a legend if data was actually plotted
+        if plotted:
+            ax.set_title(metric_name)
+            ax.set_xlabel("Training Steps")
+            ax.set_ylabel(metric_name)
+            ax.legend()
+        else:
+            ax.set_title(f"{metric_name} (no data)")
+            ax.set_xlabel("Training Steps")
+            ax.set_ylabel(metric_name)
 
-# # Scatter plot for final episode returns vs. lambda values
-# for env_name in environments:
-#     lambda_values = []
-#     final_returns = []
+    # Adjust layout and save the figure
+    plt.subplots_adjust(hspace=0.4)  # Adjust vertical spacing between plots
+    plt.savefig(
+        f"MetaLearnCuriosity/hyperparameter_sweep/MiniGrid/{env_name}_metrics_over_time_byol.png"
+    )
+    plt.close(fig)
+    gc.collect()
 
-#     # Collect data for plotting
-#     for lambda_value, env_data in y_values.items():
-#         epi_ret = env_data[env_name][0]  # index 0 for episode returns
-#         if epi_ret.size > 0:  # Ensure there is at least one return value
-#             final_returns.append(epi_ret[-1])
-#             lambda_values.append(lambda_value)
+# Scatter plot for final episode returns vs. lambda values
+for env_name in environments:
+    lambda_values = []
+    final_returns = []
 
-#     # Sort lambda values for consistent plotting
-#     sorted_indices = sorted(range(len(lambda_values)), key=lambda k: lambda_values[k])
-#     sorted_lambda_values = [lambda_values[i] for i in sorted_indices]
-#     sorted_final_returns = [final_returns[i] for i in sorted_indices]
+    # Collect data for plotting
+    for lambda_value, env_data in y_values.items():
+        epi_ret = env_data[env_name][0]  # index 0 for episode returns
+        epi_ret = np.array(env_data[env_name][0])
+        if epi_ret.size > 0:  # Ensure there is at least one return value
+            final_returns.append(epi_ret[-1])
+            lambda_values.append(lambda_value)
 
-#     # Plotting
-#     plt.figure(figsize=(10, 6))
-#     plt.scatter(range(1, len(sorted_lambda_values) + 1), sorted_final_returns, color="blue")
-#     plt.title(f"Final Episode Returns vs. Lambda for {env_name}")
-#     plt.xlabel("Lambda Value (Indexed)")
-#     plt.ylabel("Final Episode Return")
-#     plt.xticks(
-#         range(1, len(sorted_lambda_values) + 1),
-#         [f"{lv:.5f}" for lv in sorted_lambda_values],
-#         rotation=45,
-#     )
-#     plt.grid(True)
+    # Sort lambda values for consistent plotting
+    sorted_indices = sorted(range(len(lambda_values)), key=lambda k: lambda_values[k])
+    sorted_lambda_values = [lambda_values[i] for i in sorted_indices]
+    sorted_final_returns = [final_returns[i] for i in sorted_indices]
 
-#     # Save and close plot
-#     plt.savefig(f"MetaLearnCuriosity/hyperparameter_sweep/MiniGrid/{env_name}_final_episode_returns_vs_lambda_byol.png")
-#     plt.close()  # Close the plot to free up memory
+    # Plotting
+    plt.figure(figsize=(10, 6))
+    plt.scatter(range(1, len(sorted_lambda_values) + 1), sorted_final_returns, color="blue")
+    plt.title(f"Final Episode Returns vs. Lambda for {env_name}")
+    plt.xlabel("Lambda Value (Indexed)")
+    plt.ylabel("Final Episode Return")
+    plt.xticks(
+        range(1, len(sorted_lambda_values) + 1),
+        [f"{lv:.5f}" for lv in sorted_lambda_values],
+        rotation=45,
+    )
+    plt.grid(True)
+
+    # Save and close plot
+    plt.savefig(
+        f"MetaLearnCuriosity/hyperparameter_sweep/MiniGrid/{env_name}_final_episode_returns_vs_lambda_byol.png"
+    )
+    plt.close()  # Close the plot to free up memory
+    gc.collect()
+
+for lambda_value, env_data in y_values.items():
+    for env_name, epi_ret in env_data.items():
+        # Assuming you have precomputed normalization_factors for each env_name
+
+        y_values[lambda_value][env_name] = normalize_curious_agent_returns(
+            f"/home/batsy/MetaLearnCuriosity/MetaLearnCuriosity/experiments/baseline/{env_name}/metric_seeds_episode_return.npy",
+            f"/home/batsy/MetaLearnCuriosity/MetaLearnCuriosity/experiments/random_agents/{env_name}_epi_rets.npy",
+            epi_ret.T,
+        )
+
+for lambda_value, env_data in y_values.items():
+    # Create a list to store all normalized epi_ret for this lambda_value
+    normalized_returns = []
+
+    # Collect normalized returns for each environment
+    for env_name, normalized_epi_ret in env_data.items():
+        normalized_returns.append(normalized_epi_ret)
+
+    # Convert the list to a NumPy array (this is more memory-efficient for large data)
+    y_values[lambda_value] = np.array(normalized_returns)
+
+# Collect lambda values and normalized returns
+lambda_values = sorted(y_values.keys())
+means = []
+ci_lows = []
+ci_highs = []
+
+# Calculate means and CIs
+for lambda_value in lambda_values:
+    normalized_returns = np.array(y_values[lambda_value]).flatten()
+    mean_value = np.mean(normalized_returns)
+    means.append(mean_value)
+
+    ci = bootstrap(
+        (normalized_returns,), np.mean, confidence_level=0.95, method="percentile", n_resamples=1000
+    )
+    ci_lows.append(ci.confidence_interval.low)
+    ci_highs.append(ci.confidence_interval.high)
+
+# Create evenly spaced x positions
+x_positions = np.arange(len(lambda_values))
+
+plt.figure(figsize=(15, 8))  # Increased figure size
+
+# Create the bar plot
+bars = plt.bar(
+    x_positions,
+    means,
+    yerr=[np.array(means) - np.array(ci_lows), np.array(ci_highs) - np.array(means)],
+    capsize=5,
+    color="skyblue",
+    edgecolor="black",
+    alpha=0.7,
+    width=0.6,
+)
+
+# Add grid
+plt.grid(True, axis="y", linestyle="--", alpha=0.7)
+
+# Set x-axis ticks and labels
+plt.xticks(x_positions, [f"{lv:.4f}" for lv in lambda_values], rotation=90, ha="center")
+
+# Adjust y-axis to show both positive and negative values
+y_min = min(min(ci_lows), 0)
+y_max = max(ci_highs)
+plt.ylim(y_min - 0.1 * abs(y_min), y_max + 0.1 * abs(y_max))
+
+# Add a horizontal line at y=0
+plt.axhline(y=0, color="black", linestyle="-", linewidth=0.5)
+
+# Label the axes
+plt.xlabel("Lambda Value", fontsize=12)
+plt.ylabel("Mean Normalized Episode Return", fontsize=12)
+plt.title("Mean Normalized Episode Return vs Lambda Value", fontsize=14)
+
+# Add value labels on top of each bar
+for bar in bars:
+    height = bar.get_height()
+    plt.text(
+        bar.get_x() + bar.get_width() / 2.0,
+        height,
+        f"{height:.2f}",
+        ha="center",
+        va="bottom",
+        rotation=0,
+    )
+
+# Adjust layout
+plt.tight_layout()
+
+# Save the plot
+plt.savefig("normalized_returns_histogram_10_values.png", dpi=300)
+plt.close()

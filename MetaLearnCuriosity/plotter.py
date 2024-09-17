@@ -732,8 +732,6 @@ environments = [
 #             name_to_normalise,
 #             env_name,
 #         )
-
-#         normalize_curious_agent_returns(
 #             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/baseline/{env_name}/metric_seeds_episode_return.npy",
 #             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/random_agents/{env_name}_epi_rets.npy",
 #             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/{name_to_normalise}/{env_name}/metric_seeds_episode_return.npy",
