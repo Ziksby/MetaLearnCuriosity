@@ -1,6 +1,7 @@
 # Taken from:
 # https://github.com/corl-team/xland-minigrid/blob/main/training/train_single_task.py
 
+import gc
 import os
 import shutil
 import time
@@ -34,11 +35,11 @@ from MetaLearnCuriosity.wrappers import (
 jax.config.update("jax_threefry_partitionable", True)
 
 environments = [
-    "MiniGrid-BlockedUnlockPickUp",
-    "MiniGrid-Empty-16x16",
-    "MiniGrid-EmptyRandom-16x16",
-    "MiniGrid-FourRooms",
-    "MiniGrid-MemoryS128",
+    # "MiniGrid-BlockedUnlockPickUp",
+    # "MiniGrid-Empty-16x16",
+    # "MiniGrid-EmptyRandom-16x16",
+    # "MiniGrid-FourRooms",
+    "MiniGrid-MemoryS16",
     "MiniGrid-Unlock",
 ]
 
@@ -336,7 +337,6 @@ for env_name in environments:
         train_fn = jax.pmap(train, axis_name="devices")
         output = jax.block_until_ready(train_fn(rng, init_hstate, train_state))
 
-    print(output["rl_total_loss"].shape)
     logger = WBLogger(
         config=config,
         group="minigrid_baseline",
@@ -347,11 +347,11 @@ for env_name in environments:
 
     logger.log_episode_return(output, config["NUM_SEEDS"])
     logger.log_rl_loss_minigrid(output, config["NUM_SEEDS"])
-    output["config"] = config
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
     # Get the absolute path of the directory
     output = compress_output_for_reasoning(output, minigrid=True)
+    output["config"] = config
 
     path = os.path.abspath(checkpoint_directory)
     Save(path, output)
@@ -359,3 +359,16 @@ for env_name in environments:
     shutil.rmtree(path)
     print(f"Deleted local checkpoint directory: {path}")
     print(f"Done in {elapsed_time / 60:.2f}min")
+    # Clear memory
+    del output, init_hstate, train_state
+
+    # Clear JAX caches
+    jax.clear_caches()
+
+    # Force Python garbage collection
+    gc.collect()
+
+    print(f"Memory cleared after processing {env_name}")
+
+# After all environments are processed
+print("All environments processed")

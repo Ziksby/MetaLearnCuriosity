@@ -1002,7 +1002,7 @@ def compress_output_for_reasoning(output, minigrid=False):
             else:
                 # Apply double mean for loss values in non-minigrid case
                 output_compressed[key] = value.mean(-1).mean(-1)
-        elif key == "metrics" and isinstance(value, dict):
+        elif key == "metrics":
             # Apply mean to each value in the metrics dictionary
             output_compressed[key] = {k: v.mean(-1) for k, v in value.items()}
         else:
