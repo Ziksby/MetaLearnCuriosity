@@ -10,10 +10,10 @@ import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
 import optax
+import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.training.train_state import TrainState
 
-import wandb
 from MetaLearnCuriosity.agents.nn import (
     BYOLTarget,
     MiniGridActorCriticRNN,
@@ -26,8 +26,8 @@ from MetaLearnCuriosity.utils import (
     BYOLRewardNorm,
     byol_calculate_gae,
     byol_minigrid_ppo_update_networks,
+    compress_output_for_reasoning,
     process_output_general,
-    rnn_rollout,
 )
 from MetaLearnCuriosity.wrappers import (
     FlattenObservationWrapper,
@@ -42,13 +42,13 @@ environments = [
     "MiniGrid-BlockedUnlockPickUp",
     "MiniGrid-Empty-16x16",
     "MiniGrid-EmptyRandom-16x16",
-    "MiniGrid-FourRooms",
-    "MiniGrid-MemoryS128",
-    "MiniGrid-Unlock",
+    # "MiniGrid-FourRooms",
+    # "MiniGrid-MemoryS128",
+    # "MiniGrid-Unlock",
 ]
 
 config = {
-    "NUM_SEEDS": 10,
+    "NUM_SEEDS": 30,
     "PROJECT": "MetaLearnCuriosity",
     "RUN_NAME": "minigrid-byol",
     "BENCHMARK_ID": None,
@@ -77,7 +77,7 @@ config = {
     "ANNEAL_PRED_LR": False,
     "DEBUG": False,
     "PRED_LR": 0.001,
-    "INT_LAMBDA": 0.0003,
+    "INT_LAMBDA": 0.0001,
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
 }
@@ -640,10 +640,10 @@ for env_name in environments:
     logger.log_rl_losses(output, config["NUM_SEEDS"])
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
-    output["config"] = config
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
-
+    output = compress_output_for_reasoning(output, minigrid=True)
     # Get the absolute path of the directory
+    output["config"] = config
     path = os.path.abspath(checkpoint_directory)
     Save(path, output)
     logger.save_artifact(path)
