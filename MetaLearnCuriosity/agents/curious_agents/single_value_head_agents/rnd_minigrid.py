@@ -9,10 +9,10 @@ import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
 import optax
+import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.training.train_state import TrainState
 
-import wandb
 from MetaLearnCuriosity.agents.nn import (
     MiniGridActorCriticRNN,
     PredictorNetwork,
@@ -73,7 +73,7 @@ config = {
     "GAMMA": 0.99,
     "INT_GAMMA": 0.99,
     "GAE_LAMBDA": 0.95,
-    "INT_LAMBDA": 0.005,
+    "INT_LAMBDA": 0.01,
     "ENT_COEF": 0.01,
     "VF_COEF": 0.5,
     "MAX_GRAD_NORM": 0.5,

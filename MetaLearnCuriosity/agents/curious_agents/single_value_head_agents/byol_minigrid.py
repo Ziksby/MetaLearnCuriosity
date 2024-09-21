@@ -10,10 +10,10 @@ import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
 import optax
+import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.training.train_state import TrainState
 
-import wandb
 from MetaLearnCuriosity.agents.nn import (
     BYOLTarget,
     MiniGridActorCriticRNN,
@@ -77,7 +77,7 @@ config = {
     "ANNEAL_PRED_LR": False,
     "DEBUG": False,
     "PRED_LR": 0.001,
-    "INT_LAMBDA": 0.0003,
+    "INT_LAMBDA": 0.0001,
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
 }

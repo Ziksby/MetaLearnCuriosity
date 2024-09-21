@@ -529,7 +529,7 @@ def train(rng, train_state, pred_state, target_params, init_obs_rng):
     }
 
 
-optimal_lambdas = [0.02, 0.02, 0.02, 0.02]
+optimal_lambdas = [0.01, 0.01, 0.01, 0.01]
 for env_name, lambdas in zip(environments, optimal_lambdas):
     rng = jax.random.PRNGKey(config["SEED"])
     t = time.time()
@@ -581,6 +581,7 @@ for env_name, lambdas in zip(environments, optimal_lambdas):
 
     # Get the absolute path of the directory
     output = compress_output_for_reasoning(output)
+
     output["config"] = config
 
     path = os.path.abspath(checkpoint_directory)

@@ -99,7 +99,7 @@ config = {
     "PRED_LR": 0.001,
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
-    "INT_LAMBDA": 0.001,
+    "INT_LAMBDA": 0.005,
 }
 
 environments = [
