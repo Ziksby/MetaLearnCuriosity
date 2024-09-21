@@ -26,8 +26,8 @@ from MetaLearnCuriosity.utils import (
     BYOLRewardNorm,
     byol_calculate_gae,
     byol_minigrid_ppo_update_networks,
+    compress_output_for_reasoning,
     process_output_general,
-    rnn_rollout,
 )
 from MetaLearnCuriosity.wrappers import (
     FlattenObservationWrapper,
@@ -42,13 +42,13 @@ environments = [
     "MiniGrid-BlockedUnlockPickUp",
     "MiniGrid-Empty-16x16",
     "MiniGrid-EmptyRandom-16x16",
-    "MiniGrid-FourRooms",
-    "MiniGrid-MemoryS128",
-    "MiniGrid-Unlock",
+    # "MiniGrid-FourRooms",
+    # "MiniGrid-MemoryS128",
+    # "MiniGrid-Unlock",
 ]
 
 config = {
-    "NUM_SEEDS": 10,
+    "NUM_SEEDS": 30,
     "PROJECT": "MetaLearnCuriosity",
     "RUN_NAME": "minigrid-byol",
     "BENCHMARK_ID": None,
@@ -640,10 +640,10 @@ for env_name in environments:
     logger.log_rl_losses(output, config["NUM_SEEDS"])
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
-    output["config"] = config
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
-
+    output = compress_output_for_reasoning(output, minigrid=True)
     # Get the absolute path of the directory
+    output["config"] = config
     path = os.path.abspath(checkpoint_directory)
     Save(path, output)
     logger.save_artifact(path)
