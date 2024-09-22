@@ -25,6 +25,7 @@ from MetaLearnCuriosity.utils import BYOLRewardNorm
 from MetaLearnCuriosity.utils import BYOLTransition as Transition
 from MetaLearnCuriosity.utils import (
     byol_normalize_prior_int_rewards,
+    compress_output_for_reasoning,
     process_output_general,
     update_target_state_with_ema,
 )
@@ -54,7 +55,7 @@ environments = [
 config = {
     "RUN_NAME": "delayed_brax_byol",
     "SEED": 42,
-    "NUM_SEEDS": 10,
+    "NUM_SEEDS": 30,
     "LR": 3e-4,
     "NUM_ENVS": 2048,
     "NUM_STEPS": 10,  # unroll length
@@ -626,7 +627,7 @@ def train(
             update_target_counter,
             rng,
         )
-        return runner_state, (metric, loss_info, norm_int_reward, traj_batch.int_reward)
+        return runner_state, (metric, loss_info, traj_batch.int_reward, norm_int_reward)
 
     rng, _rng = jax.random.split(rng)
     runner_state = (
@@ -747,11 +748,12 @@ for env_name in environments:
     logger.log_rl_losses(output, config["NUM_SEEDS"])
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
-    output["config"] = config
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
     # Get the absolute path of the directory
+    output = compress_output_for_reasoning(output)
     path = os.path.abspath(checkpoint_directory)
+    output["config"] = config
     Save(path, output)
     logger.save_artifact(path)
     shutil.rmtree(path)
