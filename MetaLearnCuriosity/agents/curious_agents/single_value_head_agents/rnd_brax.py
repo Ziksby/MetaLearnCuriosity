@@ -63,7 +63,7 @@ config = {
     "GAMMA": 0.99,
     "INT_GAMMA": 0.99,
     "GAE_LAMBDA": 0.95,
-    "INT_LAMBDA": 0.1,  # 0.00021,
+    "INT_LAMBDA": 0.005,  # 0.00021,
     "CLIP_EPS": 0.2,
     "ENT_COEF": 0.0,
     "VF_COEF": 0.5,
