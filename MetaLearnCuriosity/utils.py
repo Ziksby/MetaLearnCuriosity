@@ -1010,3 +1010,50 @@ def compress_output_for_reasoning(output, minigrid=False):
             output_compressed[key] = value.mean(-1)
 
     return output_compressed
+
+
+def create_adjacent_pairs(candidate_params):
+    def split_adjacent(arr):
+        # Ensure the first dimension is even
+        assert arr.shape[0] % 2 == 0, "First dimension must be even"
+        return arr.reshape(-1, 2, *arr.shape[1:])
+
+    # Split each parameter array into pairs
+    paired_params = jax.tree.map(split_adjacent, candidate_params)
+
+    # Get the number of pairs
+    num_pairs = jax.tree.leaves(paired_params)[0].shape[0]
+
+    # Function to extract a single pair from the paired structure
+    def extract_pair(paired_tree, idx):
+        return jax.tree.map(lambda x: x[idx], paired_tree)
+
+    # Create a list of parameter pairs
+    param_pairs = [extract_pair(paired_params, i) for i in range(num_pairs)]
+
+    return param_pairs
+
+
+def reorder_antithetic_pairs(params, population_size):
+    """
+    Reorder parameters to make antithetic samples adjacent in the population.
+
+    Parameters:
+    - params: A pytree containing population parameters (e.g., dict, list, or array).
+    - population_size: The total number of individuals in the population (must be even).
+
+    Returns:
+    - Reordered pytree where antithetic pairs are adjacent.
+    """
+    # Ensure population_size is even for antithetic pairing
+    assert population_size % 2 == 0, "population_size must be even for antithetic pairing."
+
+    # Generate indices to reorder the population
+    idxs = jnp.concatenate(
+        [jnp.array([i, i + population_size // 2]) for i in range(population_size // 2)]
+    )
+
+    # Reorder the parameters based on the calculated indices
+    reordered_params = jax.tree_util.tree_map(lambda arr: arr[idxs], params)
+
+    return reordered_params
