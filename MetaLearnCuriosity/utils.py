@@ -1034,6 +1034,19 @@ def create_adjacent_pairs(candidate_params):
     return param_pairs
 
 
+def reshape_adjacent_pairs(candidate_params):
+    def combine_adjacent(arr):
+        # Ensure the first dimension is even
+        assert arr.shape[0] % 2 == 0, "First dimension must be even"
+        new_shape = (arr.shape[0] // 2, 2, *arr.shape[1:])
+        return arr.reshape(new_shape)
+
+    # Reshape each parameter array to combine adjacent pairs
+    reshaped_params = jax.tree_util.tree_map(combine_adjacent, candidate_params)
+
+    return reshaped_params
+
+
 def reorder_antithetic_pairs(params, population_size):
     """
     Reorder parameters to make antithetic samples adjacent in the population.
