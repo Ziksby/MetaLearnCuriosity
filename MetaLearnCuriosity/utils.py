@@ -46,6 +46,8 @@ class RCBYOLTransition(NamedTuple):
     next_obs: jnp.ndarray
     bt: jnp.ndarray
     norm_time_step: jnp.ndarray
+    ext_reward_hist: jnp.ndarray
+    int_reward_hist: jnp.ndarray
     info: jnp.ndarray
 
 
@@ -921,7 +923,7 @@ def byol_update_reward_norm_params(byol_reward_norm_params, int_reward, rew_norm
 
 
 def byol_normalize_prior_int_rewards(
-    int_reward, byol_reward_norm_params, rew_norm_param, prior: bool = True
+    int_reward, byol_reward_norm_params, rew_norm_param, rew_hist, prior: bool = True
 ):
     # Update reward normalization parameters
     byol_reward_norm_params = byol_update_reward_norm_params(
@@ -937,25 +939,32 @@ def byol_normalize_prior_int_rewards(
     sigma_r = jnp.sqrt(jnp.max(mu_array) + 1e-8)  # 1e-8 as a small numerical regularization
     # Normalize intrinsic reward
     norm_int_reward = int_reward / sigma_r
+    rew_hist /= sigma_r
 
     # Update prior normalization
     byol_reward_norm_params = byol_update_reward_prior_norm(
         norm_int_reward, byol_reward_norm_params, rew_norm_param
     )
 
-    def prior_norm_step(norm_int_reward, byol_reward_norm_params):
+    def prior_norm_step(norm_int_reward, byol_reward_norm_params, rew_hist):
         # Compute prior normalized intrinsic reward
         prior_norm_int_reward = jnp.maximum(norm_int_reward - byol_reward_norm_params.mu_l, 0)
-        return prior_norm_int_reward, byol_reward_norm_params
+        rew_hist = jnp.maximum(rew_hist - byol_reward_norm_params.mu_l, 0)
+        return prior_norm_int_reward, byol_reward_norm_params, rew_hist
 
-    def no_prior_norm_step(norm_int_reward, byol_reward_norm_params):
-        return norm_int_reward, byol_reward_norm_params
+    def no_prior_norm_step(norm_int_reward, byol_reward_norm_params, rew_hist):
+        return norm_int_reward, byol_reward_norm_params, rew_hist
 
-    prior_norm_int_reward, byol_reward_norm_params = jax.lax.cond(
-        prior, prior_norm_step, no_prior_norm_step, norm_int_reward, byol_reward_norm_params
+    prior_norm_int_reward, byol_reward_norm_params, rew_hist = jax.lax.cond(
+        prior,
+        prior_norm_step,
+        no_prior_norm_step,
+        norm_int_reward,
+        byol_reward_norm_params,
+        rew_hist,
     )
 
-    return prior_norm_int_reward, byol_reward_norm_params
+    return prior_norm_int_reward, byol_reward_norm_params, rew_hist
 
 
 def update_target_state_with_ema(predictor_state, target_state, ema_param):

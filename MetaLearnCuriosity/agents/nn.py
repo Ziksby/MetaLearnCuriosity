@@ -220,16 +220,47 @@ class MiniGridActorCriticRNN(nn.Module):
         return jnp.zeros((batch_size, self.rnn_num_layers, self.rnn_hidden_dim))
 
 
+# class RewardCombiner(nn.Module):
+#     @nn.compact
+#     def __call__(self, x):
+#         # Input shape: (num_envs, 128, 2)
+#         x = nn.Conv(features=16, kernel_size=(3,), padding='valid')(x)
+#         x = nn.relu(x)
+#         x = nn.max_pool(x, window_shape=(2,), strides=(2,), padding='valid')
+
+#         x = nn.Conv(features=32, kernel_size=(3,), padding='valid')(x)
+#         x = nn.relu(x)
+#         x = nn.max_pool(x, window_shape=(2,), strides=(2,), padding='valid')
+
+#         x = x.reshape((x.shape[0], -1))  # Flatten
+
+#         x = nn.Dense(features=64)(x)
+#         x = nn.relu(x)
+
+#         x = nn.Dense(features=1)(x)
+#         return jnp.squeeze(nn.sigmoid(x),-1)
+
+
 class RewardCombiner(nn.Module):
     @nn.compact
     def __call__(self, x):
+        # Input shape: (num_envs, 128, 2)
+        x = nn.Conv(features=16, kernel_size=(3,), padding="valid")(x)
+        x = nn.relu(x)
 
-        int_lambda = nn.Dense(128, use_bias=False)(x)
-        int_lambda = nn.relu(int_lambda)
-        int_lambda = nn.Dense(1, use_bias=False)(int_lambda)
-        int_lambda = nn.sigmoid(int_lambda)
+        x = nn.Conv(features=32, kernel_size=(3,), padding="valid")(x)
+        x = nn.relu(x)
 
-        return jnp.squeeze(int_lambda, axis=-1)
+        # Flatten the output
+        x = x.reshape((x.shape[0], -1))  # Flatten all dimensions except batch
+
+        # Fully connected layer
+        x = nn.Dense(features=128)(x)
+        x = nn.relu(x)
+
+        # Output layer with sigmoid activation
+        x = nn.Dense(features=1)(x)
+        return jnp.squeeze(nn.sigmoid(x), -1)
 
 
 class TargetNetwork(nn.Module):

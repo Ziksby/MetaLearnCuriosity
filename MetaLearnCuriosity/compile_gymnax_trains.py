@@ -1,14 +1,9 @@
 # Taken from:
 # https://github.com/corl-team/xland-minigrid/blob/main/training/train_single_task.py
 
-import gc
-import os
-import shutil
-import time
 from typing import Sequence
 
 import distrax
-import flax
 import flax.linen as nn
 import gymnax
 import jax
@@ -16,12 +11,8 @@ import jax.numpy as jnp
 import jax.tree_util
 import numpy as np
 import optax
-import wandb
-from evosax import OpenES
-from flax.jax_utils import replicate, unreplicate
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
-from tqdm import tqdm
 
 from MetaLearnCuriosity.agents.nn import (
     AtariBYOLPredictor,
@@ -30,15 +21,10 @@ from MetaLearnCuriosity.agents.nn import (
     OpenScannedRNN,
     RewardCombiner,
 )
-from MetaLearnCuriosity.checkpoints import Save
-from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import BYOLRewardNorm
 from MetaLearnCuriosity.utils import RCBYOLTransition as Transition
 from MetaLearnCuriosity.utils import (
     byol_normalize_prior_int_rewards,
-    create_adjacent_pairs,
-    process_output_general,
-    reorder_antithetic_pairs,
     update_target_state_with_ema,
 )
 from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper, VecEnv
@@ -176,8 +162,15 @@ def compile_fns(config=config):  # noqa: C901
         close_init_hstate = CloseScannedRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 128)
         open_init_hstate = OpenScannedRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 128)
         init_bt = jnp.zeros((1, config["NUM_ENVS_PER_DEVICE"], 128))
-
         init_pred_input = (init_bt, init_x, init_action[np.newaxis, :])
+        total_ext_reward_history = jnp.zeros(
+            (config["NUM_STEPS"], config["NUM_ENVS_PER_DEVICE"], 128)
+        )
+        total_int_reward_history = jnp.zeros(
+            (config["NUM_STEPS"], config["NUM_ENVS_PER_DEVICE"], 128)
+        )
+        ext_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 128))
+        int_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 128))
 
         network_params = network.init(_rng, init_x)
         pred_params = pred.init(_pred_rng, close_init_hstate, open_init_hstate, init_pred_input)
@@ -233,6 +226,10 @@ def compile_fns(config=config):  # noqa: C901
             close_init_hstate,
             open_init_hstate,
             init_action,
+            ext_reward_history,
+            int_reward_history,
+            total_ext_reward_history,
+            total_int_reward_history,
         )
 
     def train(
@@ -245,6 +242,10 @@ def compile_fns(config=config):  # noqa: C901
         close_init_hstate,
         open_init_hstate,
         init_action,
+        ext_reward_hist,
+        int_reward_hist,
+        tot_ext_reward_hist,
+        tot_int_reward_hist,
     ):
         # REWARD COMBINER
         rc_network = RewardCombiner()
@@ -261,7 +262,7 @@ def compile_fns(config=config):  # noqa: C901
         # TRAIN LOOP
         def _update_step(runner_state, unused):
             # COLLECT TRAJECTORIES
-            def _env_step(runner_state, unused):
+            def _env_step(runner_state, step_index):
                 (
                     train_state,
                     pred_state,
@@ -275,6 +276,10 @@ def compile_fns(config=config):  # noqa: C901
                     byol_reward_norm_params,
                     ext_reward_norm_params,
                     update_target_counter,
+                    ext_reward_hist,
+                    int_reward_hist,
+                    tot_ext_reward_hist,
+                    tot_int_reward_hist,
                     rng,
                 ) = runner_state
 
@@ -312,6 +317,15 @@ def compile_fns(config=config):  # noqa: C901
                     1 - done
                 )
                 value, action, log_prob = (value.squeeze(0), action.squeeze(0), log_prob.squeeze(0))
+
+                ext_reward_hist = jnp.roll(ext_reward_hist, shift=-1, axis=1)
+                int_reward_hist = jnp.roll(int_reward_hist, shift=-1, axis=1)
+                ext_reward_hist = ext_reward_hist.at[:, -1].set(reward)
+                int_reward_hist = int_reward_hist.at[:, -1].set(int_reward)
+
+                tot_ext_reward_hist = tot_ext_reward_hist.at[step_index].set(ext_reward_hist)
+                tot_int_reward_hist = tot_int_reward_hist.at[step_index].set(int_reward_hist)
+
                 transition = Transition(
                     done,
                     last_act,
@@ -325,6 +339,8 @@ def compile_fns(config=config):  # noqa: C901
                     obsv,
                     bt,
                     norm_time_step,
+                    tot_ext_reward_hist,
+                    tot_int_reward_hist,
                     info,
                 )
                 runner_state = (
@@ -340,13 +356,17 @@ def compile_fns(config=config):  # noqa: C901
                     byol_reward_norm_params,
                     ext_reward_norm_params,
                     update_target_counter,
+                    ext_reward_hist,
+                    int_reward_hist,
+                    tot_ext_reward_hist,
+                    tot_int_reward_hist,
                     rng,
                 )
                 return runner_state, transition
 
             close_initial_hstate, open_initial_hstate = runner_state[4:6]
             runner_state, traj_batch = jax.lax.scan(
-                _env_step, runner_state, None, config["NUM_STEPS"]
+                _env_step, runner_state, np.arange(config["NUM_STEPS"])
             )
 
             # CALCULATE ADVANTAGE
@@ -363,6 +383,10 @@ def compile_fns(config=config):  # noqa: C901
                 byol_reward_norm_params,
                 ext_reward_norm_params,
                 update_target_counter,
+                ext_reward_hist,
+                int_reward_hist,
+                tot_ext_reward_hist,
+                tot_int_reward_hist,
                 rng,
             ) = runner_state
 
@@ -370,15 +394,32 @@ def compile_fns(config=config):  # noqa: C901
             _, last_val = train_state.apply_fn(train_state.params, last_obs[np.newaxis, :])
 
             def _calculate_gae(
-                traj_batch, last_val, byol_reward_norm_params, ext_reward_norm_params
+                traj_batch,
+                last_val,
+                byol_reward_norm_params,
+                ext_reward_norm_params,
+                ext_reward_hist,
+                int_reward_hist,
             ):
-                norm_int_reward, byol_reward_norm_params = byol_normalize_prior_int_rewards(
-                    traj_batch.int_reward, byol_reward_norm_params, config["REW_NORM_PARAMETER"]
+                (
+                    norm_int_reward,
+                    byol_reward_norm_params,
+                    int_reward_hist,
+                ) = byol_normalize_prior_int_rewards(
+                    traj_batch.int_reward,
+                    byol_reward_norm_params,
+                    config["REW_NORM_PARAMETER"],
+                    int_reward_hist,
                 )
-                norm_ext_reward, ext_reward_norm_params = byol_normalize_prior_int_rewards(
+                (
+                    norm_ext_reward,
+                    ext_reward_norm_params,
+                    ext_reward_hist,
+                ) = byol_normalize_prior_int_rewards(
                     traj_batch.norm_reward,
                     ext_reward_norm_params,
                     config["REW_NORM_PARAMETER"],
+                    ext_reward_hist,
                     prior=False,
                 )
                 norm_traj_batch = Transition(
@@ -394,21 +435,25 @@ def compile_fns(config=config):  # noqa: C901
                     traj_batch.next_obs,
                     traj_batch.bt,
                     traj_batch.norm_time_step,
+                    ext_reward_hist,
+                    int_reward_hist,
                     traj_batch.info,
                 )
 
                 def _get_advantages(gae_and_next_value, transition):
                     gae, next_value = gae_and_next_value
-                    done, value, reward, int_reward, _, norm_ext_reward = (
+                    done, value, reward, int_reward, _, _, ext_reward_hist, int_reward_hist = (
                         transition.done,
                         transition.value,
                         transition.reward,
                         transition.int_reward,
                         transition.norm_time_step,
                         transition.norm_reward,
+                        transition.ext_reward_hist,
+                        transition.int_reward_hist,
                     )
-                    rc_input = jnp.concatenate(
-                        (norm_ext_reward[:, None], int_reward[:, None]),
+                    rc_input = jnp.stack(
+                        (ext_reward_hist, int_reward_hist),
                         axis=-1,
                     )
                     int_lambda = rc_network.apply(rc_params, rc_input)
@@ -442,7 +487,12 @@ def compile_fns(config=config):  # noqa: C901
                 byol_reward_norm_params,
                 ext_reward_norm_params,
             ) = _calculate_gae(
-                traj_batch, last_val.squeeze(0), byol_reward_norm_params, ext_reward_norm_params
+                traj_batch,
+                last_val.squeeze(0),
+                byol_reward_norm_params,
+                ext_reward_norm_params,
+                tot_ext_reward_hist,
+                tot_int_reward_hist,
             )
 
             # UPDATE NETWORK
@@ -626,6 +676,8 @@ def compile_fns(config=config):  # noqa: C901
                 traj_batch.next_obs,
                 traj_batch.bt.squeeze(1),
                 traj_batch.norm_time_step,
+                traj_batch.ext_reward_hist,
+                traj_batch.int_reward_hist,
                 traj_batch.info,
             )
 
@@ -672,6 +724,10 @@ def compile_fns(config=config):  # noqa: C901
                 byol_reward_norm_params,
                 ext_reward_norm_params,
                 update_target_counter,
+                ext_reward_hist,
+                int_reward_hist,
+                tot_ext_reward_hist,
+                tot_int_reward_hist,
                 rng,
             )
             return runner_state, (metric, loss_info, norm_int_reward, traj_batch.int_reward)
@@ -690,6 +746,10 @@ def compile_fns(config=config):  # noqa: C901
             byol_reward_norm_params,
             ext_reward_norm_params,
             update_target_counter,
+            ext_reward_hist,
+            int_reward_hist,
+            tot_ext_reward_hist,
+            tot_int_reward_hist,
             _rng,
         )
         runner_state, extra_info = jax.lax.scan(
@@ -720,9 +780,14 @@ def compile_fns(config=config):  # noqa: C901
         print(f"Training in {config['ENV_NAME']}")
         rng = jax.random.split(rng, config["NUM_SEEDS"])
         print(f"Training in {config['ENV_NAME']}")
-        make_train = jax.jit(jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0, 0)))
-        train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0))
-        train_fn = jax.vmap(train_fn, in_axes=(None, 0, None, None, None, None, None, None, None))
+        make_train = jax.jit(
+            jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+        )
+        train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+        train_fn = jax.vmap(
+            train_fn,
+            in_axes=(None, 0, None, None, None, None, None, None, None, None, None, None, None),
+        )
         train_fn = jax.pmap(train_fn, axis_name="devices")
         train_fns[env_name] = train_fn
         make_seeds[env_name] = make_train
