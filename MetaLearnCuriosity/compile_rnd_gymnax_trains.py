@@ -271,13 +271,13 @@ def compile_rnd_fns(config):  # noqa: C901
                 pred_feat = pred_state.apply_fn(pred_state.params, rnd_obs)
                 int_reward = jnp.square(jnp.linalg.norm((pred_feat - tar_feat), axis=1)) / 2
 
-                # ext_reward_hist = jnp.roll(ext_reward_hist, shift=-1, axis=1)
-                # int_reward_hist = jnp.roll(int_reward_hist, shift=-1, axis=1)
-                # ext_reward_hist = ext_reward_hist.at[:, -1].set(reward)
-                # int_reward_hist = int_reward_hist.at[:, -1].set(int_reward)
+                ext_reward_hist = jnp.roll(ext_reward_hist, shift=-1, axis=1)
+                int_reward_hist = jnp.roll(int_reward_hist, shift=-1, axis=1)
+                ext_reward_hist = ext_reward_hist.at[:, -1].set(reward)
+                int_reward_hist = int_reward_hist.at[:, -1].set(int_reward)
 
-                # tot_ext_reward_hist = tot_ext_reward_hist.at[step_index].set(ext_reward_hist)
-                # tot_int_reward_hist = tot_int_reward_hist.at[step_index].set(int_reward_hist)
+                tot_ext_reward_hist = tot_ext_reward_hist.at[step_index].set(ext_reward_hist)
+                tot_int_reward_hist = tot_int_reward_hist.at[step_index].set(int_reward_hist)
 
                 # Norm time step
                 norm_time_step = info["timestep"] / config["TRAINING_HORIZON"]
