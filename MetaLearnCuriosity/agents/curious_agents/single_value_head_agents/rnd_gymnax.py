@@ -21,6 +21,7 @@ from MetaLearnCuriosity.utils import (
     ObsNormParams,
     RNDNormIntReturnParams,
     RNDTransition,
+    compress_output_for_reasoning,
     make_obs_gymnax_discrete,
     process_output_general,
     rnd_normalise_int_rewards,
@@ -87,7 +88,7 @@ class PPOActorCritic(nn.Module):
 config = {
     "RUN_NAME": "minatar_rnd",
     "SEED": 42,
-    "NUM_SEEDS": 10,
+    "NUM_SEEDS": 30,
     "LR": 5e-3,
     "PRED_LR": 1e-3,
     "NUM_ENVS": 64,
@@ -153,13 +154,13 @@ def ppo_make_train(rng):
         )
         return config["LR"] * frac
 
-    def pred_linear_schedule(count):
-        frac = (
-            1.0
-            - (count // (config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"]))
-            / config["NUM_UPDATES"]
-        )
-        return config["PRED_LR"] * frac
+    # def pred_linear_schedule(count):
+    #     frac = (
+    #         1.0
+    #         - (count // (config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"]))
+    #         / config["NUM_UPDATES"]
+    #     )
+    #     return config["PRED_LR"] * frac
 
     # INIT NETWORKS
     network = PPOActorCritic(env.action_space(env_params).n, activation=config["ACTIVATION"])
@@ -194,7 +195,7 @@ def ppo_make_train(rng):
 
     pred_tx = optax.chain(
         optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
-        optax.adam(pred_linear_schedule, eps=1e-5),
+        optax.adam(config["PRED_LR"], eps=1e-5),
     )
 
     predictor_state = TrainState.create(apply_fn=predictor.apply, params=pred_params, tx=pred_tx)
@@ -516,7 +517,7 @@ def train(rng, train_state, pred_state, target_params, init_obs_rng):
     runner_state, extra_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
     metric, int_rewards, norm_int_rewards, rl_total_loss = extra_info
     return {
-        "train_state": runner_state[:3],
+        "train_states": runner_state[0],
         "metrics": metric,
         "int_reward": int_rewards,
         "norm_int_reward": norm_int_rewards,
@@ -528,7 +529,7 @@ def train(rng, train_state, pred_state, target_params, init_obs_rng):
     }
 
 
-optimal_lambdas = [0.02, 0.02, 0.02, 0.02]
+optimal_lambdas = [0.01, 0.01, 0.01, 0.01]
 for env_name, lambdas in zip(environments, optimal_lambdas):
     rng = jax.random.PRNGKey(config["SEED"])
     t = time.time()
@@ -576,10 +577,13 @@ for env_name, lambdas in zip(environments, optimal_lambdas):
     logger.log_rl_losses(output, config["NUM_SEEDS"])
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
-    output["config"] = config
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
     # Get the absolute path of the directory
+    output = compress_output_for_reasoning(output)
+
+    output["config"] = config
+
     path = os.path.abspath(checkpoint_directory)
     Save(path, output)
     logger.save_artifact(path)

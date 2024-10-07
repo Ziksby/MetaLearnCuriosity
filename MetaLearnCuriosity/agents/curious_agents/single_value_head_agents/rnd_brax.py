@@ -20,6 +20,7 @@ from MetaLearnCuriosity.utils import (
     ObsNormParams,
     RNDNormIntReturnParams,
     RNDTransition,
+    compress_output_for_reasoning,
     make_obs_gymnax_discrete,
     process_output_general,
     rnd_normalise_int_rewards,
@@ -51,7 +52,7 @@ environments = [
 config = {
     "RUN_NAME": "rnd_delayed_brax",
     "SEED": 42,
-    "NUM_SEEDS": 10,
+    "NUM_SEEDS": 30,
     "LR": 3e-4,
     "PRED_LR": 1e-3,
     "NUM_ENVS": 2048,
@@ -62,7 +63,7 @@ config = {
     "GAMMA": 0.99,
     "INT_GAMMA": 0.99,
     "GAE_LAMBDA": 0.95,
-    "INT_LAMBDA": 0.1,  # 0.00021,
+    "INT_LAMBDA": 0.005,  # 0.00021,
     "CLIP_EPS": 0.2,
     "ENT_COEF": 0.0,
     "VF_COEF": 0.5,
@@ -148,13 +149,13 @@ def make_train(rng):
         )
         return config["LR"] * frac
 
-    def pred_linear_schedule(count):
-        frac = (
-            1.0
-            - (count // (config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"]))
-            / config["NUM_UPDATES"]
-        )
-        return config["PRED_LR"] * frac
+    # def pred_linear_schedule(count):
+    #     frac = (
+    #         1.0
+    #         - (count // (config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"]))
+    #         / config["NUM_UPDATES"]
+    #     )
+    #     return config["PRED_LR"] * frac
 
     # INIT NETWORK
     network = ActorCritic(env.action_space(env_params).shape[0], activation=config["ACTIVATION"])
@@ -512,7 +513,7 @@ def train(rng, train_state, pred_state, target_params, init_obs_rng):
     runner_state, extra_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
     metric, int_rewards, norm_int_rewards, rl_total_loss = extra_info
     return {
-        "train_state": runner_state[:3],
+        "train_states": runner_state[0],
         "metrics": metric,
         "int_reward": int_rewards,
         "norm_int_reward": norm_int_rewards,
@@ -571,10 +572,13 @@ for env_name in environments:
     logger.log_rl_losses(output, config["NUM_SEEDS"])
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
-    output["config"] = config
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
     # Get the absolute path of the directory
+    # Get the absolute path of the directory
+    output = compress_output_for_reasoning(output)
+    output["config"] = config
+
     path = os.path.abspath(checkpoint_directory)
     Save(path, output)
     logger.save_artifact(path)

@@ -1,4 +1,5 @@
 import os
+import shutil
 import time
 from typing import Any, NamedTuple, Sequence
 
@@ -15,7 +16,10 @@ from flax.training.train_state import TrainState
 
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
-from MetaLearnCuriosity.utils import process_output_general
+from MetaLearnCuriosity.utils import (
+    compress_output_for_reasoning,
+    process_output_general,
+)
 from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper, VecEnv
 
 
@@ -87,7 +91,7 @@ class Transition(NamedTuple):
 config = {
     "RUN_NAME": "minatar_baseline_ppo",
     "SEED": 42,
-    "NUM_SEEDS": 10,
+    "NUM_SEEDS": 30,
     "LR": 5e-3,
     "NUM_ENVS": 64,
     "NUM_STEPS": 128,
@@ -323,7 +327,7 @@ def train(rng, train_state):
     runner_state, extra_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
     metric, rl_total_loss = extra_info
     return {
-        "runner_state": runner_state,
+        "train_states": runner_state[0],
         "metrics": metric,
         "rl_total_loss": rl_total_loss[0],
         "rl_value_loss": rl_total_loss[1][0],
@@ -364,11 +368,15 @@ for env_name in environments:
 
     logger.log_episode_return(output, config["NUM_SEEDS"])
     logger.log_rl_losses(output, config["NUM_SEEDS"])
-    output["config"] = config
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
     # Get the absolute path of the directory
+    output = compress_output_for_reasoning(output)
+    output["config"] = config
+
     path = os.path.abspath(checkpoint_directory)
     Save(path, output)
     logger.save_artifact(path)
+    shutil.rmtree(path)
+    print(f"Deleted local checkpoint directory: {path}")
     print(f"Done in {elapsed_time / 60:.2f}min")

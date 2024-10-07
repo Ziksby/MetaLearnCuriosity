@@ -5,7 +5,7 @@ from flax.training import orbax_utils
 def Save(path, ckpt):
     orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
     save_args = orbax_utils.save_args_from_target(ckpt)
-    orbax_checkpointer.save(path, ckpt, save_args=save_args)
+    orbax_checkpointer.save(path, ckpt, save_args=save_args, force=True)
 
 
 def Restore(path):

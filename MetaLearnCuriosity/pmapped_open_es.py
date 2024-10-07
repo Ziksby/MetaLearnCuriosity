@@ -24,10 +24,10 @@ class EvoState:
 class EvoParams:
     opt_params: OptParams
     sigma_init: float = 0.04
-    sigma_decay: float = 1.0
+    sigma_decay: float = 0.999
     sigma_limit: float = 0.01
-    init_min: float = -2.0
-    init_max: float = 2.0
+    init_min: float = 0.0
+    init_max: float = 0.0
     clip_min: float = -jnp.finfo(jnp.float32).max
     clip_max: float = jnp.finfo(jnp.float32).max
 
@@ -39,10 +39,10 @@ class OpenES(Strategy):
         num_dims: Optional[int] = None,
         pholder_params: Optional[Union[chex.ArrayTree, chex.Array]] = None,
         opt_name: str = "adam",
-        lrate_init: float = 0.01,
-        lrate_decay: float = 0.999,
+        lrate_init: float = 0.05,
+        lrate_decay: float = 1.0,
         lrate_limit: float = 0.001,
-        sigma_init: float = 0.04,
+        sigma_init: float = 0.03,
         sigma_decay: float = 1.0,
         sigma_limit: float = 0.01,
         mean_decay: float = 0.0,

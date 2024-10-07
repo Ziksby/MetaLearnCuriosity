@@ -32,6 +32,7 @@ from MetaLearnCuriosity.utils import BYOLRewardNorm
 from MetaLearnCuriosity.utils import BYOLTransition as Transition
 from MetaLearnCuriosity.utils import (
     byol_normalize_prior_int_rewards,
+    compress_output_for_reasoning,
     process_output_general,
     update_target_state_with_ema,
 )
@@ -78,7 +79,7 @@ class PPOActorCritic(nn.Module):
 config = {
     "RUN_NAME": "minatar_byol_ppo",
     "SEED": 42,
-    "NUM_SEEDS": 10,
+    "NUM_SEEDS": 30,
     "LR": 5e-3,
     "NUM_ENVS": 64,
     "NUM_STEPS": 128,
@@ -98,7 +99,7 @@ config = {
     "PRED_LR": 0.001,
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
-    "INT_LAMBDA": 0.001,
+    "INT_LAMBDA": 0.005,
 }
 
 environments = [
@@ -614,7 +615,7 @@ def train(
             update_target_counter,
             rng,
         )
-        return runner_state, (metric, loss_info, norm_int_reward, traj_batch.int_reward)
+        return runner_state, (metric, loss_info, traj_batch.int_reward, norm_int_reward)
 
     rng, _rng = jax.random.split(rng)
     runner_state = (
@@ -634,7 +635,7 @@ def train(
     runner_state, extra_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
     metric, rl_total_loss, int_reward, norm_int_reward = extra_info
     return {
-        "train_state": runner_state[0],
+        "train_states": runner_state[0],
         "metrics": metric,
         "rl_total_loss": rl_total_loss[0],
         "rl_value_loss": rl_total_loss[1][0],
@@ -722,10 +723,6 @@ for env_name in environments:
             )
         )
         elapsed_time = time.time() - t
-        epi_ret = output["metrics"]["returned_episode_returns"].mean(0).mean(-1).reshape(-1)
-        int_rew = output["int_reward"].mean(0).mean(-1).reshape(-1)
-        int_norm_rew = output["norm_int_reward"].mean(0).mean(-1).reshape(-1)
-        pred_loss = unreplicate(output["pred_loss"]).mean(-1).mean(-1)
 
     print((time.time() - t) / 60, "\n")
 
@@ -742,10 +739,12 @@ for env_name in environments:
     logger.log_rl_losses(output, config["NUM_SEEDS"])
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
-    output["config"] = config
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
     # Get the absolute path of the directory
+    output = compress_output_for_reasoning(output)
+    output["config"] = config
+
     path = os.path.abspath(checkpoint_directory)
     Save(path, output)
     logger.save_artifact(path)
