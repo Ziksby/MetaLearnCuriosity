@@ -30,6 +30,8 @@ class RCRNDTransition(NamedTuple):
     log_prob: jnp.ndarray
     obs: jnp.ndarray
     norm_time_step: jnp.ndarray
+    ext_reward_hist: jnp.ndarray
+    int_reward_hist: jnp.ndarray
     info: jnp.ndarray
 
 
@@ -800,7 +802,7 @@ def lifetime_return(life_rewards, lifetime_gamma, reverse=True):
     return single_return
 
 
-def rnd_normalise_int_rewards(traj_batch, rnd_int_return_norm_params, int_gamma):
+def rnd_normalise_int_rewards(traj_batch, rnd_int_return_norm_params, int_gamma, rew_hist):
     def _multiply_rewems_w_dones(rewems, dones_row):
         rewems = rewems * (1 - dones_row)
         return rewems, rewems
@@ -831,10 +833,11 @@ def rnd_normalise_int_rewards(traj_batch, rnd_int_return_norm_params, int_gamma)
         batch_count, batch_mean, batch_var, rewems, rnd_int_return_norm_params
     )
     norm_int_reward = int_reward / jnp.sqrt(rnd_int_return_norm_params.var + 1e-8)
-    return norm_int_reward, rnd_int_return_norm_params
+    rew_hist /= jnp.sqrt(rnd_int_return_norm_params.var + 1e-8)
+    return norm_int_reward, rnd_int_return_norm_params, rew_hist
 
 
-def rnd_normalise_ext_rewards(traj_batch, rnd_ext_return_norm_params, ext_gamma):
+def rnd_normalise_ext_rewards(traj_batch, rnd_ext_return_norm_params, ext_gamma, rew_hist):
     def _multiply_rewems_w_dones(rewems, dones_row):
         rewems = rewems * (1 - dones_row)
         return rewems, rewems
@@ -865,7 +868,8 @@ def rnd_normalise_ext_rewards(traj_batch, rnd_ext_return_norm_params, ext_gamma)
         batch_count, batch_mean, batch_var, rewems, rnd_ext_return_norm_params
     )
     norm_ext_reward = ext_reward / jnp.sqrt(rnd_ext_return_norm_params.var + 1e-8)
-    return norm_ext_reward, rnd_ext_return_norm_params
+    rew_hist /= jnp.sqrt(rnd_ext_return_norm_params.var + 1e-8)
+    return norm_ext_reward, rnd_ext_return_norm_params, rew_hist
 
 
 def process_output_general(output):

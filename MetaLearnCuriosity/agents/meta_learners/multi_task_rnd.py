@@ -16,7 +16,7 @@ from tqdm import tqdm
 import wandb
 from MetaLearnCuriosity.agents.nn import RewardCombiner
 from MetaLearnCuriosity.checkpoints import Save
-from MetaLearnCuriosity.compile_gymnax_trains import compile_fns
+from MetaLearnCuriosity.compile_rnd_gymnax_trains import compile_rnd_fns
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import (
     create_adjacent_pairs,
@@ -33,16 +33,19 @@ environments = [
 
 
 config = {
-    "RUN_NAME": "rc_test_really2_",
+    "RUN_NAME": "rc_rnd_multi_task_1_delete",
     "SEED": 42,
     "NUM_SEEDS": 2,
     "LR": 5e-3,
+    "PRED_LR": 1e-3,
     "NUM_ENVS": 64,
     "NUM_STEPS": 128,
     "TOTAL_TIMESTEPS": 1e7,
     "UPDATE_EPOCHS": 4,
     "NUM_MINIBATCHES": 8,
     "GAMMA": 0.99,
+    "INT_GAMMA": 0.99,
+    # "INT_LAMBDA": 0.1,
     "GAE_LAMBDA": 0.95,
     "CLIP_EPS": 0.2,
     "ENT_COEF": 0.01,
@@ -50,11 +53,7 @@ config = {
     "MAX_GRAD_NORM": 0.5,
     "ACTIVATION": "relu",
     "ANNEAL_LR": True,
-    "ANNEAL_PRED_LR": False,
     "DEBUG": False,
-    "PRED_LR": 0.001,
-    "REW_NORM_PARAMETER": 0.99,
-    "EMA_PARAMETER": 0.99,
     "POP_SIZE": 6,
     "ES_SEED": 7,
     "RC_SEED": 23,
@@ -86,7 +85,7 @@ name = f'{config["RUN_NAME"]}'
 es_rng, es_rng_init = jax.random.split(es_rng)
 es_params = strategy.default_params
 es_state = strategy.initialize(es_rng_init, es_params)
-train_fns, make_seeds = compile_fns(config=config)
+train_fns, make_seeds = compile_rnd_fns(config=config)
 rng = jax.random.PRNGKey(config["SEED"])
 fit_log = wandb.init(
     project="MetaLearnCuriosity",
@@ -121,11 +120,8 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
             rng_train,
             train_state,
             pred_state,
-            target_state,
-            init_bt,
-            close_init_hstate,
-            open_init_hstate,
-            init_action,
+            target_params,
+            init_rnd_obs,
             ext_reward_hist,
             int_reward_hist,
             tot_ext_reward_hist,
@@ -133,14 +129,12 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
         ) = make_seeds[env_name](rng_train)
 
         # duplicating here for pmap
-        open_init_hstate = replicate(open_init_hstate, jax.local_devices())
-        close_init_hstate = replicate(close_init_hstate, jax.local_devices())
         train_state = replicate(train_state, jax.local_devices())
         pred_state = replicate(pred_state, jax.local_devices())
-        target_state = replicate(target_state, jax.local_devices())
-        init_bt = replicate(init_bt, jax.local_devices())
-        init_action = replicate(init_action, jax.local_devices())
+        target_params = replicate(target_params, jax.local_devices())
         pair = replicate(pair, jax.local_devices())
+        init_rnd_obs = replicate(init_rnd_obs, jax.local_devices())
+
         ext_reward_hist = replicate(ext_reward_hist, jax.local_devices())
         int_reward_hist = replicate(int_reward_hist, jax.local_devices())
         tot_ext_reward_hist = replicate(tot_ext_reward_hist, jax.local_devices())
@@ -153,11 +147,8 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
                 pair,
                 train_state,
                 pred_state,
-                target_state,
-                init_bt,
-                close_init_hstate,
-                open_init_hstate,
-                init_action,
+                target_params,
+                init_rnd_obs,
                 ext_reward_hist,
                 int_reward_hist,
                 tot_ext_reward_hist,
