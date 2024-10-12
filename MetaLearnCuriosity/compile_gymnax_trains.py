@@ -15,6 +15,7 @@ from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 
 from MetaLearnCuriosity.agents.nn import (
+    RCRNN,
     AtariBYOLPredictor,
     BYOLTarget,
     CloseScannedRNN,
@@ -162,6 +163,7 @@ def compile_fns(config=config):  # noqa: C901
         close_init_hstate = CloseScannedRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 128)
         open_init_hstate = OpenScannedRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 128)
         init_bt = jnp.zeros((1, config["NUM_ENVS_PER_DEVICE"], 128))
+        rc_hstate = RCRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 32)
         init_pred_input = (init_bt, init_x, init_action[np.newaxis, :])
         total_ext_reward_history = jnp.zeros(
             (config["NUM_STEPS"], config["NUM_ENVS_PER_DEVICE"], 128)
@@ -230,6 +232,7 @@ def compile_fns(config=config):  # noqa: C901
             int_reward_history,
             total_ext_reward_history,
             total_int_reward_history,
+            rc_hstate,
         )
 
     def train(
@@ -246,6 +249,7 @@ def compile_fns(config=config):  # noqa: C901
         int_reward_hist,
         tot_ext_reward_hist,
         tot_int_reward_hist,
+        rc_hstate,
     ):
         # REWARD COMBINER
         rc_network = RewardCombiner()
@@ -280,6 +284,7 @@ def compile_fns(config=config):  # noqa: C901
                     int_reward_hist,
                     tot_ext_reward_hist,
                     tot_int_reward_hist,
+                    rc_hstate,
                     rng,
                 ) = runner_state
 
@@ -360,6 +365,7 @@ def compile_fns(config=config):  # noqa: C901
                     int_reward_hist,
                     tot_ext_reward_hist,
                     tot_int_reward_hist,
+                    rc_hstate,
                     rng,
                 )
                 return runner_state, transition
@@ -389,6 +395,7 @@ def compile_fns(config=config):  # noqa: C901
                 int_reward_hist,
                 tot_ext_reward_hist,
                 tot_int_reward_hist,
+                rc_hstate,
                 rng,
             ) = runner_state
 
@@ -402,6 +409,7 @@ def compile_fns(config=config):  # noqa: C901
                 ext_reward_norm_params,
                 ext_reward_hist,
                 int_reward_hist,
+                rc_hstate,
             ):
                 (
                     norm_int_reward,
@@ -443,7 +451,7 @@ def compile_fns(config=config):  # noqa: C901
                 )
 
                 def _get_advantages(gae_and_next_value, transition):
-                    gae, next_value = gae_and_next_value
+                    gae, next_value, rc_hstate = gae_and_next_value
                     done, value, reward, int_reward, _, _, ext_reward_hist, int_reward_hist = (
                         transition.done,
                         transition.value,
@@ -458,18 +466,19 @@ def compile_fns(config=config):  # noqa: C901
                         (ext_reward_hist, int_reward_hist),
                         axis=-1,
                     )
-                    int_lambda = rc_network.apply(rc_params, rc_input)
+                    rc_input = jnp.transpose(rc_input, (1, 0, 2))
+                    rc_hstate, int_lambda = rc_network.apply(rc_params, rc_hstate, rc_input)
                     delta = (
                         (reward + (int_reward * int_lambda))
                         + config["GAMMA"] * next_value * (1 - done)
                         - value
                     )
                     gae = delta + config["GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
-                    return (gae, value), gae
+                    return (gae, value, rc_hstate), gae
 
-                _, advantages = jax.lax.scan(
+                (_, _, rc_hstate), advantages = jax.lax.scan(
                     _get_advantages,
-                    (jnp.zeros_like(last_val), last_val),
+                    (jnp.zeros_like(last_val), last_val, rc_hstate),
                     norm_traj_batch,
                     reverse=True,
                     unroll=16,
@@ -480,6 +489,7 @@ def compile_fns(config=config):  # noqa: C901
                     norm_int_reward,
                     byol_reward_norm_params,
                     ext_reward_norm_params,
+                    rc_hstate,
                 )
 
             (
@@ -488,6 +498,7 @@ def compile_fns(config=config):  # noqa: C901
                 norm_int_reward,
                 byol_reward_norm_params,
                 ext_reward_norm_params,
+                rc_hstate,
             ) = _calculate_gae(
                 traj_batch,
                 last_val.squeeze(0),
@@ -495,6 +506,7 @@ def compile_fns(config=config):  # noqa: C901
                 ext_reward_norm_params,
                 tot_ext_reward_hist,
                 tot_int_reward_hist,
+                rc_hstate,
             )
 
             # UPDATE NETWORK
@@ -730,6 +742,7 @@ def compile_fns(config=config):  # noqa: C901
                 int_reward_hist,
                 tot_ext_reward_hist,
                 tot_int_reward_hist,
+                rc_hstate,
                 rng,
             )
             return runner_state, (metric, loss_info, norm_int_reward, traj_batch.int_reward)
@@ -752,6 +765,7 @@ def compile_fns(config=config):  # noqa: C901
             int_reward_hist,
             tot_ext_reward_hist,
             tot_int_reward_hist,
+            rc_hstate,
             _rng,
         )
         runner_state, extra_info = jax.lax.scan(
@@ -783,12 +797,27 @@ def compile_fns(config=config):  # noqa: C901
         rng = jax.random.split(rng, config["NUM_SEEDS"])
         print(f"Training in {config['ENV_NAME']}")
         make_train = jax.jit(
-            jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+            jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
         )
-        train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+        train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
         train_fn = jax.vmap(
             train_fn,
-            in_axes=(None, 0, None, None, None, None, None, None, None, None, None, None, None),
+            in_axes=(
+                None,
+                0,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
         )
         train_fn = jax.pmap(train_fn, axis_name="devices")
         train_fns[env_name] = train_fn

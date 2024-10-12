@@ -14,7 +14,7 @@ from flax.jax_utils import replicate
 from tqdm import tqdm
 
 import wandb
-from MetaLearnCuriosity.agents.nn import RewardCombiner
+from MetaLearnCuriosity.agents.nn import RCRNN, RewardCombiner
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.compile_gymnax_trains import compile_fns
 from MetaLearnCuriosity.logger import WBLogger
@@ -33,9 +33,9 @@ environments = [
 
 
 config = {
-    "RUN_NAME": "rc_test_really2_",
+    "RUN_NAME": "rc_rnn_rnd_multi_task_trail_1",
     "SEED": 42,
-    "NUM_SEEDS": 2,
+    "NUM_SEEDS": 1,
     "LR": 5e-3,
     "NUM_ENVS": 64,
     "NUM_STEPS": 128,
@@ -55,10 +55,10 @@ config = {
     "PRED_LR": 0.001,
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
-    "POP_SIZE": 6,
+    "POP_SIZE": 32,
     "ES_SEED": 7,
     "RC_SEED": 23,
-    "NUM_GENERATIONS": 2,
+    "NUM_GENERATIONS": 32,
     # "INT_LAMBDA": 0.001,
     "TRAIN_ENVS": environments,
 }
@@ -67,7 +67,7 @@ config = {
 reward_combiner_network = RewardCombiner()
 
 rc_params_pholder = reward_combiner_network.init(
-    jax.random.PRNGKey(config["RC_SEED"]), jnp.zeros((1, 128, 2))
+    jax.random.PRNGKey(config["RC_SEED"]), RCRNN.initialize_carry(16, 32), jnp.zeros((128, 16, 2))
 )
 es_rng = jax.random.PRNGKey(config["ES_SEED"])
 strategy = OpenES(
@@ -130,6 +130,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
             int_reward_hist,
             tot_ext_reward_hist,
             tot_int_reward_hist,
+            rc_hstate,
         ) = make_seeds[env_name](rng_train)
 
         # duplicating here for pmap
@@ -145,6 +146,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
         int_reward_hist = replicate(int_reward_hist, jax.local_devices())
         tot_ext_reward_hist = replicate(tot_ext_reward_hist, jax.local_devices())
         tot_int_reward_hist = replicate(tot_int_reward_hist, jax.local_devices())
+        rc_hstate = replicate(rc_hstate, jax.local_devices())
         t = time.time()
 
         output = jax.block_until_ready(
@@ -162,6 +164,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
                 int_reward_hist,
                 tot_ext_reward_hist,
                 tot_int_reward_hist,
+                rc_hstate,
             )
         )
         output = process_output_general(output)

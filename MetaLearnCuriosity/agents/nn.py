@@ -223,44 +223,60 @@ class MiniGridActorCriticRNN(nn.Module):
 # class RewardCombiner(nn.Module):
 #     @nn.compact
 #     def __call__(self, x):
-#         # Input shape: (num_envs, 128, 2)
-#         x = nn.Conv(features=16, kernel_size=(3,), padding='valid')(x)
-#         x = nn.relu(x)
-#         x = nn.max_pool(x, window_shape=(2,), strides=(2,), padding='valid')
 
-#         x = nn.Conv(features=32, kernel_size=(3,), padding='valid')(x)
+#         # Input shape: (num_envs, history_length, 2)
+
+#         x = nn.Conv(features=16, kernel_size=(3,), padding="valid")(x)
 #         x = nn.relu(x)
-#         x = nn.max_pool(x, window_shape=(2,), strides=(2,), padding='valid')
+#         # x = nn.max_pool(x, window_shape=(2,), strides=(2,), padding='valid')
+
+#         x = nn.Conv(features=32, kernel_size=(3,), padding="valid")(x)
+#         x = nn.relu(x)
+#         # x = nn.max_pool(x, window_shape=(2,), strides=(2,), padding='valid')
 
 #         x = x.reshape((x.shape[0], -1))  # Flatten
 
-#         x = nn.Dense(features=64)(x)
+#         x = nn.Dense(features=128)(x)
 #         x = nn.relu(x)
 
 #         x = nn.Dense(features=1)(x)
-#         return jnp.squeeze(nn.sigmoid(x),-1)
+#         return jnp.squeeze(nn.sigmoid(x), -1)
+
+
+# class RewardCombiner(nn.Module):
+#     @nn.compact
+#     def __call__(self, x):
+#         # Input shape: (num_envs, 128, 2)
+#         x = nn.Conv(features=16, kernel_size=(3,), padding="valid")(x)
+#         x = nn.relu(x)
+
+#         x = nn.Conv(features=32, kernel_size=(3,), padding="valid")(x)
+#         x = nn.relu(x)
+
+#         # Flatten the output
+#         x = x.reshape((x.shape[0], -1))  # Flatten all dimensions except batch
+
+#         # Fully connected layer
+#         x = nn.Dense(features=128)(x)
+#         x = nn.relu(x)
+
+#         # Output layer with sigmoid activation
+#         x = nn.Dense(features=1)(x)
+#         return jnp.squeeze(nn.sigmoid(x), -1)
 
 
 class RewardCombiner(nn.Module):
     @nn.compact
-    def __call__(self, x):
-        # Input shape: (num_envs, 128, 2)
-        x = nn.Conv(features=16, kernel_size=(3,), padding="valid")(x)
+    def __call__(self, carry, x):
+
+        carry, x = RCRNN()(carry, x)
+
+        x = x[-1]  # take the last lambda value
+
+        x = nn.Dense(16)(x)
         x = nn.relu(x)
-
-        x = nn.Conv(features=32, kernel_size=(3,), padding="valid")(x)
-        x = nn.relu(x)
-
-        # Flatten the output
-        x = x.reshape((x.shape[0], -1))  # Flatten all dimensions except batch
-
-        # Fully connected layer
-        x = nn.Dense(features=128)(x)
-        x = nn.relu(x)
-
-        # Output layer with sigmoid activation
-        x = nn.Dense(features=1)(x)
-        return jnp.squeeze(nn.sigmoid(x), -1)
+        x = nn.Dense(1)(x)
+        return carry, jnp.squeeze(nn.sigmoid(x), -1)
 
 
 class TargetNetwork(nn.Module):
@@ -331,6 +347,32 @@ class BYOLTarget(nn.Module):
         )(encoded_obs)
         # encoded_obs = nn.relu(encoded_obs)
         return encoded_obs
+
+
+class RCRNN(nn.Module):
+    features: int = 32  # Number of hidden units
+
+    @functools.partial(
+        nn.scan,
+        variable_broadcast="params",
+        in_axes=0,
+        out_axes=0,
+        split_rngs={"params": False},
+    )
+    @nn.compact
+    def __call__(self, carry, x):
+        rnn_state = carry
+        new_rnn_state, y = nn.GRUCell(
+            self.features,
+        )(rnn_state, x)
+        return new_rnn_state, y
+
+    @staticmethod
+    def initialize_carry(batch_size, hidden_size):
+        # Use a dummy key since the default state init fn is just zeros.
+        return nn.GRUCell(hidden_size, parent=None).initialize_carry(
+            jax.random.PRNGKey(0), (batch_size, hidden_size)
+        )
 
 
 class CloseScannedRNN(nn.Module):

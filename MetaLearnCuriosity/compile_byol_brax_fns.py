@@ -338,6 +338,7 @@ def compile_brax_byol_fns(config):  # noqa: C901
                     1 - done
                 )
                 value, action, log_prob = (value.squeeze(0), action.squeeze(0), log_prob.squeeze(0))
+                norm_time_step = info["timestep"] / config["TRAINING_HORIZON"]
 
                 ext_reward_hist = jnp.roll(ext_reward_hist, shift=-1, axis=1)
                 int_reward_hist = jnp.roll(int_reward_hist, shift=-1, axis=1)
@@ -353,11 +354,13 @@ def compile_brax_byol_fns(config):  # noqa: C901
                     action,
                     value,
                     reward,
+                    reward,
                     int_reward,
                     log_prob,
                     last_obs,
                     obsv,
                     bt,
+                    norm_time_step,
                     tot_ext_reward_hist,
                     tot_int_reward_hist,
                     info,
@@ -785,7 +788,7 @@ def compile_brax_byol_fns(config):  # noqa: C901
     make_seeds = {}
     for env_name in environments:
         config, env, env_params = make_config_env(config, env_name)
-        make_train = jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0, 0))
+        make_train = jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
         train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
         train_fn = jax.vmap(
             train_fn,
