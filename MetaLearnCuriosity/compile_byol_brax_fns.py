@@ -42,14 +42,14 @@ from MetaLearnCuriosity.wrappers import (
 
 environments = [
     "ant",
-    "halfcheetah",
-    "hopper",
-    "humanoid",
-    "humanoidstandup",
-    "inverted_pendulum",
-    "inverted_double_pendulum",
-    "pusher",
-    "reacher",
+    # "halfcheetah",
+    # "hopper",
+    # "humanoid",
+    # "humanoidstandup",
+    # "inverted_pendulum",
+    # "inverted_double_pendulum",
+    # "pusher",
+    # "reacher",
     "walker2d",
 ]
 
@@ -81,6 +81,8 @@ config = {
     "EMA_PARAMETER": 0.99,
     "INT_LAMBDA": 0.02,
 }
+
+step_intervals = jnp.array([5, 10, 20, 30])
 
 
 class PPOActorCritic(nn.Module):
@@ -786,7 +788,9 @@ def compile_brax_byol_fns(config):  # noqa: C901
 
     train_fns = {}
     make_seeds = {}
-    for env_name in environments:
+    env_name = "ant"
+    for step_interval in step_intervals:
+        config["STEP_INTERVAL"] = step_interval
         config, env, env_params = make_config_env(config, env_name)
         make_train = jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
         train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
@@ -795,7 +799,7 @@ def compile_brax_byol_fns(config):  # noqa: C901
             in_axes=(None, 0, None, None, None, None, None, None, None, None, None, None, None),
         )
         train_fn = jax.pmap(train_fn, axis_name="devices")
-        train_fns[env_name] = train_fn
-        make_seeds[env_name] = make_train
+        train_fns[step_interval] = train_fn
+        make_seeds[step_interval] = make_train
 
     return train_fns, make_seeds

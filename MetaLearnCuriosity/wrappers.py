@@ -357,18 +357,48 @@ class DelayedReward(GymnaxWrapper):
     def step(self, key, state, action, params=None):
         obs, env_state, reward, done, info = self._env.step(key, state.env_state, action, params)
         new_delayed_reward = state.delayed_reward + reward
-        sparse_reward = 0.0
         steps = env_state.env_state.info["steps"]
         interval = steps % self.step_interval == 0
-        reset_delayed_rewards = steps == 1
 
-        delayed_reward = jax.lax.cond(
-            reset_delayed_rewards, lambda: 0.0, lambda: new_delayed_reward
+        returned_reward = jax.lax.cond(interval, lambda: new_delayed_reward, lambda: 0.0)
+        next_delayed_reward = jax.lax.cond(interval, lambda: 0.0, lambda: new_delayed_reward)
+
+        state = DelayedRewardEnvState(delayed_reward=next_delayed_reward, env_state=env_state)
+
+        return obs, state, returned_reward, done, info
+
+
+@struct.dataclass
+class ProbabilisticRewardEnvState:
+    env_state: environment.EnvState
+
+
+class ProbabilisticReward(GymnaxWrapper):
+    def __init__(self, env, zero_prob):
+        super().__init__(env)
+        self.zero_prob = zero_prob
+
+    def reset(self, key, params=None):
+        key, reset_key = jax.random.split(key)
+        obs, state = self._env.reset(reset_key, params)
+        state = ProbabilisticRewardEnvState(env_state=state)
+        return obs, state
+
+    def step(self, key, state, action, params=None):
+        # Split the key for the environment step and for our random reward zeroing
+        key, step_key, random_key = jax.random.split(key, 3)
+
+        obs, env_state, reward, done, info = self._env.step(
+            step_key, state.env_state, action, params
         )
-        returned_reward = jax.lax.cond(interval, lambda: delayed_reward, lambda: sparse_reward)
 
-        state = DelayedRewardEnvState(delayed_reward=delayed_reward, env_state=env_state)
+        # Use the random_key for generating the random number
+        random_num = jax.random.uniform(random_key)
 
+        # Use jax.lax.cond to conditionally zero out the reward
+        returned_reward = jax.lax.cond(random_num < self.zero_prob, lambda: 0.0, lambda: reward)
+
+        state = ProbabilisticRewardEnvState(env_state=env_state)
         return obs, state, returned_reward, done, info
 
 

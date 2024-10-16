@@ -269,11 +269,11 @@ class RewardCombiner(nn.Module):
     @nn.compact
     def __call__(self, carry, x):
 
-        carry, x = RCRNN()(carry, x)
+        # Input is (1, num_envs, 2)
 
-        x = x[-1]  # take the last lambda value
+        carry, x = RCRNN()(carry, x)  # features is 16
 
-        x = nn.Dense(16)(x)
+        x = nn.Dense(64)(x)
         x = nn.relu(x)
         x = nn.Dense(1)(x)
         return carry, jnp.squeeze(nn.sigmoid(x), -1)
