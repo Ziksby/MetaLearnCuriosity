@@ -16,7 +16,9 @@ from tqdm import tqdm
 import wandb
 from MetaLearnCuriosity.agents.nn import RCRNN, RewardCombiner
 from MetaLearnCuriosity.checkpoints import Save
-from MetaLearnCuriosity.compile_gymnax_trains import compile_fns
+from MetaLearnCuriosity.compile_byol_brax_fns import (
+    compile_brax_byol_fns as compile_fns,
+)
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import (
     create_adjacent_pairs,
@@ -26,21 +28,21 @@ from MetaLearnCuriosity.utils import (
 
 environments = [
     "ant",
-    "halfcheetah",
-    "hopper",
-    "humanoid",
-    "humanoidstandup",
-    "inverted_pendulum",
-    "inverted_double_pendulum",
-    "pusher",
-    "reacher",
-    "walker2d",
+    # "halfcheetah",
+    # "hopper",
+    # "humanoid",
+    # "humanoidstandup",
+    # "inverted_pendulum",
+    # "inverted_double_pendulum",
+    # "pusher",
+    # "reacher",
+    # "walker2d",
 ]
 
 config = {
     "RUN_NAME": "rc_delayed_brax_byol",
     "SEED": 42,
-    "NUM_SEEDS": 30,
+    "NUM_SEEDS": 1,
     "LR": 3e-4,
     "NUM_ENVS": 2048,
     "NUM_STEPS": 10,  # unroll length
@@ -63,14 +65,19 @@ config = {
     "PRED_LR": 0.001,
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
-    "INT_LAMBDA": 0.02,
+    # "INT_LAMBDA": 0.02,
+    "HIST_LEN": 1,
+    "POP_SIZE": 36,
+    "RC_SEED": 23,
+    "ES_SEED": 42**2,
+    "NUM_GENERATIONS": 24,
 }
-step_intervals = jnp.array([1, 10, 20, 30, 40])
+step_intervals = [5, 10, 20, 30]
 
 reward_combiner_network = RewardCombiner()
 
 rc_params_pholder = reward_combiner_network.init(
-    jax.random.PRNGKey(config["RC_SEED"]), RCRNN.initialize_carry(16, 32), jnp.zeros((128, 16, 2))
+    jax.random.PRNGKey(config["RC_SEED"]), RCRNN.initialize_carry(16, 32), jnp.zeros((1, 16, 2))
 )
 es_rng = jax.random.PRNGKey(config["ES_SEED"])
 strategy = OpenES(
@@ -98,7 +105,7 @@ fit_log = wandb.init(
     tags=tags,
     name=f"{name}_fitness",
 )
-env_name = "walker_2d"
+env_name = "ant"
 for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations"):
     begin_gen = time.time()
     es_rng, es_rng_ask = jax.random.split(es_rng)
@@ -172,7 +179,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
         )
         output = process_output_general(output)
         raw_episode_return = output["rewards"].mean(-1)  # This is the raw fitness
-        raw_fitness_dict[env_name].append(raw_episode_return)  # Store raw fitness
+        raw_fitness_dict[step_int].append(raw_episode_return)  # Store raw fitness
         binary_fitness = jnp.where(raw_episode_return == jnp.max(raw_episode_return), 1.0, 0.0)
         fitness.append(binary_fitness)
         print(f"Time for the Pair in {env_name} is {(time.time()-t)/60}")
@@ -186,7 +193,6 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
     details = (es_state, config)
     Save(path, details)
     print("Generation ", gen, "Time:", (time.time() - begin_gen) / 60)
-    print(raw_fitness_dict)
     # logging now to W&Bs
     for step_int in step_intervals:
         fit_log.log(
