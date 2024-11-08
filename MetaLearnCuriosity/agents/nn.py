@@ -243,41 +243,41 @@ class MiniGridActorCriticRNN(nn.Module):
 #         return jnp.squeeze(nn.sigmoid(x), -1)
 
 
-# class RewardCombiner(nn.Module):
-#     @nn.compact
-#     def __call__(self, x):
-#         # Input shape: (num_envs, 128, 2)
-#         x = nn.Conv(features=16, kernel_size=(3,), padding="valid")(x)
-#         x = nn.relu(x)
-
-#         x = nn.Conv(features=32, kernel_size=(3,), padding="valid")(x)
-#         x = nn.relu(x)
-
-#         # Flatten the output
-#         x = x.reshape((x.shape[0], -1))  # Flatten all dimensions except batch
-
-#         # Fully connected layer
-#         x = nn.Dense(features=128)(x)
-#         x = nn.relu(x)
-
-#         # Output layer with sigmoid activation
-#         x = nn.Dense(features=1)(x)
-#         return jnp.squeeze(nn.sigmoid(x), -1)
-
-
 class RewardCombiner(nn.Module):
     @nn.compact
-    def __call__(self, carry, x):
-
-        # Input is (1, num_envs, 2)
-
-        carry, x = RCRNN()(carry, x)  # features is 32
-
-        x = jnp.squeeze(x, 0)
-        x = nn.Dense(64)(x)
+    def __call__(self, x):
+        # Input shape: (num_envs, 128, 2)
+        x = nn.Conv(features=16, kernel_size=(3,), padding="valid")(x)
         x = nn.relu(x)
-        x = nn.Dense(1)(x)
-        return carry, jnp.squeeze(nn.sigmoid(x), -1)
+
+        x = nn.Conv(features=32, kernel_size=(3,), padding="valid")(x)
+        x = nn.relu(x)
+
+        # Flatten the output
+        x = x.reshape((x.shape[0], -1))  # Flatten all dimensions except batch
+
+        # Fully connected layer
+        x = nn.Dense(features=128)(x)
+        x = nn.relu(x)
+
+        # Output layer with sigmoid activation
+        x = nn.Dense(features=1)(x)
+        return jnp.squeeze(nn.sigmoid(x), -1)
+
+
+# class RewardCombiner(nn.Module):
+#     @nn.compact
+#     def __call__(self, carry, x):
+
+#         # Input is (1, num_envs, 2)
+
+#         carry, x = RCRNN()(carry, x)  # features is 32
+
+#         x = jnp.squeeze(x, 0)
+#         x = nn.Dense(64)(x)
+#         x = nn.relu(x)
+#         x = nn.Dense(1)(x)
+#         return carry, jnp.squeeze(nn.sigmoid(x), -1)
 
 
 class TargetNetwork(nn.Module):
@@ -435,7 +435,7 @@ class AtariBYOLPredictor(nn.Module):
     def __call__(self, close_hidden, open_hidden, x):
         action_encoder = nn.Embed(self.num_actions, self.action_emb_dim)
 
-        bt, obs, action = x
+        bt, obs, prev_action, action = x
 
         # Encoder
         en_obs = nn.Dense(
@@ -468,9 +468,10 @@ class AtariBYOLPredictor(nn.Module):
 
         # Embed the action
         act_emb = action_encoder(action)
+        prev_act_emb = action_encoder(prev_action)
 
         # RNN stuff
-        close_loop_input = jnp.concatenate((bt, en_obs, act_emb), axis=-1)
+        close_loop_input = jnp.concatenate((bt, en_obs, prev_act_emb), axis=-1)
         new_close_hidden, new_bt = CloseScannedRNN()(close_hidden, close_loop_input)
         open_loop_input = jnp.concatenate((new_bt, act_emb), axis=-1)
         new_open_hidden, bt_1 = OpenScannedRNN()(open_hidden, open_loop_input)
@@ -498,7 +499,7 @@ class BraxBYOLPredictor(nn.Module):
 
     @nn.compact
     def __call__(self, close_hidden, open_hidden, x):
-        bt, obs, action = x
+        bt, obs, prev_action, action = x
 
         # Encoder
         en_obs = nn.Dense(
@@ -516,7 +517,7 @@ class BraxBYOLPredictor(nn.Module):
         )(en_obs)
 
         # RNN stuff
-        close_loop_input = jnp.concatenate((bt, en_obs, action), axis=-1)
+        close_loop_input = jnp.concatenate((bt, en_obs, prev_action), axis=-1)
         new_close_hidden, new_bt = CloseScannedRNN()(close_hidden, close_loop_input)
         open_loop_input = jnp.concatenate((new_bt, action), axis=-1)
         new_open_hidden, bt_1 = OpenScannedRNN()(open_hidden, open_loop_input)

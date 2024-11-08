@@ -472,7 +472,12 @@ def byol_minigrid_ppo_update_networks(
 
     def pred_loss(pred_params, target_params):
         tar_obs = target_state.apply_fn(target_params, transitions.next_obs)
-        pred_input = (transitions.prev_bt.squeeze(2), transitions.obs, transitions.prev_action)
+        pred_input = (
+            transitions.prev_bt.squeeze(2),
+            transitions.obs,
+            transitions.prev_action,
+            transitions.action,
+        )
         pred_obs, _, _, _ = pred_state.apply_fn(
             pred_params, init_close_hstate, init_open_hstate, pred_input
         )

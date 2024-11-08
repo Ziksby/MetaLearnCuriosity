@@ -10,10 +10,10 @@ import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
 import optax
-import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.training.train_state import TrainState
 
+import wandb
 from MetaLearnCuriosity.agents.nn import (
     BYOLTarget,
     MiniGridActorCriticRNN,
@@ -278,7 +278,7 @@ def train(
 
             # INT REWARD
             tar_obs = target_state.apply_fn(target_state.params, obsv[:, None])
-            pred_input = (prev_bt, prev_obs[:, None], prev_action[:, None])
+            pred_input = (prev_bt, prev_obs[:, None], prev_action[:, None], action[:, None])
             pred_obs, new_bt, new_close_hstate, new_open_hstate = pred_state.apply_fn(
                 pred_state.params, close_prev_hstate, open_prev_hstate, pred_input
             )

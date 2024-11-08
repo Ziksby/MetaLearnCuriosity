@@ -15,12 +15,12 @@ import jax.numpy as jnp
 import jax.tree_util
 import numpy as np
 import optax
-import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 from tqdm import tqdm
 
+import wandb
 from MetaLearnCuriosity.agents.nn import (
     AtariBYOLPredictor,
     BYOLTarget,
@@ -285,7 +285,7 @@ def train(
 
             # INT REWARD
             tar_obs = target_state.apply_fn(target_state.params, obsv[np.newaxis, :])
-            pred_input = (bt, last_obs[np.newaxis, :], last_act[np.newaxis, :])
+            pred_input = (bt, last_obs[np.newaxis, :], last_act[np.newaxis, :], action)
             pred_obs, new_bt, new_close_hstate, new_open_hstate = pred_state.apply_fn(
                 pred_state.params, close_hstate, open_hstate, pred_input
             )
@@ -440,7 +440,12 @@ def train(
                     pred_params, target_params, traj_batch, init_close_hstate, init_open_hstate
                 ):
                     tar_obs = target_state.apply_fn(target_params, traj_batch.next_obs)
-                    pred_input = (traj_batch.bt, traj_batch.obs, traj_batch.prev_action)
+                    pred_input = (
+                        traj_batch.bt,
+                        traj_batch.obs,
+                        traj_batch.prev_action,
+                        traj_batch.action,
+                    )
                     pred_obs, _, _, _ = pred_state.apply_fn(
                         pred_params, init_close_hstate[0], init_open_hstate[0], pred_input
                     )
