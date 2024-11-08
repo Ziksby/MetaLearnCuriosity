@@ -443,7 +443,7 @@ def compile_brax_byol_fns(config):  # noqa: C901
                 )
 
                 def _get_advantages(gae_and_next_value, transition):
-                    gae, next_value, rc_hstate = gae_and_next_value
+                    gae, next_value = gae_and_next_value
                     done, value, reward, int_reward, _, _, ext_reward_hist, int_reward_hist = (
                         transition.done,
                         transition.value,
