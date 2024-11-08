@@ -78,7 +78,7 @@ class MiniGridBYOLPredictor(nn.Module):
     def __call__(self, close_hidden, open_hidden, x):
         action_encoder = nn.Embed(self.num_actions, self.action_emb_dim)
 
-        bt, obs, action = x
+        bt, obs, prev_action, action = x
 
         # Encoder
         en_obs = nn.Dense(
@@ -111,12 +111,13 @@ class MiniGridBYOLPredictor(nn.Module):
 
         # Embed the action
         act_emb = action_encoder(action)
+        prev_act_emb = action_encoder(prev_action)
 
         # RNN stuff
         close_rnn_core = MiniGridBatchedRNNModel(self.encoder_layer_out_shape, 1)
         open_rnn_core = MiniGridBatchedRNNModel(self.encoder_layer_out_shape, 1)
 
-        close_loop_input = jnp.concatenate((bt, en_obs, act_emb), axis=-1)
+        close_loop_input = jnp.concatenate((bt, en_obs, prev_act_emb), axis=-1)
         new_bt, new_close_hidden = close_rnn_core(close_loop_input, close_hidden)
         open_loop_input = jnp.concatenate((new_bt, act_emb), axis=-1)
         bt_1, new_open_hidden = open_rnn_core(open_loop_input, open_hidden)
