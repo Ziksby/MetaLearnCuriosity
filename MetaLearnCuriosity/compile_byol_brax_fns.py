@@ -51,7 +51,7 @@ environments = [
     # "inverted_double_pendulum",
     # "pusher",
     # "reacher",
-    "walker2d",
+    # "walker2d",
 ]
 
 config = {
@@ -74,13 +74,11 @@ config = {
     "ANNEAL_LR": False,
     "NORMALIZE_ENV": True,
     "DELAY_REWARDS": True,
-    "STEP_INTERVAL": 10,
     "ANNEAL_PRED_LR": False,
     "DEBUG": False,
     "PRED_LR": 0.001,
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
-    "INT_LAMBDA": 0.02,
 }
 
 step_intervals = [5, 10, 20, 30]
@@ -188,14 +186,6 @@ def compile_brax_byol_fns(config):  # noqa: C901
         close_init_hstate = CloseScannedRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 256)
         open_init_hstate = OpenScannedRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 256)
         init_bt = jnp.zeros((1, config["NUM_ENVS_PER_DEVICE"], 256))
-        rc_hstate = RCRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 32)
-
-        total_ext_reward_history = jnp.zeros(
-            (config["NUM_STEPS"], config["NUM_ENVS_PER_DEVICE"], config["HIST_LEN"])
-        )
-        total_int_reward_history = jnp.zeros(
-            (config["NUM_STEPS"], config["NUM_ENVS_PER_DEVICE"], config["HIST_LEN"])
-        )
         ext_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], config["HIST_LEN"]))
         int_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], config["HIST_LEN"]))
 
@@ -257,9 +247,6 @@ def compile_brax_byol_fns(config):  # noqa: C901
             init_action,
             ext_reward_history,
             int_reward_history,
-            total_ext_reward_history,
-            total_int_reward_history,
-            rc_hstate,
         )
 
     def train(
@@ -274,9 +261,6 @@ def compile_brax_byol_fns(config):  # noqa: C901
         init_action,
         ext_reward_hist,
         int_reward_hist,
-        tot_ext_reward_hist,
-        tot_int_reward_hist,
-        rc_hstate,
     ):
         rc_network = RewardCombiner()
 
@@ -309,9 +293,6 @@ def compile_brax_byol_fns(config):  # noqa: C901
                     update_target_counter,
                     ext_reward_hist,
                     int_reward_hist,
-                    tot_ext_reward_hist,
-                    tot_int_reward_hist,
-                    rc_hstate,
                     rng,
                 ) = runner_state
 
@@ -352,9 +333,6 @@ def compile_brax_byol_fns(config):  # noqa: C901
                 ext_reward_hist = ext_reward_hist.at[:, -1].set(reward)
                 int_reward_hist = int_reward_hist.at[:, -1].set(int_reward)
 
-                tot_ext_reward_hist = tot_ext_reward_hist.at[step_index].set(ext_reward_hist)
-                tot_int_reward_hist = tot_int_reward_hist.at[step_index].set(int_reward_hist)
-
                 transition = Transition(
                     done,
                     last_act,
@@ -368,8 +346,8 @@ def compile_brax_byol_fns(config):  # noqa: C901
                     obsv,
                     bt,
                     norm_time_step,
-                    tot_ext_reward_hist,
-                    tot_int_reward_hist,
+                    ext_reward_hist,
+                    int_reward_hist,
                     info,
                 )
 
@@ -388,9 +366,6 @@ def compile_brax_byol_fns(config):  # noqa: C901
                     update_target_counter,
                     ext_reward_hist,
                     int_reward_hist,
-                    tot_ext_reward_hist,
-                    tot_int_reward_hist,
-                    rc_hstate,
                     rng,
                 )
                 return runner_state, transition
@@ -416,9 +391,6 @@ def compile_brax_byol_fns(config):  # noqa: C901
                 update_target_counter,
                 ext_reward_hist,
                 int_reward_hist,
-                tot_ext_reward_hist,
-                tot_int_reward_hist,
-                rc_hstate,
                 rng,
             ) = runner_state
 
@@ -430,9 +402,6 @@ def compile_brax_byol_fns(config):  # noqa: C901
                 last_val,
                 byol_reward_norm_params,
                 ext_reward_norm_params,
-                ext_reward_hist,
-                int_reward_hist,
-                rc_hstate,
             ):
                 (
                     norm_int_reward,
@@ -442,7 +411,7 @@ def compile_brax_byol_fns(config):  # noqa: C901
                     traj_batch.int_reward,
                     byol_reward_norm_params,
                     config["REW_NORM_PARAMETER"],
-                    int_reward_hist,
+                    traj_batch.int_reward_hist,
                 )
                 (
                     norm_ext_reward,
@@ -452,7 +421,7 @@ def compile_brax_byol_fns(config):  # noqa: C901
                     traj_batch.norm_reward,
                     ext_reward_norm_params,
                     config["REW_NORM_PARAMETER"],
-                    ext_reward_hist,
+                    traj_batch.ext_reward_hist,
                     prior=False,
                 )
                 norm_traj_batch = Transition(
@@ -489,19 +458,18 @@ def compile_brax_byol_fns(config):  # noqa: C901
                         (ext_reward_hist, int_reward_hist),
                         axis=-1,
                     )
-                    rc_input = jnp.transpose(rc_input, (1, 0, 2))
-                    rc_hstate, int_lambda = rc_network.apply(rc_params, rc_hstate, rc_input)
+                    int_lambda = rc_network.apply(rc_params, rc_input)
                     delta = (
                         (reward + (int_reward * int_lambda))
                         + config["GAMMA"] * next_value * (1 - done)
                         - value
                     )
                     gae = delta + config["GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
-                    return (gae, value, rc_hstate), gae
+                    return (gae, value), gae
 
-                (_, _, rc_hstate), advantages = jax.lax.scan(
+                (_, _), advantages = jax.lax.scan(
                     _get_advantages,
-                    (jnp.zeros_like(last_val), last_val, rc_hstate),
+                    (jnp.zeros_like(last_val), last_val),
                     norm_traj_batch,
                     reverse=True,
                     unroll=16,
@@ -512,7 +480,6 @@ def compile_brax_byol_fns(config):  # noqa: C901
                     norm_int_reward,
                     byol_reward_norm_params,
                     ext_reward_norm_params,
-                    rc_hstate,
                 )
 
             (
@@ -521,15 +488,11 @@ def compile_brax_byol_fns(config):  # noqa: C901
                 norm_int_reward,
                 byol_reward_norm_params,
                 ext_reward_norm_params,
-                rc_hstate,
             ) = _calculate_gae(
                 traj_batch,
                 last_val.squeeze(0),
                 byol_reward_norm_params,
                 ext_reward_norm_params,
-                tot_ext_reward_hist,
-                tot_int_reward_hist,
-                rc_hstate,
             )
 
             # UPDATE NETWORK
@@ -770,9 +733,6 @@ def compile_brax_byol_fns(config):  # noqa: C901
                 update_target_counter,
                 ext_reward_hist,
                 int_reward_hist,
-                tot_ext_reward_hist,
-                tot_int_reward_hist,
-                rc_hstate,
                 rng,
             )
             return runner_state, (metric, loss_info, traj_batch.int_reward, norm_int_reward)
@@ -793,9 +753,6 @@ def compile_brax_byol_fns(config):  # noqa: C901
             update_target_counter,
             ext_reward_hist,
             int_reward_hist,
-            tot_ext_reward_hist,
-            tot_int_reward_hist,
-            rc_hstate,
             _rng,
         )
         runner_state, extra_info = jax.lax.scan(
@@ -815,16 +772,13 @@ def compile_brax_byol_fns(config):  # noqa: C901
     for step_interval in step_intervals:
         config["STEP_INTERVAL"] = step_interval
         config, env, env_params = make_config_env(config, env_name)
-        make_train = jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
-        train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+        make_train = jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+        train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0))
         train_fn = jax.vmap(
             train_fn,
             in_axes=(
                 None,
                 0,
-                None,
-                None,
-                None,
                 None,
                 None,
                 None,
