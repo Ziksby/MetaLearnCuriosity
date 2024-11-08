@@ -199,7 +199,7 @@ def compile_brax_byol_fns(config):  # noqa: C901
         ext_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], config["HIST_LEN"]))
         int_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], config["HIST_LEN"]))
 
-        init_pred_input = (init_bt, init_x, init_action[np.newaxis, :])
+        init_pred_input = (init_bt, init_x, init_action[np.newaxis, :], init_action[np.newaxis, :])
 
         network_params = network.init(_rng, init_x)
         pred_params = pred.init(_pred_rng, close_init_hstate, open_init_hstate, init_pred_input)
@@ -330,7 +330,7 @@ def compile_brax_byol_fns(config):  # noqa: C901
 
                 # INT REWARD
                 tar_obs = target_state.apply_fn(target_state.params, obsv[np.newaxis, :])
-                pred_input = (bt, last_obs[np.newaxis, :], last_act[np.newaxis, :])
+                pred_input = (bt, last_obs[np.newaxis, :], last_act[np.newaxis, :], action)
                 pred_obs, new_bt, new_close_hstate, new_open_hstate = pred_state.apply_fn(
                     pred_state.params, close_hstate, open_hstate, pred_input
                 )
@@ -548,7 +548,12 @@ def compile_brax_byol_fns(config):  # noqa: C901
                         pred_params, target_params, traj_batch, init_close_hstate, init_open_hstate
                     ):
                         tar_obs = target_state.apply_fn(target_params, traj_batch.next_obs)
-                        pred_input = (traj_batch.bt, traj_batch.obs, traj_batch.prev_action)
+                        pred_input = (
+                            traj_batch.bt,
+                            traj_batch.obs,
+                            traj_batch.prev_action,
+                            traj_batch.action,
+                        )
                         pred_obs, _, _, _ = pred_state.apply_fn(
                             pred_params, init_close_hstate[0], init_open_hstate[0], pred_input
                         )

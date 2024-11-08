@@ -179,7 +179,7 @@ def ppo_make_train(rng):
     open_init_hstate = OpenScannedRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 256)
     init_bt = jnp.zeros((1, config["NUM_ENVS_PER_DEVICE"], 256))
 
-    init_pred_input = (init_bt, init_x, init_action[np.newaxis, :])
+    init_pred_input = (init_bt, init_x, init_action[np.newaxis, :], init_action[np.newaxis, :])
 
     network_params = network.init(_rng, init_x)
     pred_params = pred.init(_pred_rng, close_init_hstate, open_init_hstate, init_pred_input)
