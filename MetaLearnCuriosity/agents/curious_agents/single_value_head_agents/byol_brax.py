@@ -356,8 +356,11 @@ def train(
         _, last_val = train_state.apply_fn(train_state.params, last_obs[np.newaxis, :])
 
         def _calculate_gae(traj_batch, last_val, byol_reward_norm_params):
-            norm_int_reward, byol_reward_norm_params = byol_normalize_prior_int_rewards(
-                traj_batch.int_reward, byol_reward_norm_params, config["REW_NORM_PARAMETER"]
+            norm_int_reward, byol_reward_norm_params, _ = byol_normalize_prior_int_rewards(
+                traj_batch.int_reward,
+                byol_reward_norm_params,
+                config["REW_NORM_PARAMETER"],
+                jnp.zeros((1, 1)),
             )
             norm_traj_batch = Transition(
                 traj_batch.done,

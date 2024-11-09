@@ -294,8 +294,8 @@ def byol_calculate_gae(
     rew_norm_parameter: float,
     byol_reward_norm_params: BYOLRewardNorm,
 ) -> tuple[jax.Array, jax.Array]:
-    norm_int_reward, byol_reward_norm_params = byol_normalize_prior_int_rewards(
-        transitions.int_reward, byol_reward_norm_params, rew_norm_parameter
+    norm_int_reward, byol_reward_norm_params, _ = byol_normalize_prior_int_rewards(
+        transitions.int_reward, byol_reward_norm_params, rew_norm_parameter, jnp.zeros((1, 1))
     )
     norm_traj_batch = BYOLMiniGridTransition(
         transitions.done,
