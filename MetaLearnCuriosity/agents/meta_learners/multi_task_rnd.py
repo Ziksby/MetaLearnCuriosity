@@ -9,11 +9,11 @@ import time
 import jax
 import jax.numpy as jnp
 import jax.tree_util
+import wandb
 from evosax import OpenES
 from flax.jax_utils import replicate
 from tqdm import tqdm
 
-import wandb
 from MetaLearnCuriosity.agents.nn import RewardCombiner
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.compile_rnd_gymnax_trains import compile_rnd_fns
@@ -25,42 +25,50 @@ from MetaLearnCuriosity.utils import (
 )
 
 environments = [
-    # "Asterix-MinAtar",
-    "Breakout-MinAtar",
-    # "Freeway-MinAtar",
-    "SpaceInvaders-MinAtar",
+    "ant",
+    # "halfcheetah",
+    # "hopper",
+    # "humanoid",
+    # "humanoidstandup",
+    # "inverted_pendulum",
+    # "inverted_double_pendulum",
+    # "pusher",
+    # "reacher",
+    # "walker2d",
 ]
 
-
 config = {
-    "RUN_NAME": "rc_rnd_multi_task_1_delete",
+    "RUN_NAME": "rc_cnn_multi_task_november_rnd",
     "SEED": 42,
-    "NUM_SEEDS": 2,
-    "LR": 5e-3,
-    "PRED_LR": 1e-3,
-    "NUM_ENVS": 64,
-    "NUM_STEPS": 128,
-    "TOTAL_TIMESTEPS": 1e7,
+    "NUM_SEEDS": 1,
+    "LR": 3e-4,
+    "NUM_ENVS": 2048,
+    "NUM_STEPS": 10,  # unroll length
+    "TOTAL_TIMESTEPS": 5e7,
     "UPDATE_EPOCHS": 4,
-    "NUM_MINIBATCHES": 8,
+    "NUM_MINIBATCHES": 32,
     "GAMMA": 0.99,
-    "INT_GAMMA": 0.99,
-    # "INT_LAMBDA": 0.1,
     "GAE_LAMBDA": 0.95,
     "CLIP_EPS": 0.2,
-    "ENT_COEF": 0.01,
+    "ENT_COEF": 0.0,
     "VF_COEF": 0.5,
     "MAX_GRAD_NORM": 0.5,
-    "ACTIVATION": "relu",
-    "ANNEAL_LR": True,
+    "ACTIVATION": "tanh",
+    "ANNEAL_LR": False,
+    "NORMALIZE_ENV": True,
+    "DELAY_REWARDS": True,
+    "ANNEAL_PRED_LR": False,
     "DEBUG": False,
-    "POP_SIZE": 6,
-    "ES_SEED": 7,
+    "INT_GAMMA": 0.99,
+    "PRED_LR": 1e-3,
+    # "INT_LAMBDA": 0.02,
+    "HIST_LEN": 128,
+    "POP_SIZE": 36,
     "RC_SEED": 23,
-    "NUM_GENERATIONS": 2,
-    # "INT_LAMBDA": 0.001,
-    "TRAIN_ENVS": environments,
+    "ES_SEED": 42 * 8**2,
+    "NUM_GENERATIONS": 48,
 }
+step_intervals = [5, 10, 20, 30]
 
 
 reward_combiner_network = RewardCombiner()
@@ -94,7 +102,7 @@ fit_log = wandb.init(
     tags=tags,
     name=f"{name}_fitness",
 )
-
+env_name = "ant"
 for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations"):
     begin_gen = time.time()
     es_rng, es_rng_ask = jax.random.split(es_rng)
@@ -102,18 +110,18 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
     x = reorder_antithetic_pairs(x, config["POP_SIZE"])
     pairs = create_adjacent_pairs(x)
     fitness = []
-    raw_fitness_dict = {env: [] for env in environments}
+    raw_fitness_dict = {step_int: [] for step_int in step_intervals}
 
     for pair in pairs:
         t = time.time()
         rng, env_key = jax.random.split(rng)
         rng, rng_seeds = jax.random.split(rng)
         rng_train = jax.random.split(rng_seeds, config["NUM_SEEDS"])
-        index = jax.random.choice(env_key, len(environments))
-        env_name = environments[index]
+        index = jax.random.choice(env_key, len(step_intervals))
+        step_int = step_intervals[index]
 
         # config, env, env_params = make_config_env(config, env_name)
-        print(f"Training in {env_name} in gen ", gen)
+        print(f"Training in {env_name}_{step_int} in gen ", gen)
 
         # setting up the RL agents.
         (
@@ -124,9 +132,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
             init_rnd_obs,
             ext_reward_hist,
             int_reward_hist,
-            tot_ext_reward_hist,
-            tot_int_reward_hist,
-        ) = make_seeds[env_name](rng_train)
+        ) = make_seeds[step_int](rng_train)
 
         # duplicating here for pmap
         train_state = replicate(train_state, jax.local_devices())
@@ -137,12 +143,10 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
 
         ext_reward_hist = replicate(ext_reward_hist, jax.local_devices())
         int_reward_hist = replicate(int_reward_hist, jax.local_devices())
-        tot_ext_reward_hist = replicate(tot_ext_reward_hist, jax.local_devices())
-        tot_int_reward_hist = replicate(tot_int_reward_hist, jax.local_devices())
         t = time.time()
 
         output = jax.block_until_ready(
-            train_fns[env_name](
+            train_fns[step_int](
                 rng_train,
                 pair,
                 train_state,
@@ -151,16 +155,14 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
                 init_rnd_obs,
                 ext_reward_hist,
                 int_reward_hist,
-                tot_ext_reward_hist,
-                tot_int_reward_hist,
             )
         )
         output = process_output_general(output)
         raw_episode_return = output["rewards"].mean(-1)  # This is the raw fitness
-        raw_fitness_dict[env_name].append(raw_episode_return)  # Store raw fitness
+        raw_fitness_dict[step_int].append(raw_episode_return)  # Store raw fitness
         binary_fitness = jnp.where(raw_episode_return == jnp.max(raw_episode_return), 1.0, 0.0)
         fitness.append(binary_fitness)
-        print(f"Time for the Pair in {env_name} is {(time.time()-t)/60}")
+        print(f"Time for the Pair in {env_name}_{step_int} is {(time.time()-t)/60}")
 
     fitness = jnp.array(fitness).flatten()
     es_state = strategy.tell(x, fitness, es_state, es_params)
@@ -171,16 +173,24 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
     details = (es_state, config)
     Save(path, details)
     print("Generation ", gen, "Time:", (time.time() - begin_gen) / 60)
-    print(raw_fitness_dict)
     # logging now to W&Bs
-    for env_name in environments:
-        fit_log.log(
-            {
-                f"{env_name}_mean_fitness": jnp.array(raw_fitness_dict[env_name]).mean(),
-                f"{env_name}_best_fitness": jnp.max(jnp.array(raw_fitness_dict[env_name])),
-            }
-        )
-
+    for step_int in step_intervals:
+        raw_fitness = raw_fitness_dict[step_int]
+        if len(raw_fitness) > 0:
+            fit_log.log(
+                {
+                    f"ant_{step_int}_mean_fitness": jnp.array(raw_fitness).mean(),
+                    f"ant_{step_int}_best_fitness": jnp.max(jnp.array(raw_fitness)),
+                }
+            )
+        else:
+            print(f"Warning: No fitness data for ant_{step_int} in generation {gen}")
+            fit_log.log(
+                {
+                    f"ant_{step_int}_mean_fitness": 0.0,
+                    f"ant_{step_int}_best_fitness": 0.0,
+                }
+            )
     gc.collect()
 fit_log.finish()
 logger = WBLogger(

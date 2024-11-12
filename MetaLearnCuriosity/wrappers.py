@@ -339,6 +339,36 @@ class NormalizeVecReward(GymnaxWrapper):
 
 
 @struct.dataclass
+class MinAtarDelayedRewardEnvState:
+    delayed_reward: float
+    env_state: environment.EnvState
+
+
+class MinAtarDelayedReward(GymnaxWrapper):
+    def __init__(self, env, step_interval):
+        super().__init__(env)
+        self.step_interval = step_interval
+
+    def reset(self, key, params=None):
+        obs, state = self._env.reset(key, params)
+        state = DelayedRewardEnvState(delayed_reward=0.0, env_state=state)
+        return obs, state
+
+    def step(self, key, state, action, params=None):
+        obs, env_state, reward, done, info = self._env.step(key, state.env_state, action, params)
+        new_delayed_reward = state.delayed_reward + reward
+        steps = env_state.env_state.env_state.env_state.time
+        interval = steps % self.step_interval == 0
+
+        returned_reward = jax.lax.cond(interval, lambda: new_delayed_reward, lambda: 0.0)
+        next_delayed_reward = jax.lax.cond(interval, lambda: 0.0, lambda: new_delayed_reward)
+
+        state = DelayedRewardEnvState(delayed_reward=next_delayed_reward, env_state=env_state)
+
+        return obs, state, returned_reward, done, info
+
+
+@struct.dataclass
 class DelayedRewardEnvState:
     delayed_reward: float
     env_state: environment.EnvState

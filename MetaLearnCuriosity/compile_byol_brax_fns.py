@@ -81,7 +81,7 @@ config = {
     "EMA_PARAMETER": 0.99,
 }
 
-step_intervals = [5, 10, 20, 30]
+step_intervals = [3, 10, 20, 30]
 
 
 class PPOActorCritic(nn.Module):

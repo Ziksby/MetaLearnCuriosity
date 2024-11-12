@@ -1,6 +1,3 @@
-# Taken from:
-# https://github.com/corl-team/xland-minigrid/blob/main/training/train_single_task.py
-
 import gc
 import os
 import shutil
@@ -16,9 +13,7 @@ from tqdm import tqdm
 
 from MetaLearnCuriosity.agents.nn import RCRNN, RewardCombiner
 from MetaLearnCuriosity.checkpoints import Restore, Save
-from MetaLearnCuriosity.compile_byol_brax_fns import (
-    compile_brax_byol_fns as compile_fns,
-)
+from MetaLearnCuriosity.compile_gymnax_trains import compile_fns
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import (
     create_adjacent_pairs,
@@ -26,42 +21,39 @@ from MetaLearnCuriosity.utils import (
     reorder_antithetic_pairs,
 )
 
-env_name = "ant"
-step_intervals = [3, 10, 20, 30]
 config = {
-    "RUN_NAME": "rc_cnn_delayed_brax",
+    "RUN_NAME": "rc_cnn_minatar",
     "SEED": 42,
-    "NUM_SEEDS": 1,
-    "LR": 3e-4,
-    "NUM_ENVS": 2048,
-    "NUM_STEPS": 10,  # unroll length
-    "TOTAL_TIMESTEPS": 5e7,
+    "NUM_SEEDS": 2,
+    "LR": 5e-3,
+    "NUM_ENVS": 64,
+    "NUM_STEPS": 128,
+    "TOTAL_TIMESTEPS": 1e7,
     "UPDATE_EPOCHS": 4,
-    "NUM_MINIBATCHES": 32,
+    "NUM_MINIBATCHES": 8,
     "GAMMA": 0.99,
     "GAE_LAMBDA": 0.95,
     "CLIP_EPS": 0.2,
-    "ENT_COEF": 0.0,
+    "ENT_COEF": 0.01,
     "VF_COEF": 0.5,
     "MAX_GRAD_NORM": 0.5,
-    "ACTIVATION": "tanh",
-    "ANNEAL_LR": False,
-    "NORMALIZE_ENV": True,
-    "DELAY_REWARDS": True,
+    "ACTIVATION": "relu",
+    "ANNEAL_LR": True,
     "ANNEAL_PRED_LR": False,
     "DEBUG": False,
     "PRED_LR": 0.001,
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
-    "HIST_LEN": 128,
-    "POP_SIZE": 36,
+    "POP_SIZE": 64,
+    "ES_SEED": 7,
     "RC_SEED": 23,
-    "ES_SEED": 42**2,
-    "NUM_GENERATIONS": 48,
+    "NUM_GENERATIONS": 2,
+    # "INT_LAMBDA": 0.001,
+    "ENV_KEY": 102,
 }
 
 reward_combiner_network = RewardCombiner()
-
+env_name = "SpaceInvaders-MinAtar"
 rc_params_pholder = reward_combiner_network.init(
     jax.random.PRNGKey(config["RC_SEED"]), jnp.zeros((1, config["HIST_LEN"], 2))
 )
@@ -95,14 +87,14 @@ es_state = strategy.initialize(es_rng_init, es_params)
 # print("Now matched,", es_state,"\n")
 train_fns, make_seeds = compile_fns(config=config)
 rng = jax.random.PRNGKey(config["SEED"])
-fit_log = wandb.init(
-    project="MetaLearnCuriosity",
-    config=config,
-    group=group,
-    tags=tags,
-    name=f"{name}_fitness",
-)
-
+# fit_log = wandb.init(
+#     project="MetaLearnCuriosity",
+#     config=config,
+#     group=group,
+#     tags=tags,
+#     name=f"{name}_fitness",
+# )
+step_intervals = [3, 10, 20, 30]
 for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations"):
     begin_gen = time.time()
     es_rng, es_rng_ask = jax.random.split(es_rng)
@@ -183,30 +175,30 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
     Save(path, details)
     print("Generation ", gen, "Time:", (time.time() - begin_gen) / 60)
     # logging now to W&Bs
-    for step_int in step_intervals:
-        raw_fitness = raw_fitness_dict[step_int]
-        if len(raw_fitness) > 0:
-            fit_log.log(
-                {
-                    f"ant_{step_int}_mean_fitness": jnp.array(raw_fitness).mean(),
-                    f"ant_{step_int}_best_fitness": jnp.max(jnp.array(raw_fitness)),
-                }
-            )
-        else:
-            print(f"Warning: No fitness data for ant_{step_int} in generation {gen}")
-            fit_log.log(
-                {
-                    f"ant_{step_int}_mean_fitness": 0.0,
-                    f"ant_{step_int}_best_fitness": 0.0,
-                }
-            )
+    # for step_int in step_intervals:
+    #     raw_fitness = raw_fitness_dict[step_int]
+    #     if len(raw_fitness) > 0:
+    #         fit_log.log(
+    #             {
+    #                 f"ant_{step_int}_mean_fitness": jnp.array(raw_fitness).mean(),
+    #                 f"ant_{step_int}_best_fitness": jnp.max(jnp.array(raw_fitness)),
+    #             }
+    #         )
+    #     else:
+    #         print(f"Warning: No fitness data for ant_{step_int} in generation {gen}")
+    #         fit_log.log(
+    #             {
+    #                 f"ant_{step_int}_mean_fitness": 0.0,
+    #                 f"ant_{step_int}_best_fitness": 0.0,
+    #             }
+    #         )
     gc.collect()
-fit_log.finish()
-logger = WBLogger(
-    config=config,
-    group="meta_learners",
-    tags=["multi_task", "reward-combiner"],
-    name=config["RUN_NAME"],
-)
-logger.save_artifact(path)
-shutil.rmtree(path)
+# fit_log.finish()
+# logger = WBLogger(
+#     config=config,
+#     group="meta_learners",
+#     tags=["multi_task", "reward-combiner"],
+#     name=config["RUN_NAME"],
+# )
+# logger.save_artifact(path)
+# shutil.rmtree(path)
