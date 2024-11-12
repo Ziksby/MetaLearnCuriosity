@@ -44,8 +44,9 @@ config = {
     "PRED_LR": 0.001,
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
-    "POP_SIZE": 64,
+    "POP_SIZE": 2,
     "ES_SEED": 7,
+    "HIST_LEN": 128,
     "RC_SEED": 23,
     "NUM_GENERATIONS": 2,
     # "INT_LAMBDA": 0.001,
@@ -58,13 +59,27 @@ rc_params_pholder = reward_combiner_network.init(
     jax.random.PRNGKey(config["RC_SEED"]), jnp.zeros((1, config["HIST_LEN"], 2))
 )
 es_rng = jax.random.PRNGKey(config["ES_SEED"])
+# strategy = OpenES(
+#     popsize=config["POP_SIZE"],
+#     pholder_params=rc_params_pholder,
+#     opt_name="adam",
+#     lrate_decay=1,
+#     sigma_decay=0.999,
+#     sigma_init=0.04,
+#     n_devices=1,
+#     maximize=True,
+# )
+
 strategy = OpenES(
     popsize=config["POP_SIZE"],
     pholder_params=rc_params_pholder,
     opt_name="adam",
-    lrate_decay=1,
-    sigma_decay=0.999,
-    sigma_init=0.04,
+    lrate_init=1e-2,
+    lrate_decay=0.999,
+    lrate_limit=1e-5,
+    sigma_init=0.1,
+    sigma_decay=1.0,
+    sigma_limit=0.1,
     n_devices=1,
     maximize=True,
 )
@@ -87,13 +102,13 @@ es_state = strategy.initialize(es_rng_init, es_params)
 # print("Now matched,", es_state,"\n")
 train_fns, make_seeds = compile_fns(config=config)
 rng = jax.random.PRNGKey(config["SEED"])
-# fit_log = wandb.init(
-#     project="MetaLearnCuriosity",
-#     config=config,
-#     group=group,
-#     tags=tags,
-#     name=f"{name}_fitness",
-# )
+fit_log = wandb.init(
+    project="MetaLearnCuriosity",
+    config=config,
+    group=group,
+    tags=tags,
+    name=f"{name}_fitness",
+)
 step_intervals = [3, 10, 20, 30]
 for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations"):
     begin_gen = time.time()
@@ -175,30 +190,30 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
     Save(path, details)
     print("Generation ", gen, "Time:", (time.time() - begin_gen) / 60)
     # logging now to W&Bs
-    # for step_int in step_intervals:
-    #     raw_fitness = raw_fitness_dict[step_int]
-    #     if len(raw_fitness) > 0:
-    #         fit_log.log(
-    #             {
-    #                 f"ant_{step_int}_mean_fitness": jnp.array(raw_fitness).mean(),
-    #                 f"ant_{step_int}_best_fitness": jnp.max(jnp.array(raw_fitness)),
-    #             }
-    #         )
-    #     else:
-    #         print(f"Warning: No fitness data for ant_{step_int} in generation {gen}")
-    #         fit_log.log(
-    #             {
-    #                 f"ant_{step_int}_mean_fitness": 0.0,
-    #                 f"ant_{step_int}_best_fitness": 0.0,
-    #             }
-    #         )
+    for step_int in step_intervals:
+        raw_fitness = raw_fitness_dict[step_int]
+        if len(raw_fitness) > 0:
+            fit_log.log(
+                {
+                    f"ant_{step_int}_mean_fitness": jnp.array(raw_fitness).mean(),
+                    f"ant_{step_int}_best_fitness": jnp.max(jnp.array(raw_fitness)),
+                }
+            )
+        else:
+            print(f"Warning: No fitness data for ant_{step_int} in generation {gen}")
+            fit_log.log(
+                {
+                    f"ant_{step_int}_mean_fitness": 0.0,
+                    f"ant_{step_int}_best_fitness": 0.0,
+                }
+            )
     gc.collect()
-# fit_log.finish()
-# logger = WBLogger(
-#     config=config,
-#     group="meta_learners",
-#     tags=["multi_task", "reward-combiner"],
-#     name=config["RUN_NAME"],
-# )
-# logger.save_artifact(path)
-# shutil.rmtree(path)
+fit_log.finish()
+logger = WBLogger(
+    config=config,
+    group="meta_learners",
+    tags=["multi_task", "reward-combiner"],
+    name=config["RUN_NAME"],
+)
+logger.save_artifact(path)
+shutil.rmtree(path)

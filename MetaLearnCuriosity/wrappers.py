@@ -357,7 +357,7 @@ class MinAtarDelayedReward(GymnaxWrapper):
     def step(self, key, state, action, params=None):
         obs, env_state, reward, done, info = self._env.step(key, state.env_state, action, params)
         new_delayed_reward = state.delayed_reward + reward
-        steps = env_state.env_state.env_state.env_state.time
+        steps = env_state.env_state.time
         interval = steps % self.step_interval == 0
 
         returned_reward = jax.lax.cond(interval, lambda: new_delayed_reward, lambda: 0.0)

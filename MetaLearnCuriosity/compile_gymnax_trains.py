@@ -764,10 +764,9 @@ def compile_fns(config):  # noqa: C901
     make_seeds = {}
     for step_int in step_intervals:
         rng = jax.random.PRNGKey(config["SEED"])
+        config["STEP_INTERVAL"] = step_int
         config, env, env_params = make_config_env(config, env_name)
-        print(f"Training in {config['ENV_NAME']}")
         rng = jax.random.split(rng, config["NUM_SEEDS"])
-        print(f"Training in {config['ENV_NAME']}")
         make_train = jax.jit(jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0, 0, 0, 0)))
         train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0))
         train_fn = jax.vmap(
