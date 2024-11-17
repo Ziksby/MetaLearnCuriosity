@@ -30,7 +30,12 @@ from MetaLearnCuriosity.utils import (
     rnd_normalise_int_rewards,
     update_obs_norm_params,
 )
-from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper, VecEnv
+from MetaLearnCuriosity.wrappers import (
+    FlattenObservationWrapper,
+    LogWrapper,
+    MinAtarDelayedReward,
+    VecEnv,
+)
 
 key = jax.random.PRNGKey(69)
 
@@ -93,7 +98,7 @@ class PPOActorCritic(nn.Module):
 config = {
     "RUN_NAME": "minatar_rnd",
     "SEED": 42,
-    "NUM_SEEDS": 30,
+    "NUM_SEEDS": 1,
     "LR": 5e-3,
     "PRED_LR": 1e-3,
     "NUM_ENVS": 64,
@@ -145,6 +150,7 @@ def make_config_env(config, env_name):
     env, env_params = gymnax.make(config["ENV_NAME"])
     env = FlattenObservationWrapper(env)
     env = LogWrapper(env)
+    env = MinAtarDelayedReward(env, config["STEP_INTERVAL"])
     env = VecEnv(env)
 
     return config, env, env_params
@@ -306,8 +312,8 @@ def train(rng, train_state, pred_state, target_params, init_obs_rng):
 
         def _calculate_gae(traj_batch, last_val, rnd_int_return_norm_params):
 
-            norm_int_reward, rnd_int_return_norm_params = rnd_normalise_int_rewards(
-                traj_batch, rnd_int_return_norm_params, config["INT_GAMMA"]
+            norm_int_reward, rnd_int_return_norm_params, _ = rnd_normalise_int_rewards(
+                traj_batch, rnd_int_return_norm_params, config["INT_GAMMA"], jnp.zeros((1, 1))
             )
 
             norm_traj_batch = RNDTransition(
@@ -538,7 +544,8 @@ step_intervals = [1, 3, 10, 20, 30, 40]
 lambda_values = jnp.array(
     [0.001, 0.0001, 0.0003, 0.0005, 0.0008, 0.01, 0.1, 0.003, 0.005, 0.02, 0.03, 0.05]
 ).sort()
-# lambda_values = jnp.array([0.001, 0.0001]).sort()
+
+
 y_values = {}
 env_name = "SpaceInvaders-MinAtar"
 for lambda_value in lambda_values:
