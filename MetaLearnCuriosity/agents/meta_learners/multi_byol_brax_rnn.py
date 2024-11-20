@@ -16,7 +16,7 @@ from tqdm import tqdm
 import wandb
 from MetaLearnCuriosity.agents.nn import RCRNN, RewardCombiner
 from MetaLearnCuriosity.checkpoints import Restore, Save
-from MetaLearnCuriosity.compile_byol_brax_fns import (
+from MetaLearnCuriosity.compile_byol_brax_rnns_fns import (
     compile_brax_byol_fns as compile_fns,
 )
 from MetaLearnCuriosity.logger import WBLogger
