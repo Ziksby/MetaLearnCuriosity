@@ -20,7 +20,13 @@ from MetaLearnCuriosity.utils import (
     compress_output_for_reasoning,
     process_output_general,
 )
-from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper, VecEnv
+from MetaLearnCuriosity.wrappers import (
+    FlattenObservationWrapper,
+    LogWrapper,
+    MinAtarDelayedReward,
+    ProbabilisticReward,
+    VecEnv,
+)
 
 
 class PPOActorCritic(nn.Module):
@@ -108,7 +114,7 @@ config = {
     "ANNEAL_LR": True,
     "DEBUG": False,
 }
-
+step_intervals = [0.1, 0.3, 0.5, 0.8, 0.98]
 environments = [
     "Asterix-MinAtar",
     "Breakout-MinAtar",
@@ -136,6 +142,7 @@ def make_config_env(config, env_name):
     env, env_params = gymnax.make(config["ENV_NAME"])
     env = FlattenObservationWrapper(env)
     env = LogWrapper(env)
+    env = ProbabilisticReward(env, config["STEP_INTERVAL"])
     env = VecEnv(env)
 
     return config, env, env_params
@@ -329,54 +336,59 @@ def train(rng, train_state):
     return {
         "train_states": runner_state[0],
         "metrics": metric,
-        "rl_total_loss": rl_total_loss[0],
-        "rl_value_loss": rl_total_loss[1][0],
-        "rl_actor_loss": rl_total_loss[1][1],
-        "rl_entrophy_loss": rl_total_loss[1][2],
+        # "rl_total_loss": rl_total_loss[0],
+        # "rl_value_loss": rl_total_loss[1][0],
+        # "rl_actor_loss": rl_total_loss[1][1],
+        # "rl_entrophy_loss": rl_total_loss[1][2],
     }
 
 
-for env_name in environments:
-    rng = jax.random.PRNGKey(config["SEED"])
-    t = time.time()
-    config, env, env_params = make_config_env(config, env_name)
-    print(f"Training in {config['ENV_NAME']}")
+for step_int in step_intervals:
+    config["STEP_INTERVAL"] = step_int
+    config["RUN_NAME"] = "minatar_baseline_ppo"
+    for env_name in environments:
+        config["RUN_NAME"] = f"minatar_baseline_ppo_{step_int}"
 
-    if config["NUM_SEEDS"] > 1:
-        rng = jax.random.split(rng, config["NUM_SEEDS"])
-        rng, train_state = jax.vmap(ppo_make_train, out_axes=(1, 0))(rng)
-        train_state = replicate(train_state, jax.local_devices())
-        train_fn = jax.vmap(train, in_axes=(0, 0))
-        train_fn = jax.pmap(train_fn, axis_name="devices")
-        output = jax.block_until_ready(train_fn(rng, train_state))
+        rng = jax.random.PRNGKey(config["SEED"])
+        t = time.time()
+        config, env, env_params = make_config_env(config, env_name)
+        print(f"Training in {config['ENV_NAME']}")
 
-    else:
-        rng, train_state = ppo_make_train(rng)
-        train_state = replicate(train_state, jax.local_devices())
-        train_fn = jax.pmap(train, axis_name="devices")
-        output = jax.block_until_ready(train_fn(rng, train_state))
+        if config["NUM_SEEDS"] > 1:
+            rng = jax.random.split(rng, config["NUM_SEEDS"])
+            rng, train_state = jax.vmap(ppo_make_train, out_axes=(1, 0))(rng)
+            train_state = replicate(train_state, jax.local_devices())
+            train_fn = jax.vmap(train, in_axes=(0, 0))
+            train_fn = jax.pmap(train_fn, axis_name="devices")
+            output = jax.block_until_ready(train_fn(rng, train_state))
 
-    elapsed_time = time.time() - t
+        else:
+            rng, train_state = ppo_make_train(rng)
+            train_state = replicate(train_state, jax.local_devices())
+            train_fn = jax.pmap(train, axis_name="devices")
+            output = jax.block_until_ready(train_fn(rng, train_state))
 
-    logger = WBLogger(
-        config=config,
-        group="minatar_baseline",
-        tags=["baseline", config["ENV_NAME"]],
-        name=config["RUN_NAME"],
-    )
-    output = process_output_general(output)
+        elapsed_time = time.time() - t
 
-    logger.log_episode_return(output, config["NUM_SEEDS"])
-    logger.log_rl_losses(output, config["NUM_SEEDS"])
-    checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
+        logger = WBLogger(
+            config=config,
+            group="minatar_baseline",
+            tags=["baseline", config["ENV_NAME"]],
+            name=config["RUN_NAME"],
+        )
+        output = process_output_general(output)
 
-    # Get the absolute path of the directory
-    output = compress_output_for_reasoning(output)
-    output["config"] = config
+        logger.log_episode_return(output, config["NUM_SEEDS"])
+        # logger.log_rl_losses(output, config["NUM_SEEDS"])
+        checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
-    path = os.path.abspath(checkpoint_directory)
-    Save(path, output)
-    logger.save_artifact(path)
-    shutil.rmtree(path)
-    print(f"Deleted local checkpoint directory: {path}")
-    print(f"Done in {elapsed_time / 60:.2f}min")
+        # Get the absolute path of the directory
+        output = compress_output_for_reasoning(output)
+        output["config"] = config
+
+        path = os.path.abspath(checkpoint_directory)
+        Save(path, output)
+        logger.save_artifact(path)
+        shutil.rmtree(path)
+        print(f"Deleted local checkpoint directory: {path}")
+        print(f"Done in {elapsed_time / 60:.2f}min")
