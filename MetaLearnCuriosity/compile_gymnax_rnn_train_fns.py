@@ -454,7 +454,7 @@ def compile_fns(config):  # noqa: C901
                         axis=-1,
                     )
                     rc_input = jnp.transpose(rc_input, (1, 0, 2))
-                    int_lambda = rc_network.apply(rc_params, rc_hstate, rc_input)
+                    rc_hstate, int_lambda = rc_network.apply(rc_params, rc_hstate, rc_input)
                     delta = (
                         (reward + (int_reward * int_lambda))
                         + config["GAMMA"] * next_value * (1 - done)
