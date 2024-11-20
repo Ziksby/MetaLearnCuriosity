@@ -9,11 +9,11 @@ import time
 import jax
 import jax.numpy as jnp
 import jax.tree_util
-import wandb
 from evosax import OpenES
 from flax.jax_utils import replicate
 from tqdm import tqdm
 
+import wandb
 from MetaLearnCuriosity.agents.nn import RCRNN, RewardCombiner
 from MetaLearnCuriosity.checkpoints import Restore, Save
 from MetaLearnCuriosity.compile_byol_brax_fns import (
@@ -29,7 +29,7 @@ from MetaLearnCuriosity.utils import (
 env_name = "ant"
 step_intervals = [3, 10, 20, 30]
 config = {
-    "RUN_NAME": "rc_cnn_delayed_brax",
+    "RUN_NAME": "rc_cnn_128_delayed_ant_fixed",
     "SEED": 42,
     "NUM_SEEDS": 1,
     "LR": 3e-4,
@@ -54,9 +54,9 @@ config = {
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
     "HIST_LEN": 128,
-    "POP_SIZE": 36,
-    "RC_SEED": 23,
-    "ES_SEED": 42**2,
+    "POP_SIZE": 38,
+    "RC_SEED": 23 * 2 * 8,
+    "ES_SEED": 23_000,
     "NUM_GENERATIONS": 48,
 }
 
@@ -83,16 +83,30 @@ es_rng, es_rng_init = jax.random.split(es_rng)
 es_params = strategy.default_params
 es_state = strategy.initialize(es_rng_init, es_params)
 # es_stuff = Restore(
-#     "/home/batsy/MetaLearnCuriosity/rc_cnn_multi_task_october_flax-checkpoints_v0"
+#     "/home/batsy/MetaLearnCuriosity/MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/rc_cnn_64_64_delayed_brax_1_seed_continued"
 # )
 # es_state_saved, _ = es_stuff
 # print(es_state_saved)
 # print()
 # print(es_state)
 # print()
-# opt_state = es_state.opt_state.replace(lrate=es_state_saved["opt_state"]["lrate"], m=es_state_saved["opt_state"]["m"], v=es_state_saved["opt_state"]["v"], n=es_state_saved["opt_state"]["n"], last_grads=es_state_saved["opt_state"]["last_grads"], gen_counter=es_state_saved["opt_state"]["gen_counter"])
-# es_state=es_state.replace(mean=es_state_saved['mean'], sigma=es_state_saved["sigma"], opt_state=opt_state, best_member = es_state_saved["best_member"], best_fitness=es_state_saved["best_fitness"], gen_counter=es_state_saved["gen_counter"])
-# print("Now matched,", es_state,"\n")
+# opt_state = es_state.opt_state.replace(
+#     lrate=es_state_saved["opt_state"]["lrate"],
+#     m=es_state_saved["opt_state"]["m"],
+#     v=es_state_saved["opt_state"]["v"],
+#     n=es_state_saved["opt_state"]["n"],
+#     last_grads=es_state_saved["opt_state"]["last_grads"],
+#     gen_counter=es_state_saved["opt_state"]["gen_counter"],
+# )
+# es_state = es_state.replace(
+#     mean=es_state_saved["mean"],
+#     sigma=es_state_saved["sigma"],
+#     opt_state=opt_state,
+#     best_member=es_state_saved["best_member"],
+#     best_fitness=es_state_saved["best_fitness"],
+#     gen_counter=es_state_saved["gen_counter"],
+# )
+# print("Now matched,", es_state, "\n")
 train_fns, make_seeds = compile_fns(config=config)
 rng = jax.random.PRNGKey(config["SEED"])
 fit_log = wandb.init(
@@ -111,6 +125,9 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
     pairs = create_adjacent_pairs(x)
     fitness = []
     raw_fitness_dict = {step_int: [] for step_int in step_intervals}
+    int_lambda_dict = {
+        step_int: [] for step_int in step_intervals
+    }  # New dictionary for int_lambdas
 
     for pair in pairs:
         t = time.time()
@@ -168,7 +185,13 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
         )
         output = process_output_general(output)
         raw_episode_return = output["rewards"].mean(-1)  # This is the raw fitness
+        int_lambdas = output["int_lambdas"].mean(
+            -1
+        )  # Get the int_lambdas and average across episodes
+
         raw_fitness_dict[step_int].append(raw_episode_return)  # Store raw fitness
+        int_lambda_dict[step_int].append(int_lambdas)  # Store int_lambdas
+
         binary_fitness = jnp.where(raw_episode_return == jnp.max(raw_episode_return), 1.0, 0.0)
         fitness.append(binary_fitness)
         print(f"Time for the Pair in {env_name}_{step_int} is {(time.time()-t)/60}")
@@ -182,14 +205,28 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
     details = (es_state, config)
     Save(path, details)
     print("Generation ", gen, "Time:", (time.time() - begin_gen) / 60)
+
     # logging now to W&Bs
     for step_int in step_intervals:
         raw_fitness = raw_fitness_dict[step_int]
+        int_lambdas = int_lambda_dict[step_int]
+
         if len(raw_fitness) > 0:
+            # Convert to numpy arrays for easier manipulation
+            raw_fitness_array = jnp.array(raw_fitness)
+            int_lambda_array = jnp.array(int_lambdas)
+
+            # Find the best individual based on raw fitness
+            best_idx = jnp.argmax(raw_fitness_array)
+
             fit_log.log(
                 {
-                    f"ant_{step_int}_mean_fitness": jnp.array(raw_fitness).mean(),
-                    f"ant_{step_int}_best_fitness": jnp.max(jnp.array(raw_fitness)),
+                    f"ant_{step_int}_mean_fitness": raw_fitness_array.mean(),
+                    f"ant_{step_int}_best_fitness": jnp.max(raw_fitness_array),
+                    f"ant_{step_int}_mean_lambda": int_lambda_array.mean(),  # Average lambda across generation
+                    f"ant_{step_int}_best_lambda": int_lambda_array[best_idx][
+                        0
+                    ],  # Lambda of best individual
                 }
             )
         else:
@@ -198,6 +235,8 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
                 {
                     f"ant_{step_int}_mean_fitness": 0.0,
                     f"ant_{step_int}_best_fitness": 0.0,
+                    f"ant_{step_int}_mean_lambda": 0.0,
+                    f"ant_{step_int}_best_lambda": 0.0,
                 }
             )
     gc.collect()
