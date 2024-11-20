@@ -173,8 +173,8 @@ def compile_fns(config):  # noqa: C901
         rc_hstate = RCRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 32)
         init_bt = jnp.zeros((1, config["NUM_ENVS_PER_DEVICE"], 128))
         init_pred_input = (init_bt, init_x, init_action[np.newaxis, :], init_action[np.newaxis, :])
-        ext_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 128))
-        int_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 128))
+        ext_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], config["HIST_LEN"]))
+        int_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], config["HIST_LEN"]))
 
         network_params = network.init(_rng, init_x)
         pred_params = pred.init(_pred_rng, close_init_hstate, open_init_hstate, init_pred_input)
@@ -453,6 +453,7 @@ def compile_fns(config):  # noqa: C901
                         (ext_reward_hist, int_reward_hist),
                         axis=-1,
                     )
+                    rc_input = jnp.transpose(rc_input, (1, 0, 2))
                     int_lambda = rc_network.apply(rc_params, rc_hstate, rc_input)
                     delta = (
                         (reward + (int_reward * int_lambda))
