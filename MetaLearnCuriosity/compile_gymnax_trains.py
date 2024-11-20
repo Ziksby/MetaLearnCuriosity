@@ -32,6 +32,7 @@ from MetaLearnCuriosity.wrappers import (
     FlattenObservationWrapper,
     LogWrapper,
     MinAtarDelayedReward,
+    ProbabilisticReward,
     VecEnv,
 )
 
@@ -104,7 +105,7 @@ config = {
     "ENV_KEY": 102,
 }
 step_intervals = [3, 10, 20, 30]
-env_name = "SpaceInvaders-MinAtar"
+env_name = "Breakout-MinAtar"
 
 
 def compile_fns(config):  # noqa: C901
@@ -452,9 +453,9 @@ def compile_fns(config):  # noqa: C901
                         - value
                     )
                     gae = delta + config["GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
-                    return (gae, value), gae
+                    return (gae, value), (gae, int_lambda)
 
-                (_, _), advantages = jax.lax.scan(
+                (_, _), (advantages, int_lambdas) = jax.lax.scan(
                     _get_advantages,
                     (jnp.zeros_like(last_val), last_val),
                     norm_traj_batch,
@@ -467,6 +468,7 @@ def compile_fns(config):  # noqa: C901
                     norm_int_reward,
                     byol_reward_norm_params,
                     ext_reward_norm_params,
+                    int_lambdas,
                 )
 
             (
@@ -475,6 +477,7 @@ def compile_fns(config):  # noqa: C901
                 norm_int_reward,
                 byol_reward_norm_params,
                 ext_reward_norm_params,
+                int_lambdas,
             ) = _calculate_gae(
                 traj_batch,
                 last_val.squeeze(0),
@@ -720,7 +723,13 @@ def compile_fns(config):  # noqa: C901
                 int_reward_hist,
                 rng,
             )
-            return runner_state, (metric, loss_info, norm_int_reward, traj_batch.int_reward)
+            return runner_state, (
+                metric,
+                loss_info,
+                norm_int_reward,
+                traj_batch.int_reward,
+                int_lambdas,
+            )
 
         rng, _rng = jax.random.split(rng)
         runner_state = (
@@ -743,13 +752,15 @@ def compile_fns(config):  # noqa: C901
         runner_state, extra_info = jax.lax.scan(
             _update_step, runner_state, None, config["NUM_UPDATES"]
         )
-        metric, _, _, _ = extra_info
+        metric, _, _, _, int_lambdas = extra_info
         rewards = metric["sum_of_rewards"].mean(axis=-1)
         rewards = rewards.reshape(-1)
         rewards = rewards[-1]
+        int_lambdas = int_lambdas.mean()
         return {
             # "train_state": runner_state[0],
             "rewards": rewards,
+            "int_lambdas": int_lambdas,
             # "rl_total_loss": rl_total_loss[0],
             # "rl_value_loss": rl_total_loss[1][0],
             # "rl_actor_loss": rl_total_loss[1][1],
