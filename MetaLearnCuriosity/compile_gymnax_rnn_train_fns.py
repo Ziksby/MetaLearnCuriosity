@@ -790,13 +790,14 @@ def compile_fns(config):  # noqa: C901
         config["STEP_INTERVAL"] = step_int
         config, env, env_params = make_config_env(config, env_name)
         rng = jax.random.split(rng, config["NUM_SEEDS"])
-        make_train = jax.jit(jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0, 0, 0, 0)))
-        train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+        make_train = jax.jit(jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)))
+        train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
         train_fn = jax.vmap(
             train_fn,
             in_axes=(
                 None,
                 0,
+                None,
                 None,
                 None,
                 None,
