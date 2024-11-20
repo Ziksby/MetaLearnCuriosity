@@ -465,9 +465,9 @@ def compile_brax_byol_fns(config):  # noqa: C901
                         - value
                     )
                     gae = delta + config["GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
-                    return (gae, value), gae
+                    return (gae, value), (gae, int_lambda)
 
-                (_, _), advantages = jax.lax.scan(
+                (_, _), (advantages, int_lambdas) = jax.lax.scan(
                     _get_advantages,
                     (jnp.zeros_like(last_val), last_val),
                     norm_traj_batch,
@@ -480,6 +480,7 @@ def compile_brax_byol_fns(config):  # noqa: C901
                     norm_int_reward,
                     byol_reward_norm_params,
                     ext_reward_norm_params,
+                    int_lambdas,
                 )
 
             (
@@ -488,6 +489,7 @@ def compile_brax_byol_fns(config):  # noqa: C901
                 norm_int_reward,
                 byol_reward_norm_params,
                 ext_reward_norm_params,
+                int_lambdas,
             ) = _calculate_gae(
                 traj_batch,
                 last_val.squeeze(0),
@@ -735,7 +737,13 @@ def compile_brax_byol_fns(config):  # noqa: C901
                 int_reward_hist,
                 rng,
             )
-            return runner_state, (metric, loss_info, traj_batch.int_reward, norm_int_reward)
+            return runner_state, (
+                metric,
+                loss_info,
+                traj_batch.int_reward,
+                norm_int_reward,
+                int_lambdas,
+            )
 
         rng, _rng = jax.random.split(rng)
         runner_state = (
@@ -758,13 +766,12 @@ def compile_brax_byol_fns(config):  # noqa: C901
         runner_state, extra_info = jax.lax.scan(
             _update_step, runner_state, None, config["NUM_UPDATES"]
         )
-        metric, _, _, _ = extra_info
+        metric, _, _, _, int_lambdas = extra_info
         rewards = metric["sum_of_rewards"].mean(axis=-1)
         rewards = rewards.reshape(-1)
         rewards = rewards[-1]
-        return {
-            "rewards": rewards,
-        }
+        int_lambdas = int_lambdas.mean()
+        return {"rewards": rewards, "int_lambdas": int_lambdas}
 
     train_fns = {}
     make_seeds = {}
