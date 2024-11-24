@@ -13,7 +13,7 @@ from tqdm import tqdm
 import wandb
 from MetaLearnCuriosity.agents.nn import RCRNN, RewardCombiner
 from MetaLearnCuriosity.checkpoints import Restore, Save
-from MetaLearnCuriosity.compile_gymnax_trains import compile_fns
+from MetaLearnCuriosity.compile_gymnax_rnn_train_fns import compile_fns
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import (
     create_adjacent_pairs,
@@ -22,7 +22,7 @@ from MetaLearnCuriosity.utils import (
 )
 
 config = {
-    "RUN_NAME": "rc_cnn_64_64_minatar_default_delayed_breakout",
+    "RUN_NAME": "rc_rnn_minatar_default_delayed_breakout",
     "SEED": 42,
     "NUM_SEEDS": 2,
     "LR": 5e-3,
@@ -46,7 +46,7 @@ config = {
     "EMA_PARAMETER": 0.99,
     "POP_SIZE": 64,
     "ES_SEED": 7,
-    "HIST_LEN": 128,
+    "HIST_LEN": 1,
     "RC_SEED": 23 * 89,
     "NUM_GENERATIONS": 48,
     # "INT_LAMBDA": 0.001,
@@ -56,7 +56,9 @@ config = {
 reward_combiner_network = RewardCombiner()
 env_name = "Breakout-MinAtar"
 rc_params_pholder = reward_combiner_network.init(
-    jax.random.PRNGKey(config["RC_SEED"]), jnp.zeros((1, config["HIST_LEN"], 2))
+    jax.random.PRNGKey(config["RC_SEED"]),
+    jnp.zeros((16, 32)),
+    jnp.zeros((1, config["HIST_LEN"], 2)),
 )
 es_rng = jax.random.PRNGKey(config["ES_SEED"])
 strategy = OpenES(
@@ -147,6 +149,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
             init_action,
             ext_reward_hist,
             int_reward_hist,
+            rc_hstate,
         ) = make_seeds[step_int](rng_train)
 
         # duplicating here for pmap
@@ -160,6 +163,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
         pair = replicate(pair, jax.local_devices())
         ext_reward_hist = replicate(ext_reward_hist, jax.local_devices())
         int_reward_hist = replicate(int_reward_hist, jax.local_devices())
+        rc_hstate = replicate(rc_hstate, jax.local_devices())
         t = time.time()
 
         output = jax.block_until_ready(
@@ -175,6 +179,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
                 init_action,
                 ext_reward_hist,
                 int_reward_hist,
+                rc_hstate,
             )
         )
         output = process_output_general(output)
