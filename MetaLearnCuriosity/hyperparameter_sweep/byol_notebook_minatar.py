@@ -84,7 +84,7 @@ class PPOActorCritic(nn.Module):
 config = {
     "RUN_NAME": "minatar_byol_ppo",
     "SEED": 42,
-    "NUM_SEEDS": 1,
+    "NUM_SEEDS": 10,
     "LR": 5e-3,
     "NUM_ENVS": 64,
     "NUM_STEPS": 128,
@@ -663,13 +663,13 @@ def train(
     }
 
 
-step_intervals = [40]
-# lambda_values = jnp.array(
-#     [0.001, 0.0001, 0.0003, 0.0005, 0.0008, 0.01, 0.1, 0.003, 0.005, 0.02, 0.03, 0.05]
-# ).sort()
-lambda_values = jnp.array([0.001, 0.0001]).sort()
+step_intervals = [1, 3, 10, 20, 30, 40]
+lambda_values = jnp.array(
+    [0.001, 0.0001, 0.0003, 0.0005, 0.0008, 0.01, 0.1, 0.003, 0.005, 0.02, 0.03, 0.05]
+).sort()
+# lambda_values = jnp.array([0.001, 0.0001]).sort()
 y_values = {}
-env_name = "SpaceInvaders-MinAtar"
+env_name = "Breakout-MinAtar"
 for lambda_value in lambda_values:
     y_values[
         float(lambda_value)

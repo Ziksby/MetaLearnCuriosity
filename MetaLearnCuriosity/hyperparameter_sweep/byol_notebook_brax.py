@@ -49,7 +49,7 @@ from MetaLearnCuriosity.wrappers import (
 )
 
 key = jax.random.PRNGKey(76)
-step_intervals = []
+step_intervals = [0.0, 0.1, 0.3, 0.5, 0.8, 0.98]
 jax.config.update("jax_threefry_partitionable", True)
 environments = [
     "ant",
@@ -89,7 +89,7 @@ config = {
     "ANNEAL_LR": False,
     "ANNEAL_PRED_LR": False,
     "NORMALIZE_ENV": True,
-    "DELAY_REWARDS": False,
+    "DELAY_REWARDS": True,
     "STEP_INTERVAL": 0.98,
     "DEBUG": False,
     "REW_NORM_PARAMETER": 0.99,
@@ -691,7 +691,7 @@ lambda_values = jnp.array(
 ).sort()
 # lambda_values = jnp.array([0.001, 0.0001]).sort()
 y_values = {}
-env_name = "ant"
+env_name = "inverted_pendulum"
 for lambda_value in lambda_values:
     y_values[
         float(lambda_value)
@@ -819,7 +819,8 @@ def normalize_curious_agent_returns(
     return normalized_curious_agent_returns
 
 
-save_dir = f"/home/batsy/MetaLearnCuriosity/MetaLearnCuriosity/hyperparameter_sweep/Brax_Arrays/Brax_{env_name}/BYOL"
+# 1 save data
+save_dir = f"/home/batsy/MetaLearnCuriosity/MetaLearnCuriosity/hyperparameter_sweep/Brax_Arrays/Brax_{env_name}/byol"
 os.makedirs(save_dir, exist_ok=True)
 
 # Save data for each lambda and step interval
@@ -829,6 +830,43 @@ for lambda_value, step_data in y_values.items():
         np.save(save_path, returns)
 
 # 2. Create individual plots for each step interval
+# Define which step interval's data we want to load
+# existing_step_int = 1  # Replace with your specific step interval
+# base_dir = f"/home/batsy/MetaLearnCuriosity/MetaLearnCuriosity/hyperparameter_sweep/MinAtar_Arrays/MinAtar_{env_name}/RND"
+
+# # First, check if y_values is already populated for some lambda values
+# existing_lambdas = []
+# if y_values:
+#     existing_lambdas = list(y_values.keys())
+
+# # Load and update y_values with the existing data
+# for lambda_value in lambda_values:
+#     lambda_float = float(lambda_value)
+
+#     # Skip if this lambda value already has data for the existing_step_int
+#     if lambda_float in existing_lambdas and existing_step_int in y_values[lambda_float]:
+#         continue
+
+#     # Create the dictionary for this lambda if it doesn't exist
+#     if lambda_float not in y_values:
+#         y_values[lambda_float] = {}
+
+#     # Load the saved array
+#     save_path = os.path.join(
+#         base_dir, f"lambda_{lambda_float:.6f}_step_{existing_step_int}_returns.npy"
+#     )
+
+#     try:
+#         loaded_returns = np.load(save_path)
+#         y_values[lambda_float][existing_step_int] = loaded_returns
+#         print(f"Successfully loaded data for lambda={lambda_float}, step_int={existing_step_int}")
+#     except FileNotFoundError:
+#         print(
+#             f"Warning: No saved data found for lambda={lambda_float}, step_int={existing_step_int}"
+#         )
+#         continue
+
+
 for step_int in step_intervals:
     means = []
     ci_lows = []
@@ -875,13 +913,16 @@ for step_int in step_intervals:
 aggregate_means = []
 aggregate_ci_lows = []
 aggregate_ci_highs = []
-lambda_vals = sorted(y_values.keys())
+lambda_vals = sorted([float(f"{lv:.6f}") for lv in lambda_values])
 
 for lambda_value in lambda_vals:
     # Collect all returns for this lambda across all step intervals
     all_returns = []
     for step_int in step_intervals:
-        all_returns.extend(y_values[lambda_value][step_int])
+        # Load the saved numpy array instead of using y_values
+        save_path = os.path.join(save_dir, f"lambda_{lambda_value:.6f}_step_{step_int}_returns.npy")
+        loaded_returns = np.load(save_path)
+        all_returns.extend(loaded_returns)
 
     # Convert to numpy array
     all_returns = np.array(all_returns)
@@ -920,196 +961,5 @@ plt.grid(True, alpha=0.3)
 plt.tight_layout()
 
 # Save aggregate plot
-plt.savefig(os.path.join(save_dir, "aggregate_returns_all_steps.png"))
+plt.savefig(os.path.join(save_dir, "aggregate_returns_prob_all_steps.png"))
 plt.close()
-
-# Construct the save path using the curious algorithm type
-# os.makedirs(save_path, exist_ok=True)
-
-# Save the normalized curious agent returns
-# normalized_curious_agent_file = os.path.join(save_path, "normalized_curious_agent_returns.npy")
-# np.save(normalized_curious_agent_file, normalized_curious_agent_returns)
-
-# Print the size of the saved file in MB
-# print(
-#     f"Size of normalized_curious_agent_returns.npy: {os.path.getsize(normalized_curious_agent_file) / (1024 * 1024):.2f} MB"
-# )
-
-# end_time = time.time()
-# elapsed_time = end_time - start_time
-# print(f"Time taken to run the code: {elapsed_time:.2f} seconds")
-
-# return normalized_curious_agent_returns
-
-
-# Initialize plotting
-# for env_name in environments:
-#     num_metrics = len(metric_names)
-#     fig, axs = plt.subplots(num_metrics, 1, figsize=(12, 6 * num_metrics), sharex=False)
-#     fig.suptitle(f"Training Metrics Over Time for {env_name}")
-
-#     # Iterate over each metric
-#     for idx, metric_name in enumerate(metric_names):
-#         ax = axs[idx] if num_metrics > 1 else axs
-
-#         # Plot each lambda's data for this metric
-#         plotted = False
-#         for lambda_value in lambda_values:
-#             lambda_key = float(lambda_value)  # Ensure float key matches dictionary keys
-#             if lambda_key in y_values and env_name in y_values[lambda_key]:
-#                 metric_data = y_values[lambda_key][env_name][idx]
-
-#                 # Convert JAX array to NumPy array to ensure it can be used with len()
-#                 metric_data = np.array(metric_data)  # Ensure it's a NumPy array
-#                 if len(metric_data) > 0:
-#                     x_axis = range(1, len(metric_data) + 1)
-#                     ax.plot(x_axis, metric_data, label=f"Lambda={lambda_value:.5f}")
-#                     plotted = True
-
-#         # Only add a legend if data was actually plotted
-#         if plotted:
-#             ax.set_title(metric_name)
-#             ax.set_xlabel("Training Steps")
-#             ax.set_ylabel(metric_name)
-#             ax.legend()
-#         else:
-#             ax.set_title(f"{metric_name} (no data)")
-#             ax.set_xlabel("Training Steps")
-#             ax.set_ylabel(metric_name)
-
-#     # Adjust layout and save the figure
-#     plt.subplots_adjust(hspace=0.4)  # Adjust vertical spacing between plots
-#     plt.savefig(
-#         f"MetaLearnCuriosity/hyperparameter_sweep/MiniGrid/{env_name}_metrics_over_time_byol.png"
-#     )
-#     plt.close(fig)
-#     gc.collect()
-
-# Scatter plot for final episode returns vs. lambda values
-# for env_name in environments:
-#     lambda_values = []
-#     final_returns = []
-
-#     # Collect data for plotting
-#     for lambda_value, env_data in y_values.items():
-#         epi_ret = env_data[env_name][0]  # index 0 for episode returns
-#         epi_ret = np.array(env_data[env_name][0])
-#         if epi_ret.size > 0:  # Ensure there is at least one return value
-#             final_returns.append(epi_ret)
-#             lambda_values.append(lambda_value)
-
-#     # Sort lambda values for consistent plotting
-#     sorted_indices = sorted(range(len(lambda_values)), key=lambda k: lambda_values[k])
-#     sorted_lambda_values = [lambda_values[i] for i in sorted_indices]
-#     sorted_final_returns = [final_returns[i] for i in sorted_indices]
-
-#     # Plotting
-#     plt.figure(figsize=(10, 6))
-#     plt.scatter(range(1, len(sorted_lambda_values) + 1), sorted_final_returns, color="blue")
-#     plt.title(f"Final Episode Returns vs. Lambda for {env_name}")
-#     plt.xlabel("Lambda Value (Indexed)")
-#     plt.ylabel("Final Episode Return")
-#     plt.xticks(
-#         range(1, len(sorted_lambda_values) + 1),
-#         [f"{lv:.5f}" for lv in sorted_lambda_values],
-#         rotation=45,
-#     )
-#     plt.grid(True)
-
-#     # Save and close plot
-#     plt.savefig(
-#         f"MetaLearnCuriosity/hyperparameter_sweep/Brax/{env_name}_final_episode_returns_vs_lambda_BYOL_{config['STEP_INTERVAL']}.png"
-#     )
-#     plt.close()  # Close the plot to free up memory
-#     gc.collect()
-
-# # First loop remains the same
-# for lambda_value, env_data in y_values.items():
-#     for env_name, epi_ret in env_data.items():
-#         y_values[lambda_value][env_name] = normalize_curious_agent_returns(
-#             f"/home/batsy/MetaLearnCuriosity/MetaLearnCuriosity/experiments/delayed_brax_baseline_ppo_{config['STEP_INTERVAL']}/{env_name}/metric_seeds_episode_return.npy",
-#             f"/home/batsy/MetaLearnCuriosity/MetaLearnCuriosity/experiments/random_agents/{env_name}_epi_rets.npy",
-#             epi_ret.T,
-#         )
-# save_dir = f"/home/batsy/MetaLearnCuriosity/MetaLearnCuriosity/hyperparameter_sweep/Brax_Arrays/Brax_{config['STEP_INTERVAL']}/BYOL"
-# os.makedirs(save_dir, exist_ok=True)
-
-# # Second loop: save normalized returns for each lambda
-# for lambda_value, env_data in y_values.items():
-#     normalized_returns = []
-#     for env_name, normalized_epi_ret in env_data.items():
-#         normalized_returns.append(normalized_epi_ret)
-
-#     # Save the normalized returns array
-#     save_path = os.path.join(save_dir, f"{round(lambda_value, 4):.4e}_all_normalised_returns.npy")
-#     np.save(save_path, np.array(normalized_returns))
-#     y_values[lambda_value] = np.array(normalized_returns)
-
-# # Now load the saved arrays and calculate statistics
-# lambda_values = sorted(y_values.keys())
-# means = []
-# ci_lows = []
-# ci_highs = []
-
-# for lambda_value in lambda_values:
-#     # Load the saved normalized returns
-#     load_path = os.path.join(save_dir, f"{round(lambda_value, 4):.4e}_all_normalised_returns.npy")
-#     normalized_returns = np.load(load_path).flatten()
-
-#     # Calculate statistics
-#     mean_value = np.mean(normalized_returns)
-#     means.append(mean_value)
-
-#     ci = bootstrap(
-#         (normalized_returns,),
-#         np.mean,
-#         confidence_level=0.95,
-#         method="percentile",
-#     )
-#     ci_lows.append(ci.confidence_interval.low)
-#     ci_highs.append(ci.confidence_interval.high)
-
-# # Create evenly spaced x positions
-# x_positions = np.arange(len(lambda_values))
-
-# plt.figure(figsize=(15, 8))  # Maintain larger figure size for clarity
-
-# # Create the bar plot
-# plt.bar(
-#     x_positions,
-#     means,
-#     yerr=[np.array(means) - np.array(ci_lows), np.array(ci_highs) - np.array(means)],
-#     capsize=5,
-#     color="skyblue",
-#     edgecolor="black",
-#     width=0.6,
-# )
-
-# # Add grid
-# plt.grid(True)
-
-# # Set x-axis ticks and labels
-# plt.xticks(x_positions, [f"{lv:.4f}" for lv in lambda_values], rotation=45, ha="right")
-
-# # Adjust y-axis to show both positive and negative values
-# y_min = min(min(ci_lows), 0)
-# y_max = max(ci_highs)
-# plt.ylim(y_min - 0.1 * abs(y_min), y_max + 0.1 * abs(y_max))
-
-# # Add a horizontal line at y=0
-# plt.axhline(y=0, color="black", linestyle="-", linewidth=0.5)
-
-# # Label the axes
-# plt.xlabel("Lambda Value", fontsize=12)
-# plt.ylabel("Mean Normalized Episode Return", fontsize=12)
-# plt.title("Mean Normalized Episode Return vs Lambda Value", fontsize=14)
-
-# # Adjust layout
-# plt.tight_layout()
-
-# # Save the plot
-# plt.savefig(
-#     f"/home/batsy/MetaLearnCuriosity/MetaLearnCuriosity/hyperparameter_sweep/Brax/Brax_normalized_returns_histogram_BYOL_{config['STEP_INTERVAL']}.png",
-#     dpi=300,
-# )
-# plt.close()
