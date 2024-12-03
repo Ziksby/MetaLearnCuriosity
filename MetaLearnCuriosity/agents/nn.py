@@ -223,21 +223,26 @@ class MiniGridActorCriticRNN(nn.Module):
 
 # class RewardCombiner(nn.Module):
 #     @nn.compact
-#     def __call__(self, x):
+#     def __call__(self, x, norm_time_step):
 
 #         # Input shape: (num_envs, history_length, 2)
+#         # norm_time_step_encoder = nn.Embed(1, 16)
 
 #         x = nn.Conv(features=16, kernel_size=(3,), padding="valid")(x)
 #         x = nn.relu(x)
-#         # x = nn.max_pool(x, window_shape=(2,), strides=(2,), padding='valid')
+#         x = nn.max_pool(x, window_shape=(2,), strides=(2,), padding='valid')
 
 #         x = nn.Conv(features=32, kernel_size=(3,), padding="valid")(x)
 #         x = nn.relu(x)
-#         # x = nn.max_pool(x, window_shape=(2,), strides=(2,), padding='valid')
+#         x = nn.max_pool(x, window_shape=(2,), strides=(2,), padding='valid')
+
+#         norm_time_step_embed=nn.Dense(16)(norm_time_step)
 
 #         x = x.reshape((x.shape[0], -1))  # Flatten
-
-#         x = nn.Dense(features=128)(x)
+#         x=jnp.concatenate([x, norm_time_step_embed],-1)
+#         x = nn.Dense(features=64)(x)
+#         x = nn.relu(x)
+#         x = nn.Dense(features=64)(x)
 #         x = nn.relu(x)
 
 #         x = nn.Dense(features=1)(x)
@@ -258,7 +263,9 @@ class RewardCombiner(nn.Module):
         x = x.reshape((x.shape[0], -1))  # Flatten all dimensions except batch
 
         # Fully connected layer
-        x = nn.Dense(features=128)(x)
+        x = nn.Dense(features=64)(x)
+        x = nn.relu(x)
+        x = nn.Dense(features=64)(x)
         x = nn.relu(x)
 
         # Output layer with sigmoid activation
@@ -266,19 +273,19 @@ class RewardCombiner(nn.Module):
         return jnp.squeeze(nn.sigmoid(x), -1)
 
 
-# class RewardCombiner(nn.Module):
-#     @nn.compact
-#     def __call__(self, carry, x):
+class RNNRewardCombiner(nn.Module):
+    @nn.compact
+    def __call__(self, carry, x):
 
-#         # Input is (1, num_envs, 2)
+        # Input is (1, num_envs, 2)
 
-#         carry, x = RCRNN()(carry, x)  # features is 32
+        carry, x = RCRNN()(carry, x)  # features is 32
 
-#         x = jnp.squeeze(x, 0)
-#         x = nn.Dense(64)(x)
-#         x = nn.relu(x)
-#         x = nn.Dense(1)(x)
-#         return carry, jnp.squeeze(nn.sigmoid(x), -1)
+        x = jnp.squeeze(x, 0)
+        x = nn.Dense(128)(x)
+        x = nn.relu(x)
+        x = nn.Dense(1)(x)
+        return carry, jnp.squeeze(nn.sigmoid(x), -1)
 
 
 class TargetNetwork(nn.Module):

@@ -27,7 +27,13 @@ from MetaLearnCuriosity.utils import (
     rnd_normalise_int_rewards,
     update_obs_norm_params,
 )
-from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper, VecEnv
+from MetaLearnCuriosity.wrappers import (
+    FlattenObservationWrapper,
+    LogWrapper,
+    MinAtarDelayedReward,
+    ProbabilisticReward,
+    VecEnv,
+)
 
 
 class PPOActorCritic(nn.Module):
@@ -110,9 +116,9 @@ config = {
 }
 
 environments = [
-    "Asterix-MinAtar",
-    "Breakout-MinAtar",
-    "Freeway-MinAtar",
+    # "Asterix-MinAtar",
+    # "Breakout-MinAtar",
+    # "Freeway-MinAtar",
     "SpaceInvaders-MinAtar",
 ]
 
@@ -140,6 +146,7 @@ def make_config_env(config, env_name):
     env, env_params = gymnax.make(config["ENV_NAME"])
     env = FlattenObservationWrapper(env)
     env = LogWrapper(env)
+    env = MinAtarDelayedReward(env, config["STEP_INTERVAL"])
     env = VecEnv(env)
 
     return config, env, env_params
@@ -301,8 +308,8 @@ def train(rng, train_state, pred_state, target_params, init_obs_rng):
 
         def _calculate_gae(traj_batch, last_val, rnd_int_return_norm_params):
 
-            norm_int_reward, rnd_int_return_norm_params = rnd_normalise_int_rewards(
-                traj_batch, rnd_int_return_norm_params, config["INT_GAMMA"]
+            norm_int_reward, rnd_int_return_norm_params, _ = rnd_normalise_int_rewards(
+                traj_batch, rnd_int_return_norm_params, config["INT_GAMMA"], jnp.ones((1, 1))
             )
 
             norm_traj_batch = RNDTransition(
@@ -529,14 +536,19 @@ def train(rng, train_state, pred_state, target_params, init_obs_rng):
     }
 
 
-optimal_lambdas = [0.01, 0.01, 0.01, 0.01]
-for env_name, lambdas in zip(environments, optimal_lambdas):
-    rng = jax.random.PRNGKey(config["SEED"])
-    t = time.time()
-    config, env, env_params = make_config_env(config, env_name)
-    config["INT_LAMBDA"] = lambdas
+step_intervals = [1, 3, 30]
+optimal_lambdas = [0.02, 0.005, 0.0001]
 
-    if config["NUM_SEEDS"] > 1:
+
+for env_name in environments:
+    for step_int, optimal_lambda in zip(step_intervals, optimal_lambdas):
+        rng = jax.random.PRNGKey(config["SEED"])
+        t = time.time()
+        config["STEP_INTERVAL"] = step_int
+        config["INT_LAMBDA"] = optimal_lambda
+        config["RUN_NAME"] = f"delayed_rnd_{step_int}_{env_name}_optimal"
+        config, env, env_params = make_config_env(config, env_name)
+
         rng = jax.random.split(rng, config["NUM_SEEDS"])
         rng, train_state, pred_state, target_params, init_rnd_obs = jax.vmap(
             ppo_make_train, out_axes=(1, 0, 0, 0, 0)
@@ -551,42 +563,31 @@ for env_name, lambdas in zip(environments, optimal_lambdas):
             train_fn(rng, train_state, pred_state, target_params, init_rnd_obs)
         )
 
-    else:
-        rng, train_state, pred_state, target_params, init_rnd_obs = ppo_make_train(rng)
-        train_state = replicate(train_state, jax.local_devices())
-        pred_state = replicate(pred_state, jax.local_devices())
-        target_params = replicate(target_params, jax.local_devices())
-        init_rnd_obs = replicate(init_rnd_obs, jax.local_devices())
-        train_fn = jax.pmap(train, axis_name="devices")
-        output = jax.block_until_ready(
-            train_fn(rng, train_state, pred_state, target_params, init_rnd_obs)
+        print(f"Training in {config['ENV_NAME']}")
+        elapsed_time = time.time() - t
+        logger = WBLogger(
+            config=config,
+            group="minatar_curious",
+            tags=["curious_baseline", config["ENV_NAME"], "rnd"],
+            name=f"{config['RUN_NAME']}_{config['ENV_NAME']}",
         )
+        output = process_output_general(output)
 
-    print(f"Training in {config['ENV_NAME']}")
-    elapsed_time = time.time() - t
-    logger = WBLogger(
-        config=config,
-        group="minatar_curious",
-        tags=["curious_baseline", config["ENV_NAME"], "rnd"],
-        name=f"{config['RUN_NAME']}_{config['ENV_NAME']}",
-    )
-    output = process_output_general(output)
+        # logger.log_rnd_losses(output, config["NUM_SEEDS"])
+        logger.log_episode_return(output, config["NUM_SEEDS"])
+        # logger.log_rl_losses(output, config["NUM_SEEDS"])
+        # logger.log_int_rewards(output, config["NUM_SEEDS"])
+        # logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
+        # checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
-    logger.log_rnd_losses(output, config["NUM_SEEDS"])
-    logger.log_episode_return(output, config["NUM_SEEDS"])
-    logger.log_rl_losses(output, config["NUM_SEEDS"])
-    logger.log_int_rewards(output, config["NUM_SEEDS"])
-    logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
-    checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
+        # # Get the absolute path of the directory
+        # output = compress_output_for_reasoning(output)
 
-    # Get the absolute path of the directory
-    output = compress_output_for_reasoning(output)
+        # output["config"] = config
 
-    output["config"] = config
-
-    path = os.path.abspath(checkpoint_directory)
-    Save(path, output)
-    logger.save_artifact(path)
-    shutil.rmtree(path)
-    print(f"Deleted local checkpoint directory: {path}")
-    print(f"Done in {elapsed_time / 60:.2f}min")
+        # path = os.path.abspath(checkpoint_directory)
+        # Save(path, output)
+        # logger.save_artifact(path)
+        # shutil.rmtree(path)
+        # print(f"Deleted local checkpoint directory: {path}")
+        # print(f"Done in {elapsed_time / 60:.2f}min")
