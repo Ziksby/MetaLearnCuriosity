@@ -9,16 +9,14 @@ import time
 import jax
 import jax.numpy as jnp
 import jax.tree_util
-import wandb
 from evosax import OpenES
 from flax.jax_utils import replicate
 from tqdm import tqdm
 
+import wandb
 from MetaLearnCuriosity.agents.nn import RCRNN, RewardCombiner
 from MetaLearnCuriosity.checkpoints import Restore, Save
-from MetaLearnCuriosity.compile_byol_brax_fns import (
-    compile_brax_byol_fns as compile_fns,
-)
+from MetaLearnCuriosity.compile_rnd_gymnax_fns import compile_rnd_fns as compile_fns
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import (
     create_adjacent_pairs,
