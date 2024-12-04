@@ -4,6 +4,7 @@
 import gc
 import os
 import shutil
+import subprocess
 import time
 
 import jax
@@ -56,7 +57,28 @@ config = {
     "ES_SEED": 23_000,
     "NUM_GENERATIONS": 48,
 }
+# Function to get the latest commit hash
 
+
+def get_latest_commit_hash():
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],  # Git command to get the hash
+            capture_output=True,  # Capture the output
+            text=True,  # Decode the output as text
+            check=True,  # Raise an exception if the command fails
+        )
+        return result.stdout.strip()  # Return the commit hash as a string
+    except subprocess.CalledProcessError as e:
+        print("Error while getting the commit hash:", e)
+        return None
+
+
+# Store the commit hash in a string
+commit_hash = get_latest_commit_hash()
+
+config["COMMIT_HARSH"] = commit_hash
 reward_combiner_network = RewardCombiner()
 
 rc_params_pholder = reward_combiner_network.init(
@@ -228,6 +250,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
             )
     gc.collect()
 fit_log.finish()
+
 logger = WBLogger(
     config=config,
     group="meta_learners",
