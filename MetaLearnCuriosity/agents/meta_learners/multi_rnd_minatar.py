@@ -16,7 +16,7 @@ from tqdm import tqdm
 import wandb
 from MetaLearnCuriosity.agents.nn import RCRNN, RewardCombiner
 from MetaLearnCuriosity.checkpoints import Restore, Save
-from MetaLearnCuriosity.compile_rnd_gymnax_fns import compile_rnd_fns as compile_fns
+from MetaLearnCuriosity.compile_rnd_gymnax_trains import compile_rnd_fns as compile_fns
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import (
     create_adjacent_pairs,
@@ -29,7 +29,7 @@ step_intervals = [3, 10, 20, 30]
 config = {
     "RUN_NAME": "DELTE_rc_cnn_RND",
     "SEED": 42,
-    "NUM_SEEDS": 2,
+    "NUM_SEEDS": 1,
     "LR": 3e-4,
     "NUM_ENVS": 2048,
     "NUM_STEPS": 10,  # unroll length
@@ -51,10 +51,10 @@ config = {
     "INT_GAMMA": 0.99,
     "PRED_LR": 1e-3,
     "HIST_LEN": 128,
-    "POP_SIZE": 38,
+    "POP_SIZE": 2,
     "RC_SEED": 23 * 2 * 8,
     "ES_SEED": 23_000,
-    "NUM_GENERATIONS": 48,
+    "NUM_GENERATIONS": 2,
 }
 
 reward_combiner_network = RewardCombiner()
@@ -155,6 +155,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
         pair = replicate(pair, jax.local_devices())
         ext_reward_hist = replicate(ext_reward_hist, jax.local_devices())
         int_reward_hist = replicate(int_reward_hist, jax.local_devices())
+        init_rnd_obs = replicate(init_rnd_obs, jax.local_devices())
         t = time.time()
 
         output = jax.block_until_ready(
@@ -164,6 +165,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
                 train_state,
                 pred_state,
                 target_params,
+                init_rnd_obs,
                 ext_reward_hist,
                 int_reward_hist,
             )
@@ -226,11 +228,11 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
             )
     gc.collect()
 fit_log.finish()
-logger = WBLogger(
-    config=config,
-    group="meta_learners",
-    tags=["multi_task", "reward-combiner"],
-    name=config["RUN_NAME"],
-)
-logger.save_artifact(path)
-shutil.rmtree(path)
+# logger = WBLogger(
+#     config=config,
+#     group="meta_learners",
+#     tags=["multi_task", "reward-combiner"],
+#     name=config["RUN_NAME"],
+# )
+# logger.save_artifact(path)
+# shutil.rmtree(path)

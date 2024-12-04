@@ -12,12 +12,12 @@ import jax.numpy as jnp
 import jax.tree_util
 import numpy as np
 import optax
-import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 from tqdm import tqdm
 
+import wandb
 from MetaLearnCuriosity.agents.nn import PredictorNetwork, RewardCombiner, TargetNetwork
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
@@ -103,7 +103,7 @@ def compile_rnd_fns(config):  # noqa: C901
         env, env_params = gymnax.make(config["ENV_NAME"])
         env = FlattenObservationWrapper(env)
         env = LogWrapper(env)
-        env = MinAtarDelayedReward(env)
+        env = MinAtarDelayedReward(env, config["STEP_INTERVAL"])
         env = VecEnv(env)
 
         return config, env, env_params
@@ -284,6 +284,8 @@ def compile_rnd_fns(config):  # noqa: C901
                     log_prob,
                     last_obs,
                     norm_time_step,
+                    ext_reward_hist,
+                    int_reward_hist,
                     info,
                 )
                 runner_state = (
@@ -328,8 +330,6 @@ def compile_rnd_fns(config):  # noqa: C901
                 last_val,
                 rnd_int_return_norm_params,
                 rnd_ext_return_norm_params,
-                ext_reward_hist,
-                int_reward_hist,
             ):
 
                 (
@@ -340,7 +340,7 @@ def compile_rnd_fns(config):  # noqa: C901
                     traj_batch,
                     rnd_int_return_norm_params,
                     config["INT_GAMMA"],
-                    int_reward_hist,
+                    traj_batch.int_reward_hist,
                 )
                 (
                     norm_ext_reward,
@@ -350,7 +350,7 @@ def compile_rnd_fns(config):  # noqa: C901
                     traj_batch,
                     rnd_ext_return_norm_params,
                     config["GAMMA"],
-                    ext_reward_hist,
+                    traj_batch.ext_reward_hist,
                 )
 
                 norm_traj_batch = RNDTransition(
@@ -636,14 +636,12 @@ def compile_rnd_fns(config):  # noqa: C901
 
         rng = jax.random.PRNGKey(config["SEED"])
         config, env, env_params = make_config_env(config, env_name)
-        print(f"Training in {config['ENV_NAME']}")
         rng = jax.random.split(rng, config["NUM_SEEDS"])
-        print(f"Training in {config['ENV_NAME']}")
-        make_train = jax.jit(jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0, 0, 0)))
-        train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0, 0))
+        make_train = jax.jit(jax.vmap(ppo_make_train, out_axes=(1, 0, 0, 0, 0, 0, 0)))
+        train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0))
         train_fn = jax.vmap(
             train_fn,
-            in_axes=(None, 0, None, None, None, None, None, None, None, None),
+            in_axes=(None, 0, None, None, None, None, None, None),
         )
         train_fn = jax.pmap(train_fn, axis_name="devices")
         train_fns[step_int] = train_fn
