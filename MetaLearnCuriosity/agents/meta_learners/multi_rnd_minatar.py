@@ -14,9 +14,11 @@ from evosax import OpenES
 from flax.jax_utils import replicate
 from tqdm import tqdm
 
-from MetaLearnCuriosity.agents.nn import RewardCombiner
-from MetaLearnCuriosity.checkpoints import Save
-from MetaLearnCuriosity.compile_rnd_gymnax_trains import compile_rnd_fns
+from MetaLearnCuriosity.agents.nn import RCRNN, RewardCombiner
+from MetaLearnCuriosity.checkpoints import Restore, Save
+from MetaLearnCuriosity.compile_byol_brax_fns import (
+    compile_brax_byol_fns as compile_fns,
+)
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import (
     create_adjacent_pairs,
@@ -24,23 +26,12 @@ from MetaLearnCuriosity.utils import (
     reorder_antithetic_pairs,
 )
 
-environments = [
-    "ant",
-    # "halfcheetah",
-    # "hopper",
-    # "humanoid",
-    # "humanoidstandup",
-    # "inverted_pendulum",
-    # "inverted_double_pendulum",
-    # "pusher",
-    # "reacher",
-    # "walker2d",
-]
-
+env_name = "Breakout-Minatar"
+step_intervals = [3, 10, 20, 30]
 config = {
-    "RUN_NAME": "rc_cnn_multi_task_november_rnd",
+    "RUN_NAME": "DELTE_rc_cnn_RND",
     "SEED": 42,
-    "NUM_SEEDS": 1,
+    "NUM_SEEDS": 2,
     "LR": 3e-4,
     "NUM_ENVS": 2048,
     "NUM_STEPS": 10,  # unroll length
@@ -61,20 +52,17 @@ config = {
     "DEBUG": False,
     "INT_GAMMA": 0.99,
     "PRED_LR": 1e-3,
-    # "INT_LAMBDA": 0.02,
     "HIST_LEN": 128,
-    "POP_SIZE": 36,
-    "RC_SEED": 23,
-    "ES_SEED": 42 * 8**2,
+    "POP_SIZE": 38,
+    "RC_SEED": 23 * 2 * 8,
+    "ES_SEED": 23_000,
     "NUM_GENERATIONS": 48,
 }
-step_intervals = [3, 10, 20, 30]
-
 
 reward_combiner_network = RewardCombiner()
 
 rc_params_pholder = reward_combiner_network.init(
-    jax.random.PRNGKey(config["RC_SEED"]), jnp.zeros((1, 128, 2))
+    jax.random.PRNGKey(config["RC_SEED"]), jnp.zeros((1, config["HIST_LEN"], 2))
 )
 es_rng = jax.random.PRNGKey(config["ES_SEED"])
 strategy = OpenES(
@@ -93,7 +81,32 @@ name = f'{config["RUN_NAME"]}'
 es_rng, es_rng_init = jax.random.split(es_rng)
 es_params = strategy.default_params
 es_state = strategy.initialize(es_rng_init, es_params)
-train_fns, make_seeds = compile_rnd_fns(config=config)
+# es_stuff = Restore(
+#     "/home/batsy/MetaLearnCuriosity/MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/rc_cnn_64_64_delayed_brax_1_seed_continued"
+# )
+# es_state_saved, _ = es_stuff
+# print(es_state_saved)
+# print()
+# print(es_state)
+# print()
+# opt_state = es_state.opt_state.replace(
+#     lrate=es_state_saved["opt_state"]["lrate"],
+#     m=es_state_saved["opt_state"]["m"],
+#     v=es_state_saved["opt_state"]["v"],
+#     n=es_state_saved["opt_state"]["n"],
+#     last_grads=es_state_saved["opt_state"]["last_grads"],
+#     gen_counter=es_state_saved["opt_state"]["gen_counter"],
+# )
+# es_state = es_state.replace(
+#     mean=es_state_saved["mean"],
+#     sigma=es_state_saved["sigma"],
+#     opt_state=opt_state,
+#     best_member=es_state_saved["best_member"],
+#     best_fitness=es_state_saved["best_fitness"],
+#     gen_counter=es_state_saved["gen_counter"],
+# )
+# print("Now matched,", es_state, "\n")
+train_fns, make_seeds = compile_fns(config=config)
 rng = jax.random.PRNGKey(config["SEED"])
 fit_log = wandb.init(
     project="MetaLearnCuriosity",
@@ -102,7 +115,7 @@ fit_log = wandb.init(
     tags=tags,
     name=f"{name}_fitness",
 )
-env_name = "ant"
+
 for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations"):
     begin_gen = time.time()
     es_rng, es_rng_ask = jax.random.split(es_rng)
@@ -111,6 +124,9 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
     pairs = create_adjacent_pairs(x)
     fitness = []
     raw_fitness_dict = {step_int: [] for step_int in step_intervals}
+    int_lambda_dict = {
+        step_int: [] for step_int in step_intervals
+    }  # New dictionary for int_lambdas
 
     for pair in pairs:
         t = time.time()
@@ -139,8 +155,6 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
         pred_state = replicate(pred_state, jax.local_devices())
         target_params = replicate(target_params, jax.local_devices())
         pair = replicate(pair, jax.local_devices())
-        init_rnd_obs = replicate(init_rnd_obs, jax.local_devices())
-
         ext_reward_hist = replicate(ext_reward_hist, jax.local_devices())
         int_reward_hist = replicate(int_reward_hist, jax.local_devices())
         t = time.time()
@@ -152,14 +166,19 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
                 train_state,
                 pred_state,
                 target_params,
-                init_rnd_obs,
                 ext_reward_hist,
                 int_reward_hist,
             )
         )
         output = process_output_general(output)
         raw_episode_return = output["rewards"].mean(-1)  # This is the raw fitness
+        int_lambdas = output["int_lambdas"].mean(
+            -1
+        )  # Get the int_lambdas and average across episodes
+
         raw_fitness_dict[step_int].append(raw_episode_return)  # Store raw fitness
+        int_lambda_dict[step_int].append(int_lambdas)  # Store int_lambdas
+
         binary_fitness = jnp.where(raw_episode_return == jnp.max(raw_episode_return), 1.0, 0.0)
         fitness.append(binary_fitness)
         print(f"Time for the Pair in {env_name}_{step_int} is {(time.time()-t)/60}")
@@ -170,25 +189,41 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
     # Save the state
     checkpoint_directory = f'MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/{config["RUN_NAME"]}'
     path = os.path.abspath(checkpoint_directory)
-    details = (es_state, config)
+    details = (es_state, config, es_rng, rng)
     Save(path, details)
     print("Generation ", gen, "Time:", (time.time() - begin_gen) / 60)
+
     # logging now to W&Bs
     for step_int in step_intervals:
         raw_fitness = raw_fitness_dict[step_int]
+        int_lambdas = int_lambda_dict[step_int]
+
         if len(raw_fitness) > 0:
+            # Convert to numpy arrays for easier manipulation
+            raw_fitness_array = jnp.array(raw_fitness)
+            int_lambda_array = jnp.array(int_lambdas)
+
+            # Find the best individual based on raw fitness
+            best_idx = jnp.argmax(raw_fitness_array)
+
             fit_log.log(
                 {
-                    f"ant_{step_int}_mean_fitness": jnp.array(raw_fitness).mean(),
-                    f"ant_{step_int}_best_fitness": jnp.max(jnp.array(raw_fitness)),
+                    f"Breakout_{step_int}_mean_fitness": raw_fitness_array.mean(),
+                    f"Breakout_{step_int}_best_fitness": jnp.max(raw_fitness_array),
+                    f"Breakout_{step_int}_mean_lambda": int_lambda_array.mean(),  # Average lambda across generation
+                    f"Breakout_{step_int}_best_lambda": int_lambda_array[best_idx][
+                        0
+                    ],  # Lambda of best individual
                 }
             )
         else:
-            print(f"Warning: No fitness data for ant_{step_int} in generation {gen}")
+            print(f"Warning: No fitness data for Breakout_{step_int} in generation {gen}")
             fit_log.log(
                 {
-                    f"ant_{step_int}_mean_fitness": 0.0,
-                    f"ant_{step_int}_best_fitness": 0.0,
+                    f"Breakout_{step_int}_mean_fitness": 0.0,
+                    f"Breakout_{step_int}_best_fitness": 0.0,
+                    f"Breakout_{step_int}_mean_lambda": 0.0,
+                    f"Breakout_{step_int}_best_lambda": 0.0,
                 }
             )
     gc.collect()

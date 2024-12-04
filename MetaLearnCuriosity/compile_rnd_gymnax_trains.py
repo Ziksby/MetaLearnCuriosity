@@ -12,12 +12,12 @@ import jax.numpy as jnp
 import jax.tree_util
 import numpy as np
 import optax
+import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 from tqdm import tqdm
 
-import wandb
 from MetaLearnCuriosity.agents.nn import PredictorNetwork, RewardCombiner, TargetNetwork
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
@@ -33,7 +33,12 @@ from MetaLearnCuriosity.utils import (
     rnd_normalise_int_rewards,
     update_obs_norm_params,
 )
-from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper, VecEnv
+from MetaLearnCuriosity.wrappers import (
+    FlattenObservationWrapper,
+    LogWrapper,
+    MinAtarDelayedReward,
+    VecEnv,
+)
 
 
 class PPOActorCritic(nn.Module):
@@ -70,7 +75,7 @@ environments = [
     # "Asterix-MinAtar",
     "Breakout-MinAtar",
     # "Freeway-MinAtar",
-    "SpaceInvaders-MinAtar",
+    # "SpaceInvaders-MinAtar",
 ]
 
 
@@ -98,6 +103,7 @@ def compile_rnd_fns(config):  # noqa: C901
         env, env_params = gymnax.make(config["ENV_NAME"])
         env = FlattenObservationWrapper(env)
         env = LogWrapper(env)
+        env = MinAtarDelayedReward(env)
         env = VecEnv(env)
 
         return config, env, env_params
@@ -130,14 +136,9 @@ def compile_rnd_fns(config):  # noqa: C901
         rng, _init_obs_rng = jax.random.split(rng)
 
         init_x = jnp.zeros(env.observation_space(env_params).shape)
-        total_ext_reward_history = jnp.zeros(
-            (config["NUM_STEPS"], config["NUM_ENVS_PER_DEVICE"], 128)
-        )
-        total_int_reward_history = jnp.zeros(
-            (config["NUM_STEPS"], config["NUM_ENVS_PER_DEVICE"], 128)
-        )
-        ext_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 128))
-        int_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 128))
+
+        ext_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], config["HIST_LEN"]))
+        int_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], config["HIST_LEN"]))
 
         network_params = network.init(_rng, init_x)
         target_params = target.init(_tar_rng, init_x)
@@ -178,8 +179,6 @@ def compile_rnd_fns(config):  # noqa: C901
             _init_obs_rng,
             ext_reward_history,
             int_reward_history,
-            total_ext_reward_history,
-            total_int_reward_history,
         )
 
     def train(
@@ -191,8 +190,6 @@ def compile_rnd_fns(config):  # noqa: C901
         init_obs_rng,
         ext_reward_hist,
         int_reward_hist,
-        tot_ext_reward_hist,
-        tot_int_reward_hist,
     ):
         # REWARD COMBINER
         rc_network = RewardCombiner()
@@ -243,8 +240,6 @@ def compile_rnd_fns(config):  # noqa: C901
                     obs_norm_params,
                     ext_reward_hist,
                     int_reward_hist,
-                    tot_ext_reward_hist,
-                    tot_int_reward_hist,
                     rng,
                 ) = runner_state
 
@@ -276,9 +271,6 @@ def compile_rnd_fns(config):  # noqa: C901
                 ext_reward_hist = ext_reward_hist.at[:, -1].set(reward)
                 int_reward_hist = int_reward_hist.at[:, -1].set(int_reward)
 
-                tot_ext_reward_hist = tot_ext_reward_hist.at[step_index].set(ext_reward_hist)
-                tot_int_reward_hist = tot_int_reward_hist.at[step_index].set(int_reward_hist)
-
                 # Norm time step
                 norm_time_step = info["timestep"] / config["TRAINING_HORIZON"]
 
@@ -292,8 +284,6 @@ def compile_rnd_fns(config):  # noqa: C901
                     log_prob,
                     last_obs,
                     norm_time_step,
-                    tot_ext_reward_hist,
-                    tot_int_reward_hist,
                     info,
                 )
                 runner_state = (
@@ -307,8 +297,6 @@ def compile_rnd_fns(config):  # noqa: C901
                     obs_norm_params,
                     ext_reward_hist,
                     int_reward_hist,
-                    tot_ext_reward_hist,
-                    tot_int_reward_hist,
                     rng,
                 )
                 return runner_state, transition
@@ -331,8 +319,6 @@ def compile_rnd_fns(config):  # noqa: C901
                 obs_norm_params,
                 ext_reward_hist,
                 int_reward_hist,
-                tot_ext_reward_hist,
-                tot_int_reward_hist,
                 rng,
             ) = runner_state
             _, last_val = train_state.apply_fn(train_state.params, last_obs)
@@ -405,9 +391,9 @@ def compile_rnd_fns(config):  # noqa: C901
                         - value
                     )
                     gae = delta + config["GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
-                    return (gae, value), gae
+                    return (gae, value), (gae, int_lambda)
 
-                _, advantages = jax.lax.scan(
+                _, (advantages, int_lambdas) = jax.lax.scan(
                     _get_advantages,
                     (jnp.zeros_like(last_val), last_val),
                     norm_traj_batch,
@@ -420,6 +406,7 @@ def compile_rnd_fns(config):  # noqa: C901
                     norm_int_reward,
                     rnd_int_return_norm_params,
                     rnd_ext_return_norm_params,
+                    int_lambdas,
                 )
 
             (
@@ -428,13 +415,12 @@ def compile_rnd_fns(config):  # noqa: C901
                 norm_int_rewards,
                 rnd_int_return_norm_params,
                 rnd_ext_return_norm_params,
+                int_lambdas,
             ) = _calculate_gae(
                 traj_batch,
                 last_val,
                 rnd_int_return_norm_params,
                 rnd_ext_return_norm_params,
-                tot_ext_reward_hist,
-                tot_int_reward_hist,
             )
 
             # UPDATE NETWORK
@@ -603,11 +589,15 @@ def compile_rnd_fns(config):  # noqa: C901
                 obs_norm_params,
                 ext_reward_hist,
                 int_reward_hist,
-                tot_ext_reward_hist,
-                tot_int_reward_hist,
                 rng,
             )
-            return runner_state, (metric, traj_batch.int_reward, norm_int_rewards, loss_info)
+            return runner_state, (
+                metric,
+                traj_batch.int_reward,
+                norm_int_rewards,
+                loss_info,
+                int_lambdas,
+            )
 
         rng, _rng = jax.random.split(rng)
         runner_state = (
@@ -621,24 +611,29 @@ def compile_rnd_fns(config):  # noqa: C901
             obs_norm_params,
             ext_reward_hist,
             int_reward_hist,
-            tot_ext_reward_hist,
-            tot_int_reward_hist,
             _rng,
         )
         runner_state, extra_info = jax.lax.scan(
             _update_step, runner_state, None, config["NUM_UPDATES"]
         )
-        metric, int_rewards, norm_int_rewards, rl_total_loss = extra_info
+        metric, int_rewards, norm_int_rewards, rl_total_loss, int_lambdas = extra_info
         rewards = metric["sum_of_rewards"].mean(axis=-1)
         rewards = rewards.reshape(-1)
         rewards = rewards[-1]
+        int_lambdas = int_lambdas.mean()
+
         return {
+            "int_lambdas": int_lambdas,
             "rewards": rewards,
         }
 
     train_fns = {}
     make_seeds = {}
-    for env_name in environments:
+    step_intervals = [3, 10, 20, 30]
+    env_name = "Breakout-MinAtar"
+    for step_int in step_intervals:
+        config["STEP_INTERVAL"] = step_int
+
         rng = jax.random.PRNGKey(config["SEED"])
         config, env, env_params = make_config_env(config, env_name)
         print(f"Training in {config['ENV_NAME']}")
@@ -651,7 +646,7 @@ def compile_rnd_fns(config):  # noqa: C901
             in_axes=(None, 0, None, None, None, None, None, None, None, None),
         )
         train_fn = jax.pmap(train_fn, axis_name="devices")
-        train_fns[env_name] = train_fn
-        make_seeds[env_name] = make_train
+        train_fns[step_int] = train_fn
+        make_seeds[step_int] = make_train
 
     return train_fns, make_seeds
