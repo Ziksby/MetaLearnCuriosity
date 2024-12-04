@@ -27,9 +27,9 @@ from MetaLearnCuriosity.utils import (
 env_name = "Breakout-Minatar"
 step_intervals = [3, 10, 20, 30]
 config = {
-    "RUN_NAME": "DELTE_rc_cnn_RND",
+    "RUN_NAME": "rc_cnn_RND",
     "SEED": 42,
-    "NUM_SEEDS": 1,
+    "NUM_SEEDS": 2,
     "LR": 3e-4,
     "NUM_ENVS": 2048,
     "NUM_STEPS": 10,  # unroll length
@@ -51,10 +51,10 @@ config = {
     "INT_GAMMA": 0.99,
     "PRED_LR": 1e-3,
     "HIST_LEN": 128,
-    "POP_SIZE": 2,
+    "POP_SIZE": 64,
     "RC_SEED": 23 * 2 * 8,
     "ES_SEED": 23_000,
-    "NUM_GENERATIONS": 2,
+    "NUM_GENERATIONS": 48,
 }
 
 reward_combiner_network = RewardCombiner()
@@ -228,11 +228,11 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
             )
     gc.collect()
 fit_log.finish()
-# logger = WBLogger(
-#     config=config,
-#     group="meta_learners",
-#     tags=["multi_task", "reward-combiner"],
-#     name=config["RUN_NAME"],
-# )
-# logger.save_artifact(path)
-# shutil.rmtree(path)
+logger = WBLogger(
+    config=config,
+    group="meta_learners",
+    tags=["multi_task", "reward-combiner"],
+    name=config["RUN_NAME"],
+)
+logger.save_artifact(path)
+shutil.rmtree(path)
