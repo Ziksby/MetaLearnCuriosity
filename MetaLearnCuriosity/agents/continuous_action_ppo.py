@@ -1,4 +1,5 @@
 import os
+import shutil
 import time
 from typing import Any, NamedTuple, Sequence
 
@@ -14,7 +15,11 @@ from flax.training.train_state import TrainState
 
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
-from MetaLearnCuriosity.utils import PPOTransition, process_output_general
+from MetaLearnCuriosity.utils import (
+    PPOTransition,
+    compress_output_for_reasoning,
+    process_output_general,
+)
 from MetaLearnCuriosity.wrappers import (
     BraxGymnaxWrapper,
     ClipAction,
@@ -22,26 +27,27 @@ from MetaLearnCuriosity.wrappers import (
     LogWrapper,
     NormalizeVecObservation,
     NormalizeVecReward,
+    ProbabilisticReward,
     VecEnv,
 )
 
 environments = [
     "ant",
-    "halfcheetah",
-    "hopper",
-    "humanoid",
-    "humanoidstandup",
-    "inverted_pendulum",
-    "inverted_double_pendulum",
-    "pusher",
-    "reacher",
-    "walker2d",
+    # "halfcheetah",
+    # "hopper",
+    # "humanoid",
+    # "humanoidstandup",
+    # "inverted_pendulum",
+    # "inverted_double_pendulum",
+    # "pusher",
+    # "reacher",
+    # "walker2d",
 ]
 
 config = {
     "RUN_NAME": "delayed_brax_baseline_ppo",
     "SEED": 42,
-    "NUM_SEEDS": 10,
+    "NUM_SEEDS": 30,
     "LR": 3e-4,
     "NUM_ENVS": 2048,
     "NUM_STEPS": 10,  # unroll length
@@ -58,7 +64,6 @@ config = {
     "ANNEAL_LR": False,
     "NORMALIZE_ENV": True,
     "DELAY_REWARDS": True,
-    "STEP_INTERVAL": 10,
     "DEBUG": False,
 }
 
@@ -311,7 +316,7 @@ def train(rng, train_state):
     runner_state, extra_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
     metric, rl_total_loss = extra_info
     return {
-        "train_state": runner_state[0],
+        "train_states": runner_state[0],
         "metrics": metric,
         "rl_total_loss": rl_total_loss[0],
         "rl_value_loss": rl_total_loss[1][0],
@@ -320,13 +325,18 @@ def train(rng, train_state):
     }
 
 
-for env_name in environments:
-    rng = jax.random.PRNGKey(config["SEED"])
-    config, env, env_params = make_config_env(config, env_name)
-    print(f"Training in {config['ENV_NAME']}")
+step_intervals = [3, 20, 30]
+for step_int in step_intervals:
+    config["STEP_INTERVAL"] = step_int
+    for env_name in environments:
+        rng = jax.random.PRNGKey(config["SEED"])
+        config, env, env_params = make_config_env(config, env_name)
+        config["RUN_NAME"] = f"delayed_brax_baseline_ppo_{step_int}"
 
-    t = time.time()
-    if config["NUM_SEEDS"] > 1:
+        print(f"Training in {config['ENV_NAME']}")
+
+        t = time.time()
+
         rng = jax.random.split(rng, config["NUM_SEEDS"])
         rng, train_state = jax.vmap(make_train, out_axes=(1, 0))(rng)
         train_state = replicate(train_state, jax.local_devices())
@@ -334,29 +344,27 @@ for env_name in environments:
         train_fn = jax.pmap(train_fn, axis_name="devices")
         output = jax.block_until_ready(train_fn(rng, train_state))
 
-    else:
-        rng, train_state = make_train(rng)
-        train_state = replicate(train_state, jax.local_devices())
-        train_fn = jax.pmap(train, axis_name="devices")
-        output = jax.block_until_ready(train_fn(rng, train_state))
+        elapsed_time = time.time() - t
 
-    elapsed_time = time.time() - t
+        logger = WBLogger(
+            config=config,
+            group="delayed_brax_baseline",
+            tags=["baseline", config["ENV_NAME"], "delayed_brax"],
+            name=f'{config["RUN_NAME"]}_{config["ENV_NAME"]}',
+        )
+        output = process_output_general(output)
 
-    logger = WBLogger(
-        config=config,
-        group="delayed_brax_baseline",
-        tags=["baseline", config["ENV_NAME"], "delayed_brax"],
-        name=f'{config["RUN_NAME"]}_{config["ENV_NAME"]}',
-    )
-    output = process_output_general(output)
+        logger.log_episode_return(output, config["NUM_SEEDS"])
+        # logger.log_rl_losses(output, config["NUM_SEEDS"])
+        checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
-    logger.log_episode_return(output, config["NUM_SEEDS"])
-    logger.log_rl_losses(output, config["NUM_SEEDS"])
-    output["config"] = config
-    checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
+        # Get the absolute path of the directory
+        output = compress_output_for_reasoning(output)
+        output["config"] = config
 
-    # Get the absolute path of the directory
-    path = os.path.abspath(checkpoint_directory)
-    Save(path, output)
-    logger.save_artifact(path)
-    print(f"Done in {elapsed_time / 60:.2f}min")
+        path = os.path.abspath(checkpoint_directory)
+        Save(path, output)
+        logger.save_artifact(path)
+        shutil.rmtree(path)
+        print(f"Deleted local checkpoint directory: {path}")
+        print(f"Done in {elapsed_time / 60:.2f}min")

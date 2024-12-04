@@ -24,13 +24,11 @@ from MetaLearnCuriosity.utils import (
     ObsNormParams,
     RNDMiniGridTransition,
     RNDNormIntReturnParams,
-    RNDTransition,
+    compress_output_for_reasoning,
     make_obs_gymnax_discrete,
     process_output_general,
     rnd_calculate_gae,
     rnd_minigrid_ppo_update_networks,
-    rnd_normalise_int_rewards,
-    rnn_rollout,
     update_obs_norm_params,
 )
 from MetaLearnCuriosity.wrappers import (
@@ -43,19 +41,16 @@ from MetaLearnCuriosity.wrappers import (
 jax.config.update("jax_threefry_partitionable", True)
 
 environments = [
-    # "MiniGrid-BlockedUnlockPickUp",
-    "MiniGrid-DoorKey-16x16",
+    "MiniGrid-BlockedUnlockPickUp",
     "MiniGrid-Empty-16x16",
     "MiniGrid-EmptyRandom-16x16",
     "MiniGrid-FourRooms",
-    "MiniGrid-LockedRoom",
     "MiniGrid-MemoryS128",
     "MiniGrid-Unlock",
-    "MiniGrid-UnlockPickUp",
 ]
 
 config = {
-    "NUM_SEEDS": 10,
+    "NUM_SEEDS": 30,
     "PROJECT": "MetaLearnCuriosity",
     "RUN_NAME": "rnd_minigrid",
     "BENCHMARK_ID": None,
@@ -78,7 +73,7 @@ config = {
     "GAMMA": 0.99,
     "INT_GAMMA": 0.99,
     "GAE_LAMBDA": 0.95,
-    "INT_LAMBDA": 0.005,
+    "INT_LAMBDA": 0.01,
     "ENT_COEF": 0.01,
     "VF_COEF": 0.5,
     "MAX_GRAD_NORM": 0.5,
@@ -132,13 +127,13 @@ def make_train(rng):
         )
         return config["LR"] * frac
 
-    def pred_linear_schedule(count):
-        frac = (
-            1.0
-            - (count // (config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"]))
-            / config["NUM_UPDATES"]
-        )
-        return config["PRED_LR"] * frac
+    # def pred_linear_schedule(count):
+    #     frac = (
+    #         1.0
+    #         - (count // (config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"]))
+    #         / config["NUM_UPDATES"]
+    #     )
+    #     return config["PRED_LR"] * frac
 
     network = MiniGridActorCriticRNN(
         num_actions=num_actions,
@@ -471,7 +466,7 @@ def train(rng, init_hstate, train_state, pred_state, target_params, init_obs_rng
     runner_state, loss_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
     metric, loss, int_reward, norm_int_reward = loss_info
     return {
-        "train_state": runner_state[1:3],
+        "train_states": runner_state[1],
         "metrics": metric,
         "loss_info": loss,
         "norm_int_reward": norm_int_reward,
@@ -529,10 +524,12 @@ for env_name in environments:
     logger.log_rl_losses(output, config["NUM_SEEDS"])
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
-    output["config"] = config
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
     # Get the absolute path of the directory
+    output = compress_output_for_reasoning(output, minigrid=True)
+    output["config"] = config
+
     path = os.path.abspath(checkpoint_directory)
     Save(path, output)
     logger.save_artifact(path)

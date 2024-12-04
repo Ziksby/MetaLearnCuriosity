@@ -1,6 +1,7 @@
 import jax.numpy as jnp
-import wandb
 from flax.jax_utils import unreplicate
+
+import wandb
 
 
 class WBLogger:
@@ -25,7 +26,9 @@ class WBLogger:
             outs_avg = jnp.mean(output["metrics"]["returned_episode_returns"], axis=0)
             for returns in outs_avg.mean(-1).reshape(-1):
                 self.episode_returns.log(
-                    {f"episode_return_{self.config['ENV_NAME']}_{num_seeds}_seeds": returns}
+                    {
+                        f"episode_return_{self.config['ENV_NAME']}_{num_seeds}_seeds_{self.config['STEP_INTERVAL']}": returns
+                    }
                 )
             self.episode_returns.finish()
         else:
@@ -47,7 +50,9 @@ class WBLogger:
             outs_avg = jnp.mean(output["int_reward"], axis=0)
             for returns in outs_avg.mean(-1).reshape(-1):
                 self.episode_int_rewards.log(
-                    {f"int_rewards_{self.config['ENV_NAME']}_{num_seeds}_seeds": returns}
+                    {
+                        f"int_rewards_{self.config['ENV_NAME']}_{num_seeds}_seeds_{self.config['STEP_INTERVAL']}": returns
+                    }
                 )
             self.episode_int_rewards.finish()
         else:
@@ -69,7 +74,9 @@ class WBLogger:
             outs_avg = jnp.mean(output["norm_int_reward"], axis=0)
             for returns in outs_avg.mean(-1).reshape(-1):
                 self.episode_norm_int_rewards.log(
-                    {f"norm_int_rewards_{self.config['ENV_NAME']}_{num_seeds}_seeds": returns}
+                    {
+                        f"norm_int_rewards_{self.config['ENV_NAME']}_{num_seeds}_seeds_{self.config['STEP_INTERVAL']}": returns
+                    }
                 )
             self.episode_norm_int_rewards.finish()
         else:
@@ -78,6 +85,32 @@ class WBLogger:
                     {f"norm_int_rewards_{self.config['ENV_NAME']}": returns}
                 )
             self.episode_norm_int_rewards.finish()
+
+    def log_norm_ext_rewards(self, output, num_seeds):
+        self.episode_norm_ext_rewards = wandb.init(
+            project="MetaLearnCuriosity",
+            config=self.config,
+            group=self.group,
+            tags=self.tags,
+            notes=self.notes,
+            name=f"{self.name}_norm_ext_rew",
+        )
+
+        if num_seeds > 1:
+            outs_avg = jnp.mean(output["norm_ext_reward"], axis=0)
+            for returns in outs_avg.mean(-1).reshape(-1):
+                self.episode_norm_ext_rewards.log(
+                    {
+                        f"norm_ext_rewards_{self.config['ENV_NAME']}_{num_seeds}_seeds_{self.config['STEP_INTERVAL']}": returns
+                    }
+                )
+            self.episode_norm_ext_rewards.finish()
+        else:
+            for returns in output["norm_ext_reward"].mean(-1).reshape(-1):
+                self.episode_norm_ext_rewards.log(
+                    {f"norm_ext_rewards_{self.config['ENV_NAME']}": returns}
+                )
+            self.episode_norm_ext_rewards.finish()
 
     def log_byol_losses(self, output, num_seeds):
         self.losses = wandb.init(
@@ -377,7 +410,7 @@ class WBLogger:
             for int_lambda in range(len(int_value_avg.mean(-1).reshape(-1))):
                 self.int_lambdas.log(
                     {
-                        f"int_lambdas_{self.config['ENV_NAME']}_{num_seeds}_seeds": int_value_avg.mean(
+                        f"int_lambdas_{self.config['ENV_NAME']}_{num_seeds}_seeds_{self.config['STEP_INTERVAL']}": int_value_avg.mean(
                             -1
                         ).reshape(
                             -1
@@ -398,41 +431,41 @@ class WBLogger:
                 )
             self.int_lambdas.finish()
 
-    def log_total_reward(self, output, num_seeds):
-        self.total_reward = wandb.init(
+    def log_reward(self, output, num_seeds):
+        self.reward = wandb.init(
             project="MetaLearnCuriosity",
             config=self.config,
             group=self.group,
             tags=self.tags,
             notes=self.notes,
-            name=f"{self.name}_total_reward",
+            name=f"{self.name}_reward",
         )
 
         if num_seeds > 1:
-            total_reward_avg = jnp.mean(output["total_reward"], axis=0)
-            for total_rew in range(len(total_reward_avg.mean(-1).reshape(-1))):
-                self.total_reward.log(
+            reward_avg = jnp.mean(output["reward"], axis=0)
+            for rew in range(len(reward_avg.mean(-1).reshape(-1))):
+                self.reward.log(
                     {
-                        f"total_reward_{self.config['ENV_NAME']}_{num_seeds}_seeds": total_reward_avg.mean(
+                        f"ext_reward_{self.config['ENV_NAME']}_{num_seeds}_seeds_{self.config['STEP_INTERVAL']}": reward_avg.mean(
                             -1
                         ).reshape(
                             -1
                         )[
-                            total_rew
+                            rew
                         ]
                     }
                 )
-            self.total_reward.finish()
+            self.reward.finish()
         else:
-            for total_rew in range(len(output["total_reward"].mean(-1).reshape(-1))):
-                self.total_reward.log(
+            for rew in range(len(output["reward"].mean(-1).reshape(-1))):
+                self.reward.log(
                     {
-                        f"total_reward_{self.config['ENV_NAME']}": output["total_reward"]
+                        f"reward_{self.config['ENV_NAME']}": output["reward"]
                         .mean(-1)
-                        .reshape(-1)[total_rew],
+                        .reshape(-1)[rew],
                     }
                 )
-            self.total_reward.finish()
+            self.reward.finish()
 
     def log_rl_loss_minigrid(self, output, num_seeds):
         self.minigrid_losses = wandb.init(

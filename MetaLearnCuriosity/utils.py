@@ -6,7 +6,7 @@ from flax import struct
 from flax.jax_utils import replicate, unreplicate
 from flax.training.train_state import TrainState
 
-from MetaLearnCuriosity.agents.nn import TargetNetwork
+from MetaLearnCuriosity.agents.nn import RewardCombiner, TargetNetwork
 
 
 class RNDTransition(NamedTuple):
@@ -17,6 +17,39 @@ class RNDTransition(NamedTuple):
     int_reward: jnp.ndarray
     log_prob: jnp.ndarray
     obs: jnp.ndarray
+    info: jnp.ndarray
+
+
+class RCRNDTransition(NamedTuple):
+    done: jnp.ndarray
+    action: jnp.ndarray
+    value: jnp.ndarray
+    reward: jnp.ndarray
+    norm_reward: jnp.ndarray
+    int_reward: jnp.ndarray
+    log_prob: jnp.ndarray
+    obs: jnp.ndarray
+    norm_time_step: jnp.ndarray
+    ext_reward_hist: jnp.ndarray
+    int_reward_hist: jnp.ndarray
+    info: jnp.ndarray
+
+
+class RCBYOLTransition(NamedTuple):
+    done: jnp.ndarray
+    prev_action: jnp.ndarray
+    action: jnp.ndarray
+    value: jnp.ndarray
+    reward: jnp.ndarray
+    norm_reward: jnp.ndarray  # will be normalised in batch
+    int_reward: jnp.ndarray
+    log_prob: jnp.ndarray
+    obs: jnp.ndarray
+    next_obs: jnp.ndarray
+    bt: jnp.ndarray
+    norm_time_step: jnp.ndarray
+    ext_reward_hist: jnp.ndarray
+    int_reward_hist: jnp.ndarray
     info: jnp.ndarray
 
 
@@ -59,6 +92,25 @@ class BYOLMiniGridTransition(NamedTuple):
     prev_action: jnp.ndarray
     prev_reward: jnp.ndarray
     prev_bt: jnp.ndarray
+    info: jnp.ndarray
+
+
+class RCBYOLMiniGridTransition(NamedTuple):
+    done: jnp.ndarray
+    action: jnp.ndarray
+    value: jnp.ndarray
+    reward: jnp.ndarray
+    norm_reward: jnp.ndarray
+    int_reward: jnp.ndarray
+    log_prob: jnp.ndarray
+    obs: jnp.ndarray
+    next_obs: jnp.ndarray
+    prev_action: jnp.ndarray
+    prev_reward: jnp.ndarray
+    prev_bt: jnp.ndarray
+    norm_time_step: jnp.ndarray
+    ext_reward_hist: jnp.ndarray
+    int_reward_hist: jnp.ndarray
     info: jnp.ndarray
 
 
@@ -153,6 +205,86 @@ def calculate_gae(
     return advantages, advantages + transitions.value
 
 
+def rc_byol_calculate_gae(
+    transitions: RCBYOLMiniGridTransition,
+    rc_params,
+    last_val: jax.Array,
+    gamma: float,
+    gae_lambda: float,
+    rew_norm_parameter: float,
+    byol_reward_norm_params: BYOLRewardNorm,
+    ext_reward_norm_params: BYOLRewardNorm,
+    rc_hstate,
+) -> tuple[jax.Array, jax.Array]:
+    rc_network = RewardCombiner()
+    norm_int_reward, byol_reward_norm_params, int_reward_hist = byol_normalize_prior_int_rewards(
+        transitions.int_reward,
+        byol_reward_norm_params,
+        rew_norm_parameter,
+        transitions.int_reward_hist,
+    )
+    norm_ext_reward, ext_reward_norm_params, ext_reward_hist = byol_normalize_prior_int_rewards(
+        transitions.norm_reward,
+        ext_reward_norm_params,
+        rew_norm_parameter,
+        transitions.ext_reward_hist,
+        prior=False,
+    )
+    norm_traj_batch = RCBYOLMiniGridTransition(
+        transitions.done,
+        transitions.action,
+        transitions.value,
+        transitions.reward,
+        norm_ext_reward,
+        norm_int_reward,
+        transitions.log_prob,
+        transitions.obs,
+        transitions.next_obs,
+        # for minigrid rnn policy
+        transitions.prev_action,
+        transitions.prev_reward,
+        transitions.prev_bt,
+        transitions.norm_time_step,
+        ext_reward_hist,
+        int_reward_hist,
+        transitions.info,
+    )
+    # single iteration for the loop
+
+    def _get_advantages(gae_and_next_value, transition):
+        gae, next_value, rc_hstate = gae_and_next_value
+        rc_input = jnp.stack(
+            (transition.ext_reward_hist, transition.int_reward_hist),
+            axis=-1,
+        )
+        int_lambda = rc_network.apply(rc_params, rc_hstate, rc_input)
+        delta = (
+            (transition.reward + (transition.int_reward * int_lambda))
+            + gamma * next_value * (1 - transition.done)
+            - transition.value
+        )
+        gae = delta + gamma * gae_lambda * (1 - transition.done) * gae
+        return (gae, transition.value, rc_hstate), (gae, int_lambda)
+
+    (_, _, rc_hstate), (advantages, int_lambda) = jax.lax.scan(
+        _get_advantages,
+        (jnp.zeros_like(last_val), last_val, rc_hstate),
+        norm_traj_batch,
+        reverse=True,
+    )
+    # advantages and values (Q)
+    return (
+        advantages,
+        advantages + transitions.value,
+        norm_int_reward,
+        norm_ext_reward,
+        byol_reward_norm_params,
+        ext_reward_norm_params,
+        int_lambda,
+        rc_hstate,
+    )
+
+
 def byol_calculate_gae(
     transitions: BYOLMiniGridTransition,
     last_val: jax.Array,
@@ -162,15 +294,15 @@ def byol_calculate_gae(
     rew_norm_parameter: float,
     byol_reward_norm_params: BYOLRewardNorm,
 ) -> tuple[jax.Array, jax.Array]:
-    norm_int_reward, byol_reward_norm_params = byol_normalize_prior_int_rewards(
-        transitions.int_reward, byol_reward_norm_params, rew_norm_parameter
+    norm_int_reward, byol_reward_norm_params, _ = byol_normalize_prior_int_rewards(
+        transitions.int_reward, byol_reward_norm_params, rew_norm_parameter, jnp.zeros((1, 1))
     )
     norm_traj_batch = BYOLMiniGridTransition(
         transitions.done,
         transitions.action,
         transitions.value,
         transitions.reward,
-        transitions.int_reward,
+        norm_int_reward,
         transitions.log_prob,
         transitions.obs,
         transitions.next_obs,
@@ -340,7 +472,12 @@ def byol_minigrid_ppo_update_networks(
 
     def pred_loss(pred_params, target_params):
         tar_obs = target_state.apply_fn(target_params, transitions.next_obs)
-        pred_input = (transitions.prev_bt.squeeze(2), transitions.obs, transitions.prev_action)
+        pred_input = (
+            transitions.prev_bt.squeeze(2),
+            transitions.obs,
+            transitions.prev_action,
+            transitions.action,
+        )
         pred_obs, _, _, _ = pred_state.apply_fn(
             pred_params, init_close_hstate, init_open_hstate, pred_input
         )
@@ -683,7 +820,7 @@ def lifetime_return(life_rewards, lifetime_gamma, reverse=True):
     return single_return
 
 
-def rnd_normalise_int_rewards(traj_batch, rnd_int_return_norm_params, int_gamma):
+def rnd_normalise_int_rewards(traj_batch, rnd_int_return_norm_params, int_gamma, rew_hist):
     def _multiply_rewems_w_dones(rewems, dones_row):
         rewems = rewems * (1 - dones_row)
         return rewems, rewems
@@ -714,7 +851,43 @@ def rnd_normalise_int_rewards(traj_batch, rnd_int_return_norm_params, int_gamma)
         batch_count, batch_mean, batch_var, rewems, rnd_int_return_norm_params
     )
     norm_int_reward = int_reward / jnp.sqrt(rnd_int_return_norm_params.var + 1e-8)
-    return norm_int_reward, rnd_int_return_norm_params
+    rew_hist /= jnp.sqrt(rnd_int_return_norm_params.var + 1e-8)
+    return norm_int_reward, rnd_int_return_norm_params, rew_hist
+
+
+def rnd_normalise_ext_rewards(traj_batch, rnd_ext_return_norm_params, ext_gamma, rew_hist):
+    def _multiply_rewems_w_dones(rewems, dones_row):
+        rewems = rewems * (1 - dones_row)
+        return rewems, rewems
+
+    def _update_rewems(rewems, ext_reward_row):
+        rewems = rewems * ext_gamma + ext_reward_row
+        return rewems, rewems
+
+    # Shape (num_steps, num_envs)
+    ext_reward = traj_batch.norm_reward
+
+    # Shape (num_envs,num_steps)
+    ext_reward_transpose = jnp.transpose(ext_reward)
+
+    rewems, _ = jax.lax.scan(
+        _multiply_rewems_w_dones,
+        rnd_ext_return_norm_params.rewems,
+        jnp.transpose(traj_batch.done),  # Shape (num_envs,num_steps)
+    )
+
+    rewems, _ = jax.lax.scan(_update_rewems, rewems, ext_reward_transpose)
+
+    batch_count = len(rewems)
+    batch_mean = rewems.mean()
+    batch_var = jnp.var(rewems)
+
+    rnd_ext_return_norm_params = update_rnd_int_norm_params(
+        batch_count, batch_mean, batch_var, rewems, rnd_ext_return_norm_params
+    )
+    norm_ext_reward = ext_reward / jnp.sqrt(rnd_ext_return_norm_params.var + 1e-8)
+    rew_hist /= jnp.sqrt(rnd_ext_return_norm_params.var + 1e-8)
+    return norm_ext_reward, rnd_ext_return_norm_params, rew_hist
 
 
 def process_output_general(output):
@@ -771,34 +944,49 @@ def byol_update_reward_norm_params(byol_reward_norm_params, int_reward, rew_norm
     return BYOLRewardNorm(new_ema_mean, new_ema_mean_sq, new_c, byol_reward_norm_params.mu_l)
 
 
-def byol_normalize_prior_int_rewards(int_reward, byol_reward_norm_params, rew_norm_param):
+def byol_normalize_prior_int_rewards(
+    int_reward, byol_reward_norm_params, rew_norm_param, rew_hist, prior: bool = True
+):
     # Update reward normalization parameters
     byol_reward_norm_params = byol_update_reward_norm_params(
         byol_reward_norm_params, int_reward, rew_norm_param
     )
-
     # Compute the adjusted EMA mean and mean square
     mu_r = byol_reward_norm_params.ema_mean / (1 - (rew_norm_param**byol_reward_norm_params.c))
     mu_r_sq = byol_reward_norm_params.ema_mean_sq / (
         1 - (rew_norm_param**byol_reward_norm_params.c)
     )
-
     # Compute standard deviation
     mu_array = jnp.array([0, mu_r_sq - jnp.square(mu_r)])
     sigma_r = jnp.sqrt(jnp.max(mu_array) + 1e-8)  # 1e-8 as a small numerical regularization
-
     # Normalize intrinsic reward
     norm_int_reward = int_reward / sigma_r
+    rew_hist /= sigma_r
 
     # Update prior normalization
     byol_reward_norm_params = byol_update_reward_prior_norm(
         norm_int_reward, byol_reward_norm_params, rew_norm_param
     )
 
-    # Compute prior normalized intrinsic reward
-    prior_norm_int_reward = jnp.maximum(norm_int_reward - byol_reward_norm_params.mu_l, 0)
+    def prior_norm_step(norm_int_reward, byol_reward_norm_params, rew_hist):
+        # Compute prior normalized intrinsic reward
+        prior_norm_int_reward = jnp.maximum(norm_int_reward - byol_reward_norm_params.mu_l, 0)
+        rew_hist = jnp.maximum(rew_hist - byol_reward_norm_params.mu_l, 0)
+        return prior_norm_int_reward, byol_reward_norm_params, rew_hist
 
-    return prior_norm_int_reward, byol_reward_norm_params
+    def no_prior_norm_step(norm_int_reward, byol_reward_norm_params, rew_hist):
+        return norm_int_reward, byol_reward_norm_params, rew_hist
+
+    prior_norm_int_reward, byol_reward_norm_params, rew_hist = jax.lax.cond(
+        prior,
+        prior_norm_step,
+        no_prior_norm_step,
+        norm_int_reward,
+        byol_reward_norm_params,
+        rew_hist,
+    )
+
+    return prior_norm_int_reward, byol_reward_norm_params, rew_hist
 
 
 def update_target_state_with_ema(predictor_state, target_state, ema_param):
@@ -829,3 +1017,87 @@ def update_target_state_with_ema(predictor_state, target_state, ema_param):
     target_state = target_state.replace(params=new_target_params)
 
     return target_state
+
+
+def compress_output_for_reasoning(output, minigrid=False):
+    output_compressed = {}
+
+    for key, value in output.items():
+        if key == "train_states":
+            # Keep train_states as is
+            output_compressed[key] = value
+        elif "loss" in key.lower():
+            if minigrid:
+                # Leave loss as is for minigrid
+                output_compressed[key] = value
+            else:
+                # Apply double mean for loss values in non-minigrid case
+                output_compressed[key] = value.mean(-1).mean(-1)
+        elif key == "metrics":
+            # Apply mean to each value in the metrics dictionary
+            output_compressed[key] = {k: v.mean(-1) for k, v in value.items()}
+        else:
+            # For all other keys, take mean along the last axis
+            output_compressed[key] = value.mean(-1)
+
+    return output_compressed
+
+
+def create_adjacent_pairs(candidate_params):
+    def split_adjacent(arr):
+        # Ensure the first dimension is even
+        assert arr.shape[0] % 2 == 0, "First dimension must be even"
+        return arr.reshape(-1, 2, *arr.shape[1:])
+
+    # Split each parameter array into pairs
+    paired_params = jax.tree.map(split_adjacent, candidate_params)
+
+    # Get the number of pairs
+    num_pairs = jax.tree.leaves(paired_params)[0].shape[0]
+
+    # Function to extract a single pair from the paired structure
+    def extract_pair(paired_tree, idx):
+        return jax.tree.map(lambda x: x[idx], paired_tree)
+
+    # Create a list of parameter pairs
+    param_pairs = [extract_pair(paired_params, i) for i in range(num_pairs)]
+
+    return param_pairs
+
+
+def reshape_adjacent_pairs(candidate_params):
+    def combine_adjacent(arr):
+        # Ensure the first dimension is even
+        assert arr.shape[0] % 2 == 0, "First dimension must be even"
+        new_shape = (arr.shape[0] // 2, 2, *arr.shape[1:])
+        return arr.reshape(new_shape)
+
+    # Reshape each parameter array to combine adjacent pairs
+    reshaped_params = jax.tree_util.tree_map(combine_adjacent, candidate_params)
+
+    return reshaped_params
+
+
+def reorder_antithetic_pairs(params, population_size):
+    """
+    Reorder parameters to make antithetic samples adjacent in the population.
+
+    Parameters:
+    - params: A pytree containing population parameters (e.g., dict, list, or array).
+    - population_size: The total number of individuals in the population (must be even).
+
+    Returns:
+    - Reordered pytree where antithetic pairs are adjacent.
+    """
+    # Ensure population_size is even for antithetic pairing
+    assert population_size % 2 == 0, "population_size must be even for antithetic pairing."
+
+    # Generate indices to reorder the population
+    idxs = jnp.concatenate(
+        [jnp.array([i, i + population_size // 2]) for i in range(population_size // 2)]
+    )
+
+    # Reorder the parameters based on the calculated indices
+    reordered_params = jax.tree_util.tree_map(lambda arr: arr[idxs], params)
+
+    return reordered_params

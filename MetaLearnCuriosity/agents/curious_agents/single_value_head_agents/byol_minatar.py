@@ -15,11 +15,11 @@ import jax.numpy as jnp
 import jax.tree_util
 import numpy as np
 import optax
-import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 
+import wandb
 from MetaLearnCuriosity.agents.nn import (
     AtariBYOLPredictor,
     BYOLTarget,
@@ -32,16 +32,23 @@ from MetaLearnCuriosity.utils import BYOLRewardNorm
 from MetaLearnCuriosity.utils import BYOLTransition as Transition
 from MetaLearnCuriosity.utils import (
     byol_normalize_prior_int_rewards,
+    compress_output_for_reasoning,
     process_output_general,
     update_target_state_with_ema,
 )
-from MetaLearnCuriosity.wrappers import FlattenObservationWrapper, LogWrapper, VecEnv
+from MetaLearnCuriosity.wrappers import (
+    FlattenObservationWrapper,
+    LogWrapper,
+    MinAtarDelayedReward,
+    ProbabilisticReward,
+    VecEnv,
+)
 
 environments = [
-    "Asterix-MinAtar",
+    # "Asterix-MinAtar",
     "Breakout-MinAtar",
-    "Freeway-MinAtar",
-    "SpaceInvaders-MinAtar",
+    # "Freeway-MinAtar",
+    # "SpaceInvaders-MinAtar",
 ]
 
 
@@ -78,7 +85,7 @@ class PPOActorCritic(nn.Module):
 config = {
     "RUN_NAME": "minatar_byol_ppo",
     "SEED": 42,
-    "NUM_SEEDS": 10,
+    "NUM_SEEDS": 30,
     "LR": 5e-3,
     "NUM_ENVS": 64,
     "NUM_STEPS": 128,
@@ -98,15 +105,8 @@ config = {
     "PRED_LR": 0.001,
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
-    "INT_LAMBDA": 0.001,
+    "INT_LAMBDA": 0.02,
 }
-
-environments = [
-    "Asterix-MinAtar",
-    "Breakout-MinAtar",
-    "Freeway-MinAtar",
-    "SpaceInvaders-MinAtar",
-]
 
 
 def make_config_env(config, env_name):
@@ -128,6 +128,7 @@ def make_config_env(config, env_name):
     env, env_params = gymnax.make(config["ENV_NAME"])
     env = FlattenObservationWrapper(env)
     env = LogWrapper(env)
+    env = MinAtarDelayedReward(env, config["STEP_INTERVAL"])
     env = VecEnv(env)
 
     return config, env, env_params
@@ -168,7 +169,7 @@ def ppo_make_train(rng):
     open_init_hstate = OpenScannedRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 128)
     init_bt = jnp.zeros((1, config["NUM_ENVS_PER_DEVICE"], 128))
 
-    init_pred_input = (init_bt, init_x, init_action[np.newaxis, :])
+    init_pred_input = (init_bt, init_x, init_action[np.newaxis, :], init_action[np.newaxis, :])
 
     network_params = network.init(_rng, init_x)
     pred_params = pred.init(_pred_rng, close_init_hstate, open_init_hstate, init_pred_input)
@@ -281,7 +282,7 @@ def train(
 
             # INT REWARD
             tar_obs = target_state.apply_fn(target_state.params, obsv[np.newaxis, :])
-            pred_input = (bt, last_obs[np.newaxis, :], last_act[np.newaxis, :])
+            pred_input = (bt, last_obs[np.newaxis, :], last_act[np.newaxis, :], action)
             pred_obs, new_bt, new_close_hstate, new_open_hstate = pred_state.apply_fn(
                 pred_state.params, close_hstate, open_hstate, pred_input
             )
@@ -345,8 +346,11 @@ def train(
         _, last_val = train_state.apply_fn(train_state.params, last_obs[np.newaxis, :])
 
         def _calculate_gae(traj_batch, last_val, byol_reward_norm_params):
-            norm_int_reward, byol_reward_norm_params = byol_normalize_prior_int_rewards(
-                traj_batch.int_reward, byol_reward_norm_params, config["REW_NORM_PARAMETER"]
+            norm_int_reward, byol_reward_norm_params, _ = byol_normalize_prior_int_rewards(
+                traj_batch.int_reward,
+                byol_reward_norm_params,
+                config["REW_NORM_PARAMETER"],
+                jnp.zeros((1, 1)),
             )
             norm_traj_batch = Transition(
                 traj_batch.done,
@@ -406,7 +410,12 @@ def train(
                     pred_params, target_params, traj_batch, init_close_hstate, init_open_hstate
                 ):
                     tar_obs = target_state.apply_fn(target_params, traj_batch.next_obs)
-                    pred_input = (traj_batch.bt, traj_batch.obs, traj_batch.prev_action)
+                    pred_input = (
+                        traj_batch.bt,
+                        traj_batch.obs,
+                        traj_batch.prev_action,
+                        traj_batch.action,
+                    )
                     pred_obs, _, _, _ = pred_state.apply_fn(
                         pred_params, init_close_hstate[0], init_open_hstate[0], pred_input
                     )
@@ -614,7 +623,7 @@ def train(
             update_target_counter,
             rng,
         )
-        return runner_state, (metric, loss_info, norm_int_reward, traj_batch.int_reward)
+        return runner_state, (metric, loss_info, traj_batch.int_reward, norm_int_reward)
 
     rng, _rng = jax.random.split(rng)
     runner_state = (
@@ -632,27 +641,32 @@ def train(
         _rng,
     )
     runner_state, extra_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
-    metric, rl_total_loss, int_reward, norm_int_reward = extra_info
+    metric, _, int_reward, norm_int_reward = extra_info
     return {
-        "train_state": runner_state[0],
+        # "train_states": runner_state[0],
         "metrics": metric,
-        "rl_total_loss": rl_total_loss[0],
-        "rl_value_loss": rl_total_loss[1][0],
-        "rl_actor_loss": rl_total_loss[1][1],
-        "rl_entrophy_loss": rl_total_loss[1][2],
-        "pred_loss": rl_total_loss[2],
+        # "rl_total_loss": rl_total_loss[0],
+        # "rl_value_loss": rl_total_loss[1][0],
+        # "rl_actor_loss": rl_total_loss[1][1],
+        # "rl_entrophy_loss": rl_total_loss[1][2],
+        # "pred_loss": rl_total_loss[2],
         "int_reward": int_reward,
         "norm_int_reward": norm_int_reward,
     }
 
 
+step_intervals = [1, 3, 20, 40]
+optimal_lambdas = [0.003, 0.03, 0.001, 0.005]
 for env_name in environments:
-    rng = jax.random.PRNGKey(config["SEED"])
-    t = time.time()
-    config, env, env_params = make_config_env(config, env_name)
-    print(f"Training in {config['ENV_NAME']}")
+    for step_int, optimal_lambda in zip(step_intervals, optimal_lambdas):
+        rng = jax.random.PRNGKey(config["SEED"])
+        config["STEP_INTERVAL"] = step_int
+        config["INT_LAMBDA"] = optimal_lambda
+        config["RUN_NAME"] = f"delay_minatar_byol_{step_int}_{env_name}_optimal"
+        t = time.time()
+        config, env, env_params = make_config_env(config, env_name)
+        print(f"Training in {config['ENV_NAME']}")
 
-    if config["NUM_SEEDS"] > 1:
         rng = jax.random.split(rng, config["NUM_SEEDS"])
         (
             rng,
@@ -689,66 +703,30 @@ for env_name in environments:
         )
         elapsed_time = time.time() - t
 
-    else:
-        (
-            rng,
-            train_state,
-            pred_state,
-            target_state,
-            init_bt,
-            close_init_hstate,
-            open_init_hstate,
-            init_action,
-        ) = ppo_make_train(rng)
-        open_init_hstate = replicate(open_init_hstate, jax.local_devices())
-        close_init_hstate = replicate(close_init_hstate, jax.local_devices())
-        train_state = replicate(train_state, jax.local_devices())
-        pred_state = replicate(pred_state, jax.local_devices())
-        target_state = replicate(target_state, jax.local_devices())
-        init_bt = replicate(init_bt, jax.local_devices())
-        init_action = replicate(init_action, jax.local_devices())
-        train_fn = jax.pmap(train, axis_name="devices")
-        t = time.time()
-        output = jax.block_until_ready(
-            train_fn(
-                rng,
-                train_state,
-                pred_state,
-                target_state,
-                init_bt,
-                close_init_hstate,
-                open_init_hstate,
-                init_action,
-            )
+        print((time.time() - t) / 60, "\n")
+
+        logger = WBLogger(
+            config=config,
+            group="minatar_curious",
+            tags=["curious_baseline", config["ENV_NAME"], "minatar"],
+            name=f'{config["RUN_NAME"]}_{config["ENV_NAME"]}',
         )
-        elapsed_time = time.time() - t
-        epi_ret = output["metrics"]["returned_episode_returns"].mean(0).mean(-1).reshape(-1)
-        int_rew = output["int_reward"].mean(0).mean(-1).reshape(-1)
-        int_norm_rew = output["norm_int_reward"].mean(0).mean(-1).reshape(-1)
-        pred_loss = unreplicate(output["pred_loss"]).mean(-1).mean(-1)
+        output = process_output_general(output)
 
-    print((time.time() - t) / 60, "\n")
+        # logger.log_pred_losses(output, config["NUM_SEEDS"])
+        logger.log_episode_return(output, config["NUM_SEEDS"])
+        # logger.log_rl_losses(output, config["NUM_SEEDS"])
+        logger.log_int_rewards(output, config["NUM_SEEDS"])
+        logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
+        checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
-    logger = WBLogger(
-        config=config,
-        group="minatar_curious",
-        tags=["curious_baseline", config["ENV_NAME"], "minatar"],
-        name=f'{config["RUN_NAME"]}_{config["ENV_NAME"]}',
-    )
-    output = process_output_general(output)
+        # Get the absolute path of the directory
+        output = compress_output_for_reasoning(output)
+        output["config"] = config
 
-    logger.log_pred_losses(output, config["NUM_SEEDS"])
-    logger.log_episode_return(output, config["NUM_SEEDS"])
-    logger.log_rl_losses(output, config["NUM_SEEDS"])
-    logger.log_int_rewards(output, config["NUM_SEEDS"])
-    logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
-    output["config"] = config
-    checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
-
-    # Get the absolute path of the directory
-    path = os.path.abspath(checkpoint_directory)
-    Save(path, output)
-    logger.save_artifact(path)
-    shutil.rmtree(path)
-    print(f"Deleted local checkpoint directory: {path}")
-    print(f"Done in {elapsed_time / 60:.2f}min")
+        path = os.path.abspath(checkpoint_directory)
+        Save(path, output)
+        logger.save_artifact(path)
+        shutil.rmtree(path)
+        print(f"Deleted local checkpoint directory: {path}")
+        print(f"Done in {elapsed_time / 60:.2f}min")

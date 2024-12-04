@@ -25,6 +25,7 @@ from MetaLearnCuriosity.utils import BYOLRewardNorm
 from MetaLearnCuriosity.utils import BYOLTransition as Transition
 from MetaLearnCuriosity.utils import (
     byol_normalize_prior_int_rewards,
+    compress_output_for_reasoning,
     process_output_general,
     update_target_state_with_ema,
 )
@@ -54,7 +55,7 @@ environments = [
 config = {
     "RUN_NAME": "delayed_brax_byol",
     "SEED": 42,
-    "NUM_SEEDS": 10,
+    "NUM_SEEDS": 30,
     "LR": 3e-4,
     "NUM_ENVS": 2048,
     "NUM_STEPS": 10,  # unroll length
@@ -77,7 +78,7 @@ config = {
     "PRED_LR": 0.001,
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
-    "INT_LAMBDA": 0.0003,
+    "INT_LAMBDA": 0.02,
 }
 
 
@@ -178,7 +179,7 @@ def ppo_make_train(rng):
     open_init_hstate = OpenScannedRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 256)
     init_bt = jnp.zeros((1, config["NUM_ENVS_PER_DEVICE"], 256))
 
-    init_pred_input = (init_bt, init_x, init_action[np.newaxis, :])
+    init_pred_input = (init_bt, init_x, init_action[np.newaxis, :], init_action[np.newaxis, :])
 
     network_params = network.init(_rng, init_x)
     pred_params = pred.init(_pred_rng, close_init_hstate, open_init_hstate, init_pred_input)
@@ -291,7 +292,7 @@ def train(
 
             # INT REWARD
             tar_obs = target_state.apply_fn(target_state.params, obsv[np.newaxis, :])
-            pred_input = (bt, last_obs[np.newaxis, :], last_act[np.newaxis, :])
+            pred_input = (bt, last_obs[np.newaxis, :], last_act[np.newaxis, :], action)
             pred_obs, new_bt, new_close_hstate, new_open_hstate = pred_state.apply_fn(
                 pred_state.params, close_hstate, open_hstate, pred_input
             )
@@ -355,8 +356,11 @@ def train(
         _, last_val = train_state.apply_fn(train_state.params, last_obs[np.newaxis, :])
 
         def _calculate_gae(traj_batch, last_val, byol_reward_norm_params):
-            norm_int_reward, byol_reward_norm_params = byol_normalize_prior_int_rewards(
-                traj_batch.int_reward, byol_reward_norm_params, config["REW_NORM_PARAMETER"]
+            norm_int_reward, byol_reward_norm_params, _ = byol_normalize_prior_int_rewards(
+                traj_batch.int_reward,
+                byol_reward_norm_params,
+                config["REW_NORM_PARAMETER"],
+                jnp.zeros((1, 1)),
             )
             norm_traj_batch = Transition(
                 traj_batch.done,
@@ -416,7 +420,12 @@ def train(
                     pred_params, target_params, traj_batch, init_close_hstate, init_open_hstate
                 ):
                     tar_obs = target_state.apply_fn(target_params, traj_batch.next_obs)
-                    pred_input = (traj_batch.bt, traj_batch.obs, traj_batch.prev_action)
+                    pred_input = (
+                        traj_batch.bt,
+                        traj_batch.obs,
+                        traj_batch.prev_action,
+                        traj_batch.action,
+                    )
                     pred_obs, _, _, _ = pred_state.apply_fn(
                         pred_params, init_close_hstate[0], init_open_hstate[0], pred_input
                     )
@@ -626,7 +635,7 @@ def train(
             update_target_counter,
             rng,
         )
-        return runner_state, (metric, loss_info, norm_int_reward, traj_batch.int_reward)
+        return runner_state, (metric, loss_info, traj_batch.int_reward, norm_int_reward)
 
     rng, _rng = jax.random.split(rng)
     runner_state = (
@@ -646,7 +655,7 @@ def train(
     runner_state, extra_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
     metric, rl_total_loss, int_reward, norm_int_reward = extra_info
     return {
-        "train_state": runner_state[0],
+        "train_states": runner_state[0],
         "metrics": metric,
         "rl_total_loss": rl_total_loss[0],
         "rl_value_loss": rl_total_loss[1][0],
@@ -747,11 +756,12 @@ for env_name in environments:
     logger.log_rl_losses(output, config["NUM_SEEDS"])
     logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
-    output["config"] = config
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
     # Get the absolute path of the directory
+    output = compress_output_for_reasoning(output)
     path = os.path.abspath(checkpoint_directory)
+    output["config"] = config
     Save(path, output)
     logger.save_artifact(path)
     shutil.rmtree(path)
