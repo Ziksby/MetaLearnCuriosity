@@ -9,11 +9,11 @@ import time
 import jax
 import jax.numpy as jnp
 import jax.tree_util
+import wandb
 from evosax import OpenES
 from flax.jax_utils import replicate
 from tqdm import tqdm
 
-import wandb
 from MetaLearnCuriosity.agents.nn import RCRNN, RewardCombiner
 from MetaLearnCuriosity.checkpoints import Restore, Save
 from MetaLearnCuriosity.compile_byol_brax_fns import (
@@ -22,14 +22,15 @@ from MetaLearnCuriosity.compile_byol_brax_fns import (
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import (
     create_adjacent_pairs,
+    get_latest_commit_hash,
     process_output_general,
     reorder_antithetic_pairs,
 )
 
-env_name = "ant"
+env_name = "inverted_pendulum"
 step_intervals = [3, 10, 20, 30]
 config = {
-    "RUN_NAME": "rc_cnn_128_delayed_ant_fixed",
+    "RUN_NAME": "rc_cnn_brax",
     "SEED": 42,
     "NUM_SEEDS": 1,
     "LR": 3e-4,
@@ -54,11 +55,15 @@ config = {
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
     "HIST_LEN": 128,
-    "POP_SIZE": 38,
+    "POP_SIZE": 64,
     "RC_SEED": 23 * 2 * 8,
     "ES_SEED": 23_000,
-    "NUM_GENERATIONS": 48,
+    "NUM_GENERATIONS": 6,
 }
+# Store the commit hash in a string
+commit_hash = get_latest_commit_hash()
+
+config["COMMIT_HARSH"] = commit_hash
 
 reward_combiner_network = RewardCombiner()
 
@@ -202,7 +207,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
     # Save the state
     checkpoint_directory = f'MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/{config["RUN_NAME"]}'
     path = os.path.abspath(checkpoint_directory)
-    details = (es_state, config)
+    details = (es_state, config, es_rng, rng)
     Save(path, details)
     print("Generation ", gen, "Time:", (time.time() - begin_gen) / 60)
 
@@ -221,10 +226,10 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
 
             fit_log.log(
                 {
-                    f"ant_{step_int}_mean_fitness": raw_fitness_array.mean(),
-                    f"ant_{step_int}_best_fitness": jnp.max(raw_fitness_array),
-                    f"ant_{step_int}_mean_lambda": int_lambda_array.mean(),  # Average lambda across generation
-                    f"ant_{step_int}_best_lambda": int_lambda_array[best_idx][
+                    f"{env_name}_{step_int}_mean_fitness": raw_fitness_array.mean(),
+                    f"{env_name}_{step_int}_best_fitness": jnp.max(raw_fitness_array),
+                    f"{env_name}_{step_int}_mean_lambda": int_lambda_array.mean(),  # Average lambda across generation
+                    f"{env_name}_{step_int}_best_lambda": int_lambda_array[best_idx][
                         0
                     ],  # Lambda of best individual
                 }
@@ -233,10 +238,10 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
             print(f"Warning: No fitness data for ant_{step_int} in generation {gen}")
             fit_log.log(
                 {
-                    f"ant_{step_int}_mean_fitness": 0.0,
-                    f"ant_{step_int}_best_fitness": 0.0,
-                    f"ant_{step_int}_mean_lambda": 0.0,
-                    f"ant_{step_int}_best_lambda": 0.0,
+                    f"{env_name}_{step_int}_mean_fitness": 0.0,
+                    f"{env_name}_{step_int}_best_fitness": 0.0,
+                    f"{env_name}_{step_int}_mean_lambda": 0.0,
+                    f"{env_name}_{step_int}_best_lambda": 0.0,
                 }
             )
     gc.collect()
