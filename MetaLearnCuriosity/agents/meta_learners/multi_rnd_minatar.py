@@ -197,9 +197,12 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
         int_lambdas = output["int_lambdas"].mean(
             -1
         )  # Get the int_lambdas and average across episodes
-
+        episode_returns = output["episode_returns"].mean(-1)
         raw_fitness_dict[step_int].append(raw_episode_return)  # Store raw fitness
         int_lambda_dict[step_int].append(int_lambdas)  # Store int_lambdas
+        print("Here is the episode return of the pair:", episode_returns)
+        print("Here is the int_lambda of the pair:", int_lambdas)
+        print("Here is the fitness of the pair:", raw_episode_return)
 
         binary_fitness = jnp.where(raw_episode_return == jnp.max(raw_episode_return), 1.0, 0.0)
         fitness.append(binary_fitness)

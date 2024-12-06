@@ -620,11 +620,15 @@ def compile_rnd_fns(config):  # noqa: C901
         rewards = metric["sum_of_rewards"].mean(axis=-1)
         rewards = rewards.reshape(-1)
         rewards = rewards[-1]
+        episode_returns = metric["returned_episode_returns"].mean(axis=-1)
+        episode_returns = episode_returns.reshape(-1)
+        episode_returns = episode_returns[-1]
         int_lambdas = int_lambdas.mean()
 
         return {
             "int_lambdas": int_lambdas,
             "rewards": rewards,
+            "episode_returns": episode_returns,
         }
 
     train_fns = {}
