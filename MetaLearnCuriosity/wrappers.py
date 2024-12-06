@@ -358,15 +358,39 @@ class MinAtarDelayedReward(GymnaxWrapper):
         return obs, state
 
     def step(self, key, state, action, params=None):
+        # Perform a step in the wrapped environment
         obs, env_state, reward, done, info = self._env.step(key, state.env_state, action, params)
+
+        # Update the accumulated reward
         new_delayed_reward = state.delayed_reward + reward
+
+        # Get the current step count from the environment
         steps = env_state.env_state.time
+
+        # Check if we should release the delayed reward (either at step_interval or end of episode)
         interval = steps % self.step_interval == 0
+        return_full_reward = (
+            done | interval
+        )  # Reward is returned either at intervals or when the episode ends
 
-        returned_reward = jax.lax.cond(interval, lambda: new_delayed_reward, lambda: 0.0)
-        next_delayed_reward = jax.lax.cond(done | interval, lambda: 0.0, lambda: new_delayed_reward)
+        # Use jax.lax.cond to determine the reward to return
+        returned_reward = jax.lax.cond(
+            return_full_reward,
+            lambda: new_delayed_reward,  # Return the accumulated reward
+            lambda: 0.0,  # Otherwise, return no reward
+        )
 
-        state = DelayedRewardEnvState(delayed_reward=next_delayed_reward, env_state=env_state)
+        # Reset the delayed reward if the episode ends or interval is reached
+        next_delayed_reward = jax.lax.cond(
+            return_full_reward,
+            lambda: 0.0,  # Reset accumulated reward
+            lambda: new_delayed_reward,  # Keep accumulating
+        )
+
+        # Update the state with the new delayed reward and environment state
+        state = MinAtarDelayedRewardEnvState(
+            delayed_reward=next_delayed_reward, env_state=env_state
+        )
 
         return obs, state, returned_reward, done, info
 
@@ -391,12 +415,31 @@ class DelayedReward(GymnaxWrapper):
         obs, env_state, reward, done, info = self._env.step(key, state.env_state, action, params)
         new_delayed_reward = state.delayed_reward + reward
         steps = env_state.env_state.info["steps"]
+
+        # Check if we should release the delayed reward (either at step_interval or end of episode)
         interval = steps % self.step_interval == 0
+        return_full_reward = (
+            done | interval
+        )  # Reward is returned either at intervals or when the episode ends
 
-        returned_reward = jax.lax.cond(interval, lambda: new_delayed_reward, lambda: 0.0)
-        next_delayed_reward = jax.lax.cond(done | interval, lambda: 0.0, lambda: new_delayed_reward)
+        # Use jax.lax.cond to determine the reward to return
+        returned_reward = jax.lax.cond(
+            return_full_reward,
+            lambda: new_delayed_reward,  # Return the accumulated reward
+            lambda: 0.0,  # Otherwise, return no reward
+        )
 
-        state = DelayedRewardEnvState(delayed_reward=next_delayed_reward, env_state=env_state)
+        # Reset the delayed reward if the episode ends or interval is reached
+        next_delayed_reward = jax.lax.cond(
+            return_full_reward,
+            lambda: 0.0,  # Reset accumulated reward
+            lambda: new_delayed_reward,  # Keep accumulating
+        )
+
+        # Update the state with the new delayed reward and environment state
+        state = MinAtarDelayedRewardEnvState(
+            delayed_reward=next_delayed_reward, env_state=env_state
+        )
 
         return obs, state, returned_reward, done, info
 
