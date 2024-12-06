@@ -4,6 +4,7 @@
 import gc
 import os
 import shutil
+import subprocess
 import time
 
 import jax
@@ -56,7 +57,28 @@ config = {
     "ES_SEED": 23_000,
     "NUM_GENERATIONS": 48,
 }
+# Function to get the latest commit hash
 
+
+def get_latest_commit_hash():
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],  # Git command to get the hash
+            capture_output=True,  # Capture the output
+            text=True,  # Decode the output as text
+            check=True,  # Raise an exception if the command fails
+        )
+        return result.stdout.strip()  # Return the commit hash as a string
+    except subprocess.CalledProcessError as e:
+        print("Error while getting the commit hash:", e)
+        return None
+
+
+# Store the commit hash in a string
+commit_hash = get_latest_commit_hash()
+
+config["COMMIT_HARSH"] = commit_hash
 reward_combiner_network = RewardCombiner()
 
 rc_params_pholder = reward_combiner_network.init(
@@ -175,9 +197,12 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
         int_lambdas = output["int_lambdas"].mean(
             -1
         )  # Get the int_lambdas and average across episodes
-
+        episode_returns = output["episode_returns"].mean(-1)
         raw_fitness_dict[step_int].append(raw_episode_return)  # Store raw fitness
         int_lambda_dict[step_int].append(int_lambdas)  # Store int_lambdas
+        print("Here is the episode return of the pair:", episode_returns)
+        print("Here is the int_lambda of the pair:", int_lambdas)
+        print("Here is the fitness of the pair:", raw_episode_return)
 
         binary_fitness = jnp.where(raw_episode_return == jnp.max(raw_episode_return), 1.0, 0.0)
         fitness.append(binary_fitness)
@@ -228,6 +253,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
             )
     gc.collect()
 fit_log.finish()
+
 logger = WBLogger(
     config=config,
     group="meta_learners",

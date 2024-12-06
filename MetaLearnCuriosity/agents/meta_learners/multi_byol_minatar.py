@@ -6,11 +6,11 @@ import time
 import jax
 import jax.numpy as jnp
 import jax.tree_util
+import wandb
 from evosax import OpenES
 from flax.jax_utils import replicate
 from tqdm import tqdm
 
-import wandb
 from MetaLearnCuriosity.agents.nn import RCRNN, RewardCombiner
 from MetaLearnCuriosity.checkpoints import Restore, Save
 from MetaLearnCuriosity.compile_gymnax_trains import compile_fns
@@ -22,7 +22,7 @@ from MetaLearnCuriosity.utils import (
 )
 
 config = {
-    "RUN_NAME": "rc_cnn_64_64_minatar_default_delayed_breakout",
+    "RUN_NAME": "rc_cnn_minatar_default_delayed_breakout_fixed",
     "SEED": 42,
     "NUM_SEEDS": 2,
     "LR": 5e-3,
@@ -182,12 +182,15 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
         int_lambdas = output["int_lambdas"].mean(
             -1
         )  # Get the int_lambdas and average across episodes
-
+        episode_returns = output["episode_returns"].mean(-1)
         raw_fitness_dict[step_int].append(raw_episode_return)  # Store raw fitness
         int_lambda_dict[step_int].append(int_lambdas)  # Store int_lambdas
 
         binary_fitness = jnp.where(raw_episode_return == jnp.max(raw_episode_return), 1.0, 0.0)
         fitness.append(binary_fitness)
+        print("Here is the episode return of the pair:", episode_returns)
+        print("Here is the int_lambda of the pair:", int_lambdas)
+        print("Here is the fitness of the pair:", raw_episode_return)
         print(f"Time for the Pair in {env_name}_{step_int} is {(time.time()-t)/60}")
 
     fitness = jnp.array(fitness).flatten()
