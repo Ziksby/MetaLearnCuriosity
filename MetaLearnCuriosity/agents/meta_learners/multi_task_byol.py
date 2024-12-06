@@ -9,11 +9,11 @@ import time
 import jax
 import jax.numpy as jnp
 import jax.tree_util
-import wandb
 from evosax import OpenES
 from flax.jax_utils import replicate
 from tqdm import tqdm
 
+import wandb
 from MetaLearnCuriosity.agents.nn import RCRNN, RewardCombiner
 from MetaLearnCuriosity.checkpoints import Restore, Save
 from MetaLearnCuriosity.compile_byol_brax_fns import (
@@ -58,7 +58,7 @@ config = {
     "POP_SIZE": 64,
     "RC_SEED": 23 * 2 * 8,
     "ES_SEED": 23_000,
-    "NUM_GENERATIONS": 6,
+    "NUM_GENERATIONS": 48,
 }
 # Store the commit hash in a string
 commit_hash = get_latest_commit_hash()
@@ -237,7 +237,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
                 }
             )
         else:
-            print(f"Warning: No fitness data for ant_{step_int} in generation {gen}")
+            print(f"Warning: No fitness data for {env_name}_{step_int} in generation {gen}")
             fit_log.log(
                 {
                     f"{env_name}_{step_int}_mean_fitness": 0.0,
