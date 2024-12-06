@@ -354,7 +354,7 @@ class MinAtarDelayedReward(GymnaxWrapper):
 
     def reset(self, key, params=None):
         obs, state = self._env.reset(key, params)
-        state = DelayedRewardEnvState(delayed_reward=0.0, env_state=state)
+        state = MinAtarDelayedRewardEnvState(delayed_reward=0.0, env_state=state)
         return obs, state
 
     def step(self, key, state, action, params=None):
