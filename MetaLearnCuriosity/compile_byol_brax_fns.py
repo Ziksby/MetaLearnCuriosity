@@ -767,7 +767,7 @@ def compile_brax_byol_fns(config):  # noqa: C901
             _update_step, runner_state, None, config["NUM_UPDATES"]
         )
         metric, _, _, _, int_lambdas = extra_info
-        rewards = metric["sum_of_rewards"].mean(axis=-1)
+        rewards = metric["lifetime_episode_lengths"].mean(axis=-1)
         rewards = rewards.reshape(-1)
         rewards = rewards[-1]
         int_lambdas = int_lambdas.mean()

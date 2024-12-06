@@ -80,6 +80,7 @@ class LogEnvState:
     returned_episode_lengths: int
     sum_of_rewards: int
     timestep: int
+    lifetime_episode_lengths: int
 
 
 class LogWrapper(GymnaxWrapper):
@@ -115,14 +116,16 @@ class LogWrapper(GymnaxWrapper):
             + new_episode_return * done,
             returned_episode_lengths=state.returned_episode_lengths * (1 - done)
             + new_episode_length * done,
-            sum_of_rewards=state.sum_of_rewards + reward,
+            sum_of_rewards=state.sum_of_rewards + (reward),
             timestep=state.timestep + 1,
+            lifetime_episode_lengths=state.lifetime_episode_lengths + new_episode_length * done,
         )
         info["returned_episode_returns"] = state.returned_episode_returns
         info["returned_episode_lengths"] = state.returned_episode_lengths
         info["timestep"] = state.timestep
         info["returned_episode"] = done
         info["sum_of_rewards"] = state.sum_of_rewards
+        info["lifetime_episode_lengths"] = state.lifetime_episode_lengths
         return obs, state, reward, done, info
 
 
@@ -361,7 +364,7 @@ class MinAtarDelayedReward(GymnaxWrapper):
         interval = steps % self.step_interval == 0
 
         returned_reward = jax.lax.cond(interval, lambda: new_delayed_reward, lambda: 0.0)
-        next_delayed_reward = jax.lax.cond(interval, lambda: 0.0, lambda: new_delayed_reward)
+        next_delayed_reward = jax.lax.cond(done | interval, lambda: 0.0, lambda: new_delayed_reward)
 
         state = DelayedRewardEnvState(delayed_reward=next_delayed_reward, env_state=env_state)
 
@@ -391,7 +394,7 @@ class DelayedReward(GymnaxWrapper):
         interval = steps % self.step_interval == 0
 
         returned_reward = jax.lax.cond(interval, lambda: new_delayed_reward, lambda: 0.0)
-        next_delayed_reward = jax.lax.cond(interval, lambda: 0.0, lambda: new_delayed_reward)
+        next_delayed_reward = jax.lax.cond(done | interval, lambda: 0.0, lambda: new_delayed_reward)
 
         state = DelayedRewardEnvState(delayed_reward=next_delayed_reward, env_state=env_state)
 
@@ -426,7 +429,11 @@ class ProbabilisticReward(GymnaxWrapper):
         random_num = jax.random.uniform(random_key)
 
         # Use jax.lax.cond to conditionally zero out the reward
-        returned_reward = jax.lax.cond(random_num < self.zero_prob, lambda: 0.0, lambda: reward)
+        returned_reward = jax.lax.cond(
+            self.zero_prob == 0.0,
+            lambda: reward,
+            lambda: jax.lax.cond(random_num < self.zero_prob, lambda: 0.0, lambda: reward),
+        )
 
         state = ProbabilisticRewardEnvState(env_state=env_state)
         return obs, state, returned_reward, done, info
