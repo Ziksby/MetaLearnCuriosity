@@ -189,7 +189,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
             )
         )
         output = process_output_general(output)
-        raw_episode_return = output["sum_of_rewards"].mean(-1)  # This is the raw fitness
+        raw_episode_return = output["rewards"].mean(-1)  # This is the raw fitness
         int_lambdas = output["int_lambdas"].mean(
             -1
         )  # Get the int_lambdas and average across episodes
