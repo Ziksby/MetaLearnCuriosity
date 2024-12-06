@@ -41,19 +41,6 @@ from MetaLearnCuriosity.wrappers import (
     VecEnv,
 )
 
-environments = [
-    # "ant",
-    # "halfcheetah",
-    # "hopper",
-    # "humanoid",
-    # "humanoidstandup",
-    "inverted_pendulum",
-    # "inverted_double_pendulum",
-    # "pusher",
-    # "reacher",
-    # "walker2d",
-]
-
 config = {
     "RUN_NAME": "rc_delayed_brax_byol",
     "SEED": 42,
@@ -788,7 +775,7 @@ def compile_brax_byol_fns(config):  # noqa: C901
 
     train_fns = {}
     make_seeds = {}
-    env_name = "inverted_pendulum"
+    env_name = "inverted_double_pendulum"
     for step_interval in step_intervals:
         config["STEP_INTERVAL"] = step_interval
         config, env, env_params = make_config_env(config, env_name)

@@ -27,7 +27,7 @@ from MetaLearnCuriosity.utils import (
     reorder_antithetic_pairs,
 )
 
-env_name = "inverted_pendulum"
+env_name = "inverted_double_pendulum"
 step_intervals = [3, 10, 20, 30]
 config = {
     "RUN_NAME": "rc_cnn_brax",
@@ -189,7 +189,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
             )
         )
         output = process_output_general(output)
-        raw_episode_return = output["lifetime_episode_lengths"].mean(-1)  # This is the raw fitness
+        raw_episode_return = output["sum_of_rewards"].mean(-1)  # This is the raw fitness
         int_lambdas = output["int_lambdas"].mean(
             -1
         )  # Get the int_lambdas and average across episodes

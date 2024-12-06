@@ -78,9 +78,9 @@ class LogEnvState:
     episode_lengths: int
     returned_episode_returns: float
     returned_episode_lengths: int
-    sum_of_rewards: int
+    sum_of_rewards: float
     timestep: int
-    lifetime_episode_lengths: int
+    done_sum_of_rewards: float
 
 
 class LogWrapper(GymnaxWrapper):
@@ -117,15 +117,15 @@ class LogWrapper(GymnaxWrapper):
             returned_episode_lengths=state.returned_episode_lengths * (1 - done)
             + new_episode_length * done,
             sum_of_rewards=state.sum_of_rewards + (reward),
+            done_sum_of_rewards=state.done_sum_of_rewards + reward * (1 - done),
             timestep=state.timestep + 1,
-            lifetime_episode_lengths=state.lifetime_episode_lengths + new_episode_length * done,
         )
         info["returned_episode_returns"] = state.returned_episode_returns
         info["returned_episode_lengths"] = state.returned_episode_lengths
         info["timestep"] = state.timestep
         info["returned_episode"] = done
         info["sum_of_rewards"] = state.sum_of_rewards
-        info["lifetime_episode_lengths"] = state.lifetime_episode_lengths
+        info["done_sum_of_rewards"] = state.done_sum_of_rewards
         return obs, state, reward, done, info
 
 
