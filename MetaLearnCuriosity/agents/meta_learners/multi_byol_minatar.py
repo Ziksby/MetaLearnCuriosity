@@ -23,7 +23,7 @@ from MetaLearnCuriosity.utils import (
 )
 
 config = {
-    "RUN_NAME": "rc_cnn_minatar_default_delayed_breakout_fixed",
+    "RUN_NAME": "rc_cnn_minatar_default_delayed_breakout_EPISODE_RETURNS",
     "SEED": 42,
     "NUM_SEEDS": 2,
     "LR": 5e-3,
@@ -181,7 +181,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
             )
         )
         output = process_output_general(output)
-        raw_episode_return = output["rewards"].mean(-1)  # This is the raw fitness
+        raw_episode_return = output["episode_returns"].mean(-1)  # This is the raw fitness
         int_lambdas = output["int_lambdas"].mean(
             -1
         )  # Get the int_lambdas and average across episodes
@@ -221,8 +221,8 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
 
             fit_log.log(
                 {
-                    f"Breakout_{step_int}_mean_fitness": raw_fitness_array.mean(),
-                    f"Breakout_{step_int}_best_fitness": jnp.max(raw_fitness_array),
+                    f"Breakout_{step_int}_mean_fitness_episode": raw_fitness_array.mean(),
+                    f"Breakout_{step_int}_best_fitness_episode": jnp.max(raw_fitness_array),
                     f"Breakout_{step_int}_mean_lambda": int_lambda_array.mean(),  # Average lambda across generation
                     f"Breakout_{step_int}_best_lambda": int_lambda_array[best_idx][
                         0
@@ -233,8 +233,8 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
             print(f"Warning: No fitness data for Breakout_{step_int} in generation {gen}")
             fit_log.log(
                 {
-                    f"Breakout_{step_int}_mean_fitness": 0.0,
-                    f"Breakout_{step_int}_best_fitness": 0.0,
+                    f"Breakout_{step_int}_mean_fitness_episode": 0.0,
+                    f"Breakout_{step_int}_best_fitness_episode": 0.0,
                     f"Breakout_{step_int}_mean_lambda": 0.0,
                     f"Breakout_{step_int}_best_lambda": 0.0,
                 }
