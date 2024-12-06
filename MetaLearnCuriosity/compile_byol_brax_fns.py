@@ -757,11 +757,6 @@ def compile_brax_byol_fns(config):  # noqa: C901
         rewards = metric["sum_of_rewards"].mean(axis=-1)
         rewards = rewards.reshape(-1)
         rewards = rewards[-1]
-
-        lifetime_episode_lengths = metric["lifetime_episode_lengths"].mean(axis=-1)
-        lifetime_episode_lengths = lifetime_episode_lengths.reshape(-1)
-        lifetime_episode_lengths = lifetime_episode_lengths[-1]
-
         int_lambdas = int_lambdas.mean()
         episode_returns = metric["returned_episode_returns"].mean(axis=-1)
         episode_returns = episode_returns.reshape(-1)
@@ -770,7 +765,6 @@ def compile_brax_byol_fns(config):  # noqa: C901
             "rewards": rewards,
             "int_lambdas": int_lambdas,
             "episode_returns": episode_returns,
-            "lifetime_episode_lengths": lifetime_episode_lengths,
         }
 
     train_fns = {}
