@@ -779,7 +779,12 @@ def compile_brax_byol_fns(config):  # noqa: C901
         episode_returns = metric["returned_episode_returns"].mean(axis=-1)
         episode_returns = episode_returns.reshape(-1)
         episode_returns = episode_returns[-1]
-        return {"rewards": rewards, "int_lambdas": int_lambdas, "episode_returns": episode_returns}
+        return {
+            "rewards": rewards,
+            "int_lambdas": int_lambdas,
+            "episode_returns": episode_returns,
+            "lifetime_episode_lengths": lifetime_episode_lengths,
+        }
 
     train_fns = {}
     make_seeds = {}
