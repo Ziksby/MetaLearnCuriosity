@@ -437,9 +437,7 @@ class DelayedReward(GymnaxWrapper):
         )
 
         # Update the state with the new delayed reward and environment state
-        state = MinAtarDelayedRewardEnvState(
-            delayed_reward=next_delayed_reward, env_state=env_state
-        )
+        state = DelayedRewardEnvState(delayed_reward=next_delayed_reward, env_state=env_state)
 
         return obs, state, returned_reward, done, info
 
