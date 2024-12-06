@@ -6,17 +6,18 @@ import time
 import jax
 import jax.numpy as jnp
 import jax.tree_util
-import wandb
 from evosax import OpenES
 from flax.jax_utils import replicate
 from tqdm import tqdm
 
+import wandb
 from MetaLearnCuriosity.agents.nn import RCRNN, RewardCombiner
 from MetaLearnCuriosity.checkpoints import Restore, Save
 from MetaLearnCuriosity.compile_gymnax_trains import compile_fns
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import (
     create_adjacent_pairs,
+    get_latest_commit_hash,
     process_output_general,
     reorder_antithetic_pairs,
 )
@@ -52,7 +53,9 @@ config = {
     # "INT_LAMBDA": 0.001,
     "ENV_KEY": 102,
 }
+commit_hash = get_latest_commit_hash()
 
+config["COMMIT_HARSH"] = commit_hash
 reward_combiner_network = RewardCombiner()
 env_name = "Breakout-MinAtar"
 rc_params_pholder = reward_combiner_network.init(
