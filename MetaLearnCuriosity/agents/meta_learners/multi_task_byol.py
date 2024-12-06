@@ -199,7 +199,9 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
         raw_fitness_dict[step_int].append(raw_episode_return)  # Store raw fitness
         int_lambda_dict[step_int].append(int_lambdas)  # Store int_lambdas
         print("Here is the fitness of the pair:", raw_episode_return)
+
         binary_fitness = jnp.where(raw_episode_return == jnp.max(raw_episode_return), 1.0, 0.0)
+
         fitness.append(binary_fitness)
         print(f"Time for the Pair in {env_name}_{step_int} is {(time.time()-t)/60}")
 
