@@ -769,11 +769,15 @@ def compile_fns(config):  # noqa: C901
         rewards = metric["sum_of_rewards"].mean(axis=-1)
         rewards = rewards.reshape(-1)
         rewards = rewards[-1]
+        episode_returns = metric["returned_episode_returns"].mean(axis=-1)
+        episode_returns = episode_returns.reshape(-1)
+        episode_returns = episode_returns[-1]
         int_lambdas = int_lambdas.mean()
         return {
             # "train_state": runner_state[0],
             "rewards": rewards,
             "int_lambdas": int_lambdas,
+            "episode_returns": episode_returns,
             # "rl_total_loss": rl_total_loss[0],
             # "rl_value_loss": rl_total_loss[1][0],
             # "rl_actor_loss": rl_total_loss[1][1],
