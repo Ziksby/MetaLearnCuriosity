@@ -19,7 +19,7 @@ from MetaLearnCuriosity.agents.nn import (
     BYOLTarget,
     CloseScannedRNN,
     OpenScannedRNN,
-    RewardCombiner,
+    RNNRewardCombiner,
 )
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
@@ -265,7 +265,7 @@ def compile_brax_byol_fns(config):  # noqa: C901
         int_reward_hist,
         rc_hstate,
     ):
-        rc_network = RewardCombiner()
+        rc_network = RNNRewardCombiner()
 
         # INIT STUFF FOR OPTIMIZATION AND NORMALIZATION
         update_target_counter = 0

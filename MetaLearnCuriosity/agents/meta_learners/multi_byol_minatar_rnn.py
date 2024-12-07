@@ -11,7 +11,7 @@ from flax.jax_utils import replicate
 from tqdm import tqdm
 
 import wandb
-from MetaLearnCuriosity.agents.nn import RCRNN, RewardCombiner
+from MetaLearnCuriosity.agents.nn import RCRNN, RNNRewardCombiner
 from MetaLearnCuriosity.checkpoints import Restore, Save
 from MetaLearnCuriosity.compile_gymnax_rnn_train_fns import compile_fns
 from MetaLearnCuriosity.logger import WBLogger
@@ -53,7 +53,7 @@ config = {
     "ENV_KEY": 102,
 }
 
-reward_combiner_network = RewardCombiner()
+reward_combiner_network = RNNRewardCombiner()
 env_name = "Breakout-MinAtar"
 rc_params_pholder = reward_combiner_network.init(
     jax.random.PRNGKey(config["RC_SEED"]),
