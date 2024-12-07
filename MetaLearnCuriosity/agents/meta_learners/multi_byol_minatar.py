@@ -23,7 +23,7 @@ from MetaLearnCuriosity.utils import (
 )
 
 config = {
-    "RUN_NAME": "rc_cnn_minatar_default_delayed_breakout_fixed",
+    "RUN_NAME": "rc_cnn_minatar_default_delayed_breakout",
     "SEED": 42,
     "NUM_SEEDS": 2,
     "LR": 5e-3,

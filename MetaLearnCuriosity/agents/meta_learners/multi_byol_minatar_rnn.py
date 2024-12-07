@@ -22,7 +22,7 @@ from MetaLearnCuriosity.utils import (
 )
 
 config = {
-    "RUN_NAME": "rc_rnn_minatar_default_delayed_breakout",
+    "RUN_NAME": "rc_rnn_minatar_default_delayed_breakout_SAVED",
     "SEED": 42,
     "NUM_SEEDS": 2,
     "LR": 5e-3,
@@ -183,6 +183,8 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
             )
         )
         output = process_output_general(output)
+        episode_returns = output["episode_returns"].mean(-1)
+
         raw_episode_return = output["rewards"].mean(-1)  # This is the raw fitness
         int_lambdas = output["int_lambdas"].mean(
             -1
@@ -193,6 +195,9 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
 
         binary_fitness = jnp.where(raw_episode_return == jnp.max(raw_episode_return), 1.0, 0.0)
         fitness.append(binary_fitness)
+        print("Here is the episode return of the pair:", episode_returns)
+        print("Here is the int_lambda of the pair:", int_lambdas)
+        print("Here is the fitness of the pair:", raw_episode_return)
         print(f"Time for the Pair in {env_name}_{step_int} is {(time.time()-t)/60}")
 
     fitness = jnp.array(fitness).flatten()
