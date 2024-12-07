@@ -17,6 +17,7 @@ from MetaLearnCuriosity.compile_gymnax_rnn_train_fns import compile_fns
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import (
     create_adjacent_pairs,
+    get_latest_commit_hash,
     process_output_general,
     reorder_antithetic_pairs,
 )
@@ -52,7 +53,9 @@ config = {
     # "INT_LAMBDA": 0.001,
     "ENV_KEY": 102,
 }
+commit_hash = get_latest_commit_hash()
 
+config["COMMIT_HARSH"] = commit_hash
 reward_combiner_network = RNNRewardCombiner()
 env_name = "Breakout-MinAtar"
 rc_params_pholder = reward_combiner_network.init(
