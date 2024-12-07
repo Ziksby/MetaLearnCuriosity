@@ -20,7 +20,7 @@ from MetaLearnCuriosity.agents.nn import (
     BYOLTarget,
     CloseScannedRNN,
     OpenScannedRNN,
-    RewardCombiner,
+    RNNRewardCombiner,
 )
 from MetaLearnCuriosity.utils import BYOLRewardNorm
 from MetaLearnCuriosity.utils import RCBYOLTransition as Transition
@@ -250,7 +250,7 @@ def compile_fns(config):  # noqa: C901
         rc_hstate,
     ):
         # REWARD COMBINER
-        rc_network = RewardCombiner()
+        rc_network = RNNRewardCombiner()
         # INIT STUFF FOR OPTIMIZATION AND NORMALIZATION
         update_target_counter = 0
         byol_reward_norm_params = BYOLRewardNorm(0, 0, 1, 0)
