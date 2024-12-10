@@ -1,46 +1,109 @@
+# Taken from:
+# https://github.com/corl-team/xland-minigrid/blob/main/training/train_single_task.py
+
 import gc
 import os
 import shutil
 import time
-from typing import Sequence
+from typing import Any, NamedTuple, Sequence
 
 import distrax
 import flax.linen as nn
-import gymnax
 import jax
 import jax.numpy as jnp
+import jax.tree_util as jtu
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
-from flax.jax_utils import replicate
+import wandb
+from flax.jax_utils import replicate, unreplicate
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 from scipy.stats import bootstrap
 
-from MetaLearnCuriosity.agents.nn import PredictorNetwork, TargetNetwork
+from MetaLearnCuriosity.agents.nn import (
+    BraxBYOLPredictor,
+    BYOLTarget,
+    CloseScannedRNN,
+    OpenScannedRNN,
+    PredictorNetwork,
+    TargetNetwork,
+)
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import (
     ObsNormParams,
     RNDNormIntReturnParams,
     RNDTransition,
-    compress_output_for_reasoning,
     make_obs_gymnax_discrete,
-    process_output_general,
     rnd_normalise_int_rewards,
     update_obs_norm_params,
 )
 from MetaLearnCuriosity.wrappers import (
-    FlattenObservationWrapper,
+    BraxGymnaxWrapper,
+    ClipAction,
+    DelayedReward,
     LogWrapper,
-    MinAtarDelayedReward,
+    NormalizeVecObservation,
+    NormalizeVecReward,
+    ProbabilisticReward,
     VecEnv,
+    get_latest_commit_hash,
 )
 
-key = jax.random.PRNGKey(69)
+jax.config.update("jax_threefry_partitionable", True)
+
+key = jax.random.PRNGKey(76)
+
+environments = [
+    # "ant",
+    # "halfcheetah",
+    # "hopper",
+    # "humanoid",
+    # "humanoidstandup",
+    # "inverted_pendulum",
+    "inverted_double_pendulum",
+    # "pusher",
+    # "reacher",
+    # "walker2d",
+]
+step_intervals = [1, 3, 10, 20, 30, 40]
+
+config = {
+    "RUN_NAME": "rnd_delayed_brax",
+    "SEED": 42,
+    "NUM_SEEDS": 10,
+    "LR": 3e-4,
+    "PRED_LR": 1e-3,
+    "NUM_ENVS": 2048,
+    "NUM_STEPS": 10,  # unroll length
+    "TOTAL_TIMESTEPS": 5e7,
+    "UPDATE_EPOCHS": 4,
+    "NUM_MINIBATCHES": 32,
+    "GAMMA": 0.99,
+    "INT_GAMMA": 0.99,
+    "EMA_PARAMETER": 0.99,
+    "GAE_LAMBDA": 0.95,
+    "INT_LAMBDA": 0.1,  # 0.00021,
+    "CLIP_EPS": 0.2,
+    "ENT_COEF": 0.0,
+    "VF_COEF": 0.5,
+    "MAX_GRAD_NORM": 0.5,
+    "ACTIVATION": "tanh",
+    "ANNEAL_LR": False,
+    "ANNEAL_PRED_LR": False,
+    "NORMALIZE_ENV": True,
+    "DELAY_REWARDS": True,
+    "STEP_INTERVAL": 0.98,
+    "DEBUG": False,
+    "REW_NORM_PARAMETER": 0.99,
+}
+commit_hash = get_latest_commit_hash()
+
+config["COMMIT_HARSH"] = commit_hash
 
 
-class PPOActorCritic(nn.Module):
+class ActorCritic(nn.Module):
     action_dim: Sequence[int]
     activation: str = "tanh"
 
@@ -50,85 +113,30 @@ class PPOActorCritic(nn.Module):
             activation = nn.relu
         else:
             activation = nn.tanh
-        actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
+        actor_mean = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
         actor_mean = activation(actor_mean)
-        actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(
+        actor_mean = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(
             actor_mean
         )
         actor_mean = activation(actor_mean)
         actor_mean = nn.Dense(
             self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
-        pi = distrax.Categorical(logits=actor_mean)
+        actor_logtstd = self.param("log_std", nn.initializers.zeros, (self.action_dim,))
+        pi = distrax.MultivariateNormalDiag(actor_mean, jnp.exp(actor_logtstd))
 
-        critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
+        critic = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
         critic = activation(critic)
-        critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(critic)
+        critic = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(critic)
         critic = activation(critic)
         critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(critic)
 
         return pi, jnp.squeeze(critic, axis=-1)
 
 
-# control problems
-# config = {
-#     "RUN_NAME": "dis_ppo",
-#     "SEED": 42,
-#     "NUM_SEEDS": 30,
-#     "LR": 2.5e-4,
-#     "NUM_ENVS": 4,
-#     "NUM_STEPS": 128,
-#     "TOTAL_TIMESTEPS": 5e5,
-#     "UPDATE_EPOCHS": 4,
-#     "NUM_MINIBATCHES": 4,
-#     "GAMMA": 0.99,
-#     "GAE_LAMBDA": 0.95,
-#     "CLIP_EPS": 0.2,
-#     "ENT_COEF": 0.01,
-#     "VF_COEF": 0.5,
-#     "MAX_GRAD_NORM": 0.5,
-#     "ACTIVATION": "tanh",
-#     "ENV_NAME": "Empty-misc",
-#     "ANNEAL_LR": False,
-#     "DEBUG": False,
-# }
-
-# min atar
-
-config = {
-    "RUN_NAME": "minatar_rnd",
-    "SEED": 42,
-    "NUM_SEEDS": 1,
-    "LR": 5e-3,
-    "PRED_LR": 1e-3,
-    "NUM_ENVS": 64,
-    "NUM_STEPS": 128,
-    "TOTAL_TIMESTEPS": 1e7,
-    "UPDATE_EPOCHS": 4,
-    "NUM_MINIBATCHES": 8,
-    "GAMMA": 0.99,
-    "INT_GAMMA": 0.99,
-    # "INT_LAMBDA": 0.1,
-    "GAE_LAMBDA": 0.95,
-    "CLIP_EPS": 0.2,
-    "ENT_COEF": 0.01,
-    "VF_COEF": 0.5,
-    "MAX_GRAD_NORM": 0.5,
-    "ACTIVATION": "relu",
-    "ANNEAL_LR": True,
-    "DEBUG": False,
-}
-
-environments = [
-    "Asterix-MinAtar",
-    "Breakout-MinAtar",
-    "Freeway-MinAtar",
-    "SpaceInvaders-MinAtar",
-]
-
-
 def make_config_env(config, env_name):
     config["ENV_NAME"] = env_name
+    env, env_params = BraxGymnaxWrapper(config["ENV_NAME"]), None
     num_devices = jax.local_device_count()
     assert config["NUM_ENVS"] % num_devices == 0
     config["NUM_ENVS_PER_DEVICE"] = config["NUM_ENVS"] // num_devices
@@ -143,20 +151,22 @@ def make_config_env(config, env_name):
     config["TRAINING_HORIZON"] = (
         config["TOTAL_TIMESTEPS_PER_DEVICE"] // config["NUM_ENVS_PER_DEVICE"]
     )
-
     assert config["NUM_ENVS_PER_DEVICE"] >= 4
     config["UPDATE_PROPORTION"] = 4 / config["NUM_ENVS_PER_DEVICE"]
 
-    env, env_params = gymnax.make(config["ENV_NAME"])
-    env = FlattenObservationWrapper(env)
     env = LogWrapper(env)
-    env = MinAtarDelayedReward(env, config["STEP_INTERVAL"])
+    env = ClipAction(env)
+    if config["DELAY_REWARDS"]:
+        env = DelayedReward(env, config["STEP_INTERVAL"])
     env = VecEnv(env)
+    if config["NORMALIZE_ENV"]:
+        env = NormalizeVecObservation(env)
+        env = NormalizeVecReward(env, config["GAMMA"])
 
     return config, env, env_params
 
 
-def ppo_make_train(rng):
+def make_train(rng):
     def linear_schedule(count):
         frac = (
             1.0
@@ -173,10 +183,10 @@ def ppo_make_train(rng):
     #     )
     #     return config["PRED_LR"] * frac
 
-    # INIT NETWORKS
-    network = PPOActorCritic(env.action_space(env_params).n, activation=config["ACTIVATION"])
-    target = TargetNetwork(64)
-    predictor = PredictorNetwork(64)
+    # INIT NETWORK
+    network = ActorCritic(env.action_space(env_params).shape[0], activation=config["ACTIVATION"])
+    target = TargetNetwork(256)
+    predictor = PredictorNetwork(256)
 
     rng, _rng = jax.random.split(rng)
     rng, _pred_rng = jax.random.split(rng)
@@ -239,7 +249,7 @@ def train(rng, train_state, pred_state, target_params, init_obs_rng):
     )
 
     obs_norm_params = update_obs_norm_params(init_obs_norm_params, init_obs)
-    target = TargetNetwork(64)
+    target = TargetNetwork(256)
 
     # INIT ENV
     rng, _rng = jax.random.split(rng)
@@ -445,9 +455,10 @@ def train(rng, train_state, pred_state, target_params, init_obs_rng):
                 (traj_batch.obs - obs_norm_params.mean) / jnp.sqrt(obs_norm_params.var)
             ).clip(-5, 5)
 
+            rng, _rng = jax.random.split(rng)
             batch_size = config["MINIBATCH_SIZE"] * config["NUM_MINIBATCHES"]
             assert (
-                batch_size == (config["NUM_STEPS"]) * config["NUM_ENVS_PER_DEVICE"]
+                batch_size == config["NUM_STEPS"] * config["NUM_ENVS_PER_DEVICE"]
             ), "batch size must be equal to number of steps * number of envs"
             permutation = jax.random.permutation(_rng, batch_size)
             batch = (traj_batch, advantages, targets, rnd_obs)
@@ -527,47 +538,52 @@ def train(rng, train_state, pred_state, target_params, init_obs_rng):
     )
     runner_state, extra_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
     metric, int_rewards, norm_int_rewards, rl_total_loss = extra_info
+    metric["returned_episode_returns"] = metric["returned_episode_returns"].mean(-1)
+    metric["returned_episode_returns"] = metric["returned_episode_returns"].reshape(
+        metric["returned_episode_returns"].shape[0], -1
+    )
+
     return {
-        "train_states": runner_state[0],
+        # "runner_state": runner_state,
         "metrics": metric,
-        "int_reward": int_rewards,
-        "norm_int_reward": norm_int_rewards,
-        "rl_total_loss": rl_total_loss[0],
-        "rl_value_loss": rl_total_loss[1][0],
-        "rl_actor_loss": rl_total_loss[1][1],
-        "rl_entrophy_loss": rl_total_loss[1][2],
-        "rnd_loss": rl_total_loss[1][3],
+        # "loss_info": loss,
+        # "rl_total_loss": loss["total_loss"],
+        # "rl_value_loss": loss["value_loss"],
+        # "rl_actor_loss": loss["actor_loss"],
+        # "rl_entrophy_loss": loss["entropy"],
+        # "int_reward": int_reward,
+        # "norm_int_reward": norm_int_reward,
+        # "pred_loss": loss["pred_loss"],
     }
 
 
-step_intervals = [1, 3, 10, 20, 30, 40]
+env_name = "inverted_double_pendulum"
+
 lambda_values = jnp.array(
     [0.001, 0.0001, 0.0003, 0.0005, 0.0008, 0.01, 0.1, 0.003, 0.005, 0.02, 0.03, 0.05]
 ).sort()
-
-
+# lambda_values = jnp.array([0.001, 0.0001]).sort()
 y_values = {}
-env_name = "SpaceInvaders-MinAtar"
 for lambda_value in lambda_values:
     y_values[
         float(lambda_value)
     ] = {}  # Use float(lambda_value) to ensure dictionary keys are serializable
     config["INT_LAMBDA"] = lambda_value
     for step_int in step_intervals:
-        rng = jax.random.PRNGKey(config["SEED"])
         t = time.time()
+        rng = jax.random.PRNGKey(config["SEED"])
         config["STEP_INTERVAL"] = step_int
         config, env, env_params = make_config_env(config, env_name)
-        print(f"Training in {config['ENV_NAME']}")
+
         rng = jax.random.split(rng, config["NUM_SEEDS"])
         rng, train_state, pred_state, target_params, init_rnd_obs = jax.vmap(
-            ppo_make_train, out_axes=(1, 0, 0, 0, 0)
+            make_train, out_axes=(1, 0, 0, 0, 0)
         )(rng)
         train_state = replicate(train_state, jax.local_devices())
         pred_state = replicate(pred_state, jax.local_devices())
         target_params = replicate(target_params, jax.local_devices())
         init_rnd_obs = replicate(init_rnd_obs, jax.local_devices())
-        train_fn = jax.vmap(train)
+        train_fn = jax.vmap(train, in_axes=(0, 0, 0, 0, 0))
         train_fn = jax.pmap(train_fn, axis_name="devices")
         output = jax.block_until_ready(
             train_fn(rng, train_state, pred_state, target_params, init_rnd_obs)
@@ -604,6 +620,7 @@ for lambda_value in lambda_values:
         # Use the last element of each row from 'epi_ret' as y-values
         y_values[float(lambda_value)][step_int] = epi_ret
         print(epi_ret.shape)
+
 
 # Metric names corresponding to the data stored in y_values
 metric_names = [
@@ -655,7 +672,7 @@ def normalize_curious_agent_returns(
 
 
 # 1 save data
-save_dir = f"/home/batsy/MetaLearnCuriosity/MetaLearnCuriosity/hyperparameter_sweep/MinAtar_Arrays/MinAtar_{env_name}/RND"
+save_dir = f"/home/batsy/MetaLearnCuriosity/MetaLearnCuriosity/hyperparameter_sweep/Brax_Arrays/Brax_{env_name}/RND"
 os.makedirs(save_dir, exist_ok=True)
 
 # Save data for each lambda and step interval
@@ -665,6 +682,43 @@ for lambda_value, step_data in y_values.items():
         np.save(save_path, returns)
 
 # 2. Create individual plots for each step interval
+# Define which step interval's data we want to load
+# existing_step_int = 1  # Replace with your specific step interval
+# base_dir = f"/home/batsy/MetaLearnCuriosity/MetaLearnCuriosity/hyperparameter_sweep/MinAtar_Arrays/MinAtar_{env_name}/RND"
+
+# # First, check if y_values is already populated for some lambda values
+# existing_lambdas = []
+# if y_values:
+#     existing_lambdas = list(y_values.keys())
+
+# # Load and update y_values with the existing data
+# for lambda_value in lambda_values:
+#     lambda_float = float(lambda_value)
+
+#     # Skip if this lambda value already has data for the existing_step_int
+#     if lambda_float in existing_lambdas and existing_step_int in y_values[lambda_float]:
+#         continue
+
+#     # Create the dictionary for this lambda if it doesn't exist
+#     if lambda_float not in y_values:
+#         y_values[lambda_float] = {}
+
+#     # Load the saved array
+#     save_path = os.path.join(
+#         base_dir, f"lambda_{lambda_float:.6f}_step_{existing_step_int}_returns.npy"
+#     )
+
+#     try:
+#         loaded_returns = np.load(save_path)
+#         y_values[lambda_float][existing_step_int] = loaded_returns
+#         print(f"Successfully loaded data for lambda={lambda_float}, step_int={existing_step_int}")
+#     except FileNotFoundError:
+#         print(
+#             f"Warning: No saved data found for lambda={lambda_float}, step_int={existing_step_int}"
+#         )
+#         continue
+
+
 for step_int in step_intervals:
     means = []
     ci_lows = []
@@ -711,13 +765,16 @@ for step_int in step_intervals:
 aggregate_means = []
 aggregate_ci_lows = []
 aggregate_ci_highs = []
-lambda_vals = sorted(y_values.keys())
+lambda_vals = sorted([float(f"{lv:.6f}") for lv in lambda_values])
 
 for lambda_value in lambda_vals:
     # Collect all returns for this lambda across all step intervals
     all_returns = []
     for step_int in step_intervals:
-        all_returns.extend(y_values[lambda_value][step_int])
+        # Load the saved numpy array instead of using y_values
+        save_path = os.path.join(save_dir, f"lambda_{lambda_value:.6f}_step_{step_int}_returns.npy")
+        loaded_returns = np.load(save_path)
+        all_returns.extend(loaded_returns)
 
     # Convert to numpy array
     all_returns = np.array(all_returns)
@@ -756,5 +813,5 @@ plt.grid(True, alpha=0.3)
 plt.tight_layout()
 
 # Save aggregate plot
-plt.savefig(os.path.join(save_dir, "aggregate_returns_all_steps.png"))
+plt.savefig(os.path.join(save_dir, "aggregate_returns_delayed_all_steps.png"))
 plt.close()

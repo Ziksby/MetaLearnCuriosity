@@ -1,3 +1,4 @@
+import subprocess
 from typing import Any, NamedTuple, Optional
 
 import jax
@@ -7,6 +8,21 @@ from flax.jax_utils import replicate, unreplicate
 from flax.training.train_state import TrainState
 
 from MetaLearnCuriosity.agents.nn import RewardCombiner, TargetNetwork
+
+
+def get_latest_commit_hash():
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],  # Git command to get the hash
+            capture_output=True,  # Capture the output
+            text=True,  # Decode the output as text
+            check=True,  # Raise an exception if the command fails
+        )
+        return result.stdout.strip()  # Return the commit hash as a string
+    except subprocess.CalledProcessError as e:
+        print("Error while getting the commit hash:", e)
+        return None
 
 
 class RNDTransition(NamedTuple):
