@@ -553,7 +553,7 @@ def train(rng, train_state, pred_state, target_params, init_obs_rng):
     }
 
 
-env_name = "inverted_double_pendulum"
+env_name = "hopper"
 
 lambda_values = jnp.array(
     [0.001, 0.0001, 0.0003, 0.0005, 0.0008, 0.01, 0.1, 0.003, 0.005, 0.02, 0.03, 0.05]
