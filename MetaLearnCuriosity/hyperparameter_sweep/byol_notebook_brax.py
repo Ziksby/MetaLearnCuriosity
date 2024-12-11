@@ -696,7 +696,7 @@ lambda_values = jnp.array(
 ).sort()
 # lambda_values = jnp.array([0.001, 0.0001]).sort()
 y_values = {}
-env_name = "inverted_double_pendulum"
+env_name = "hopper"
 for lambda_value in lambda_values:
     y_values[
         float(lambda_value)
