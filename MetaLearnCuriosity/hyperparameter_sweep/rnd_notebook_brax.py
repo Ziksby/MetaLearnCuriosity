@@ -15,12 +15,12 @@ import jax.tree_util as jtu
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
+import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 from scipy.stats import bootstrap
 
-import wandb
 from MetaLearnCuriosity.agents.nn import (
     BraxBYOLPredictor,
     BYOLTarget,
@@ -66,7 +66,7 @@ environments = [
     # "reacher",
     # "walker2d",
 ]
-step_intervals = [0.0, 0.1, 0.3, 0.5, 0.8, 0.98]
+step_intervals = [1, 3, 10, 20, 30, 40]
 
 config = {
     "RUN_NAME": "rnd_delayed_brax",
@@ -153,7 +153,7 @@ def make_config_env(config, env_name):
     env = LogWrapper(env)
     env = ClipAction(env)
     if config["DELAY_REWARDS"]:
-        env = ProbabilisticReward(env, config["STEP_INTERVAL"])
+        env = DelayedReward(env, config["STEP_INTERVAL"])
     env = VecEnv(env)
     if config["NORMALIZE_ENV"]:
         env = NormalizeVecObservation(env)
@@ -553,7 +553,7 @@ def train(rng, train_state, pred_state, target_params, init_obs_rng):
     }
 
 
-env_name = "inverted_pendulum"
+env_name = "hopper"
 
 lambda_values = jnp.array(
     [0.001, 0.0001, 0.0003, 0.0005, 0.0008, 0.01, 0.1, 0.003, 0.005, 0.02, 0.03, 0.05]
@@ -809,5 +809,5 @@ plt.grid(True, alpha=0.3)
 plt.tight_layout()
 
 # Save aggregate plot
-plt.savefig(os.path.join(save_dir, "aggregate_returns_prob_all_steps.png"))
+plt.savefig(os.path.join(save_dir, "aggregate_returns_delay_all_steps.png"))
 plt.close()

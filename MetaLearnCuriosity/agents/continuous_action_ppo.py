@@ -18,6 +18,7 @@ from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import (
     PPOTransition,
     compress_output_for_reasoning,
+    get_latest_commit_hash,
     process_output_general,
 )
 from MetaLearnCuriosity.wrappers import (
@@ -32,16 +33,16 @@ from MetaLearnCuriosity.wrappers import (
 )
 
 environments = [
-    "ant",
+    # "ant",
     # "halfcheetah",
-    # "hopper",
+    "hopper",
     # "humanoid",
     # "humanoidstandup",
-    # "inverted_pendulum",
-    # "inverted_double_pendulum",
+    "inverted_pendulum",
+    "inverted_double_pendulum",
     # "pusher",
     # "reacher",
-    # "walker2d",
+    "walker2d",
 ]
 
 config = {
@@ -66,6 +67,9 @@ config = {
     "DELAY_REWARDS": True,
     "DEBUG": False,
 }
+commit_hash = get_latest_commit_hash()
+
+config["COMMIT_HARSH"] = commit_hash
 
 
 class ActorCritic(nn.Module):
@@ -319,19 +323,19 @@ def train(rng, train_state):
         "train_states": runner_state[0],
         "metrics": metric,
         "rl_total_loss": rl_total_loss[0],
-        "rl_value_loss": rl_total_loss[1][0],
-        "rl_actor_loss": rl_total_loss[1][1],
-        "rl_entrophy_loss": rl_total_loss[1][2],
+        # "rl_value_loss": rl_total_loss[1][0],
+        # "rl_actor_loss": rl_total_loss[1][1],
+        # "rl_entrophy_loss": rl_total_loss[1][2],
     }
 
 
-step_intervals = [3, 20, 30]
+step_intervals = [10, 1, 3, 20, 30, 40]
 for step_int in step_intervals:
     config["STEP_INTERVAL"] = step_int
     for env_name in environments:
         rng = jax.random.PRNGKey(config["SEED"])
         config, env, env_params = make_config_env(config, env_name)
-        config["RUN_NAME"] = f"delayed_brax_baseline_ppo_{step_int}"
+        config["RUN_NAME"] = f"delayed_brax_baseline_ppo_{step_int}_{env_name}"
 
         print(f"Training in {config['ENV_NAME']}")
 

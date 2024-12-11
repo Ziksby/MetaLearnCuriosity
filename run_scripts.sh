@@ -12,7 +12,7 @@
 # fi
 
 # Run the second Python script
-python MetaLearnCuriosity/agents/curious_agents/single_value_head_agents/rnd_brax.py
+python MetaLearnCuriosity/agents/continuous_action_ppo.py
 
 # Check if the previous command was successful
 if [ $? -eq 0 ]; then
@@ -23,7 +23,7 @@ else
 fi
 
 # Add more scripts as needed
-python MetaLearnCuriosity/agents/curious_agents/single_value_head_agents/byol_brax.py
+python MetaLearnCuriosity/hyperparameter_sweep/rnd_notebook_brax.py
 # Check if the previous command was successful
 if [ $? -eq 0 ]; then
     echo "byol_brax.py ran successfully."
