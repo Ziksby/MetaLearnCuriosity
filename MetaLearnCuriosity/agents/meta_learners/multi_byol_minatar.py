@@ -24,7 +24,7 @@ from MetaLearnCuriosity.utils import (
 
 config = {
     "RUN_NAME": "rc_cnn_minatar_default_delayed_breakout_EPISODE_RETURNS",
-    "SEED": 42 * 556,
+    "SEED": 42,
     "NUM_SEEDS": 2,
     "LR": 5e-3,
     "NUM_ENVS": 64,
@@ -46,7 +46,7 @@ config = {
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
     "POP_SIZE": 64,
-    "ES_SEED": 7 * 644,
+    "ES_SEED": 7,
     "HIST_LEN": 128,
     "RC_SEED": 23 * 89,
     "NUM_GENERATIONS": 48,
@@ -93,31 +93,17 @@ es_rng, es_rng_init = jax.random.split(es_rng)
 es_params = strategy.default_params
 es_state = strategy.initialize(es_rng_init, es_params)
 
-es_stuff = Restore(
-    "/home/batsy/MetaLearnCuriosity/MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/rc_rnn_minatar_default_delayed_breakout_SAVED"
-)
-es_state_saved, _ = es_stuff
-print(es_state_saved)
-print()
-print(es_state)
-print()
-opt_state = es_state.opt_state.replace(
-    lrate=es_state_saved["opt_state"]["lrate"],
-    m=es_state_saved["opt_state"]["m"],
-    v=es_state_saved["opt_state"]["v"],
-    n=es_state_saved["opt_state"]["n"],
-    last_grads=es_state_saved["opt_state"]["last_grads"],
-    gen_counter=es_state_saved["opt_state"]["gen_counter"],
-)
-es_state = es_state.replace(
-    mean=es_state_saved["mean"],
-    sigma=es_state_saved["sigma"],
-    opt_state=opt_state,
-    best_member=es_state_saved["best_member"],
-    best_fitness=es_state_saved["best_fitness"],
-    gen_counter=es_state_saved["gen_counter"],
-)
-print("Now matched,", es_state, "\n")
+# es_stuff = Restore(
+#     "/home/batsy/MetaLearnCuriosity/MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/rc_cnn_64_64_minatar_default_prob"
+# )
+# es_state_saved, _ = es_stuff
+# print(es_state_saved)
+# print()
+# print(es_state)
+# print()
+# opt_state = es_state.opt_state.replace(lrate=es_state_saved["opt_state"]["lrate"], m=es_state_saved["opt_state"]["m"], v=es_state_saved["opt_state"]["v"], n=es_state_saved["opt_state"]["n"], last_grads=es_state_saved["opt_state"]["last_grads"], gen_counter=es_state_saved["opt_state"]["gen_counter"])
+# es_state=es_state.replace(mean=es_state_saved['mean'], sigma=es_state_saved["sigma"], opt_state=opt_state, best_member = es_state_saved["best_member"], best_fitness=es_state_saved["best_fitness"], gen_counter=es_state_saved["gen_counter"])
+# print("Now matched,", es_state,"\n")
 
 train_fns, make_seeds = compile_fns(config=config)
 rng = jax.random.PRNGKey(config["SEED"])
@@ -131,9 +117,7 @@ fit_log = wandb.init(
 # step_intervals = [0.1,0.3,0.5,0.8]
 step_intervals = [3, 10, 20, 30]
 
-for gen in tqdm(
-    range(config["NUM_GENERATIONS"] - es_state_saved["gen_counter"]), desc="Processing Generations"
-):
+for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations"):
     begin_gen = time.time()
     es_rng, es_rng_ask = jax.random.split(es_rng)
     x, es_state = strategy.ask(es_rng_ask, es_state, es_params)
