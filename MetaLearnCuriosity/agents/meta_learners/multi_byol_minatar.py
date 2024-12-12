@@ -17,12 +17,13 @@ from MetaLearnCuriosity.compile_gymnax_trains import compile_fns
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import (
     create_adjacent_pairs,
+    get_latest_commit_hash,
     process_output_general,
     reorder_antithetic_pairs,
 )
 
 config = {
-    "RUN_NAME": "rc_cnn_64_64_minatar_default_delayed_breakout",
+    "RUN_NAME": "rc_cnn_minatar_default_delayed_breakout_EPISODE_RETURNS",
     "SEED": 42,
     "NUM_SEEDS": 2,
     "LR": 5e-3,
@@ -52,7 +53,9 @@ config = {
     # "INT_LAMBDA": 0.001,
     "ENV_KEY": 102,
 }
+commit_hash = get_latest_commit_hash()
 
+config["COMMIT_HARSH"] = commit_hash
 reward_combiner_network = RewardCombiner()
 env_name = "Breakout-MinAtar"
 rc_params_pholder = reward_combiner_network.init(
@@ -178,16 +181,19 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
             )
         )
         output = process_output_general(output)
-        raw_episode_return = output["rewards"].mean(-1)  # This is the raw fitness
+        raw_episode_return = output["episode_returns"].mean(-1)  # This is the raw fitness
         int_lambdas = output["int_lambdas"].mean(
             -1
         )  # Get the int_lambdas and average across episodes
-
+        episode_returns = output["episode_returns"].mean(-1)
         raw_fitness_dict[step_int].append(raw_episode_return)  # Store raw fitness
         int_lambda_dict[step_int].append(int_lambdas)  # Store int_lambdas
 
         binary_fitness = jnp.where(raw_episode_return == jnp.max(raw_episode_return), 1.0, 0.0)
         fitness.append(binary_fitness)
+        print("Here is the episode return of the pair:", episode_returns)
+        print("Here is the int_lambda of the pair:", int_lambdas)
+        print("Here is the fitness of the pair:", raw_episode_return)
         print(f"Time for the Pair in {env_name}_{step_int} is {(time.time()-t)/60}")
 
     fitness = jnp.array(fitness).flatten()
@@ -215,8 +221,8 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
 
             fit_log.log(
                 {
-                    f"Breakout_{step_int}_mean_fitness": raw_fitness_array.mean(),
-                    f"Breakout_{step_int}_best_fitness": jnp.max(raw_fitness_array),
+                    f"Breakout_{step_int}_mean_fitness_episode": raw_fitness_array.mean(),
+                    f"Breakout_{step_int}_best_fitness_episode": jnp.max(raw_fitness_array),
                     f"Breakout_{step_int}_mean_lambda": int_lambda_array.mean(),  # Average lambda across generation
                     f"Breakout_{step_int}_best_lambda": int_lambda_array[best_idx][
                         0
@@ -227,8 +233,8 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
             print(f"Warning: No fitness data for Breakout_{step_int} in generation {gen}")
             fit_log.log(
                 {
-                    f"Breakout_{step_int}_mean_fitness": 0.0,
-                    f"Breakout_{step_int}_best_fitness": 0.0,
+                    f"Breakout_{step_int}_mean_fitness_episode": 0.0,
+                    f"Breakout_{step_int}_best_fitness_episode": 0.0,
                     f"Breakout_{step_int}_mean_lambda": 0.0,
                     f"Breakout_{step_int}_best_lambda": 0.0,
                 }

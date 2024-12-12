@@ -78,8 +78,9 @@ class LogEnvState:
     episode_lengths: int
     returned_episode_returns: float
     returned_episode_lengths: int
-    sum_of_rewards: int
+    sum_of_rewards: float
     timestep: int
+    done_sum_of_rewards: float
 
 
 class LogWrapper(GymnaxWrapper):
@@ -93,7 +94,7 @@ class LogWrapper(GymnaxWrapper):
         self, key: chex.PRNGKey, params: Optional[environment.EnvParams] = None
     ) -> Tuple[chex.Array, environment.EnvState]:
         obs, env_state = self._env.reset(key, params)
-        state = LogEnvState(env_state, 0, 0, 0, 0, 0, 0)
+        state = LogEnvState(env_state, 0, 0, 0, 0, 0, 0, 0)
         return obs, state
 
     @partial(jax.jit, static_argnums=(0,))
@@ -115,7 +116,8 @@ class LogWrapper(GymnaxWrapper):
             + new_episode_return * done,
             returned_episode_lengths=state.returned_episode_lengths * (1 - done)
             + new_episode_length * done,
-            sum_of_rewards=state.sum_of_rewards + reward,
+            sum_of_rewards=state.sum_of_rewards + (reward),
+            done_sum_of_rewards=state.done_sum_of_rewards + reward * (1 - done),
             timestep=state.timestep + 1,
         )
         info["returned_episode_returns"] = state.returned_episode_returns
@@ -123,6 +125,7 @@ class LogWrapper(GymnaxWrapper):
         info["timestep"] = state.timestep
         info["returned_episode"] = done
         info["sum_of_rewards"] = state.sum_of_rewards
+        info["done_sum_of_rewards"] = state.done_sum_of_rewards
         return obs, state, reward, done, info
 
 
@@ -351,19 +354,43 @@ class MinAtarDelayedReward(GymnaxWrapper):
 
     def reset(self, key, params=None):
         obs, state = self._env.reset(key, params)
-        state = DelayedRewardEnvState(delayed_reward=0.0, env_state=state)
+        state = MinAtarDelayedRewardEnvState(delayed_reward=0.0, env_state=state)
         return obs, state
 
     def step(self, key, state, action, params=None):
+        # Perform a step in the wrapped environment
         obs, env_state, reward, done, info = self._env.step(key, state.env_state, action, params)
+
+        # Update the accumulated reward
         new_delayed_reward = state.delayed_reward + reward
+
+        # Get the current step count from the environment
         steps = env_state.env_state.time
+
+        # Check if we should release the delayed reward (either at step_interval or end of episode)
         interval = steps % self.step_interval == 0
+        return_full_reward = (
+            done | interval
+        )  # Reward is returned either at intervals or when the episode ends
 
-        returned_reward = jax.lax.cond(interval, lambda: new_delayed_reward, lambda: 0.0)
-        next_delayed_reward = jax.lax.cond(interval, lambda: 0.0, lambda: new_delayed_reward)
+        # Use jax.lax.cond to determine the reward to return
+        returned_reward = jax.lax.cond(
+            return_full_reward,
+            lambda: new_delayed_reward,  # Return the accumulated reward
+            lambda: 0.0,  # Otherwise, return no reward
+        )
 
-        state = DelayedRewardEnvState(delayed_reward=next_delayed_reward, env_state=env_state)
+        # Reset the delayed reward if the episode ends or interval is reached
+        next_delayed_reward = jax.lax.cond(
+            return_full_reward,
+            lambda: 0.0,  # Reset accumulated reward
+            lambda: new_delayed_reward,  # Keep accumulating
+        )
+
+        # Update the state with the new delayed reward and environment state
+        state = MinAtarDelayedRewardEnvState(
+            delayed_reward=next_delayed_reward, env_state=env_state
+        )
 
         return obs, state, returned_reward, done, info
 
@@ -388,11 +415,28 @@ class DelayedReward(GymnaxWrapper):
         obs, env_state, reward, done, info = self._env.step(key, state.env_state, action, params)
         new_delayed_reward = state.delayed_reward + reward
         steps = env_state.env_state.info["steps"]
+
+        # Check if we should release the delayed reward (either at step_interval or end of episode)
         interval = steps % self.step_interval == 0
+        return_full_reward = (
+            done | interval
+        )  # Reward is returned either at intervals or when the episode ends
 
-        returned_reward = jax.lax.cond(interval, lambda: new_delayed_reward, lambda: 0.0)
-        next_delayed_reward = jax.lax.cond(interval, lambda: 0.0, lambda: new_delayed_reward)
+        # Use jax.lax.cond to determine the reward to return
+        returned_reward = jax.lax.cond(
+            return_full_reward,
+            lambda: new_delayed_reward,  # Return the accumulated reward
+            lambda: 0.0,  # Otherwise, return no reward
+        )
 
+        # Reset the delayed reward if the episode ends or interval is reached
+        next_delayed_reward = jax.lax.cond(
+            return_full_reward,
+            lambda: 0.0,  # Reset accumulated reward
+            lambda: new_delayed_reward,  # Keep accumulating
+        )
+
+        # Update the state with the new delayed reward and environment state
         state = DelayedRewardEnvState(delayed_reward=next_delayed_reward, env_state=env_state)
 
         return obs, state, returned_reward, done, info
@@ -426,7 +470,11 @@ class ProbabilisticReward(GymnaxWrapper):
         random_num = jax.random.uniform(random_key)
 
         # Use jax.lax.cond to conditionally zero out the reward
-        returned_reward = jax.lax.cond(random_num < self.zero_prob, lambda: 0.0, lambda: reward)
+        returned_reward = jax.lax.cond(
+            self.zero_prob == 0.0,
+            lambda: reward,
+            lambda: jax.lax.cond(random_num < self.zero_prob, lambda: 0.0, lambda: reward),
+        )
 
         state = ProbabilisticRewardEnvState(env_state=env_state)
         return obs, state, returned_reward, done, info
