@@ -15,12 +15,12 @@ import jax.tree_util as jtu
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
-import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 from scipy.stats import bootstrap
 
+import wandb
 from MetaLearnCuriosity.agents.nn import (
     BraxBYOLPredictor,
     BYOLTarget,
@@ -553,7 +553,7 @@ def train(rng, train_state, pred_state, target_params, init_obs_rng):
     }
 
 
-env_name = "hopper"
+env_name = "walker2d"
 
 lambda_values = jnp.array(
     [0.001, 0.0001, 0.0003, 0.0005, 0.0008, 0.01, 0.1, 0.003, 0.005, 0.02, 0.03, 0.05]
