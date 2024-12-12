@@ -15,12 +15,12 @@ import jax.tree_util as jtu
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
+import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
 from scipy.stats import bootstrap
 
-import wandb
 from MetaLearnCuriosity.agents.nn import (
     BraxBYOLPredictor,
     BYOLTarget,
@@ -34,6 +34,7 @@ from MetaLearnCuriosity.utils import BYOLTransition as Transition
 from MetaLearnCuriosity.utils import (
     byol_normalize_prior_int_rewards,
     compress_output_for_reasoning,
+    get_latest_commit_hash,
     process_output_general,
     update_target_state_with_ema,
 )
@@ -49,19 +50,19 @@ from MetaLearnCuriosity.wrappers import (
 )
 
 key = jax.random.PRNGKey(76)
-step_intervals = [0.0, 0.1, 0.3, 0.5, 0.8, 0.98]
+step_intervals = [1, 3, 10, 20, 30, 40]
 jax.config.update("jax_threefry_partitionable", True)
 environments = [
-    "ant",
-    "halfcheetah",
-    "hopper",
-    "humanoid",
-    "humanoidstandup",
-    "inverted_pendulum",
+    # "ant",
+    # "halfcheetah",
+    # "hopper",
+    # "humanoid",
+    # "humanoidstandup",
+    # "inverted_pendulum",
     "inverted_double_pendulum",
-    "pusher",
-    "reacher",
-    "walker2d",
+    # "pusher",
+    # "reacher",
+    # "walker2d",
 ]
 key = jax.random.PRNGKey(76)
 
@@ -94,6 +95,10 @@ config = {
     "DEBUG": False,
     "REW_NORM_PARAMETER": 0.99,
 }
+
+commit_hash = get_latest_commit_hash()
+
+config["COMMIT_HARSH"] = commit_hash
 
 
 class ActorCritic(nn.Module):
@@ -150,7 +155,7 @@ def make_config_env(config, env_name):
     env = LogWrapper(env)
     env = ClipAction(env)
     if config["DELAY_REWARDS"]:
-        env = ProbabilisticReward(env, config["STEP_INTERVAL"])
+        env = DelayedReward(env, config["STEP_INTERVAL"])
     env = VecEnv(env)
     if config["NORMALIZE_ENV"]:
         env = NormalizeVecObservation(env)
@@ -691,7 +696,7 @@ lambda_values = jnp.array(
 ).sort()
 # lambda_values = jnp.array([0.001, 0.0001]).sort()
 y_values = {}
-env_name = "inverted_pendulum"
+env_name = "walker2d"
 for lambda_value in lambda_values:
     y_values[
         float(lambda_value)
@@ -961,5 +966,5 @@ plt.grid(True, alpha=0.3)
 plt.tight_layout()
 
 # Save aggregate plot
-plt.savefig(os.path.join(save_dir, "aggregate_returns_prob_all_steps.png"))
+plt.savefig(os.path.join(save_dir, "aggregate_returns_delayed_all_steps.png"))
 plt.close()
