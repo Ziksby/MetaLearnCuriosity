@@ -11,19 +11,20 @@ from flax.jax_utils import replicate
 from tqdm import tqdm
 
 import wandb
-from MetaLearnCuriosity.agents.nn import RCRNN, RewardCombiner
+from MetaLearnCuriosity.agents.nn import RCRNN, RNNRewardCombiner
 from MetaLearnCuriosity.checkpoints import Restore, Save
 from MetaLearnCuriosity.compile_gymnax_rnn_train_fns import compile_fns
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import (
     create_adjacent_pairs,
+    get_latest_commit_hash,
     process_output_general,
     reorder_antithetic_pairs,
 )
 
 config = {
-    "RUN_NAME": "rc_rnn_minatar_default_delayed_breakout",
-    "SEED": 42,
+    "RUN_NAME": "rc_rnn_minatar_default_delayed_breakout_SAVED",
+    "SEED": 42 * 356_7554,
     "NUM_SEEDS": 2,
     "LR": 5e-3,
     "NUM_ENVS": 64,
@@ -45,15 +46,17 @@ config = {
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
     "POP_SIZE": 64,
-    "ES_SEED": 7,
+    "ES_SEED": 7 * 766 * 6,
     "HIST_LEN": 1,
-    "RC_SEED": 23 * 89,
+    "RC_SEED": 23,
     "NUM_GENERATIONS": 48,
     # "INT_LAMBDA": 0.001,
     "ENV_KEY": 102,
 }
+commit_hash = get_latest_commit_hash()
 
-reward_combiner_network = RewardCombiner()
+config["COMMIT_HARSH"] = commit_hash
+reward_combiner_network = RNNRewardCombiner()
 env_name = "Breakout-MinAtar"
 rc_params_pholder = reward_combiner_network.init(
     jax.random.PRNGKey(config["RC_SEED"]),
@@ -92,17 +95,31 @@ es_rng, es_rng_init = jax.random.split(es_rng)
 es_params = strategy.default_params
 es_state = strategy.initialize(es_rng_init, es_params)
 
-# es_stuff = Restore(
-#     "/home/batsy/MetaLearnCuriosity/MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/rc_cnn_64_64_minatar_default_prob"
-# )
-# es_state_saved, _ = es_stuff
-# print(es_state_saved)
-# print()
-# print(es_state)
-# print()
-# opt_state = es_state.opt_state.replace(lrate=es_state_saved["opt_state"]["lrate"], m=es_state_saved["opt_state"]["m"], v=es_state_saved["opt_state"]["v"], n=es_state_saved["opt_state"]["n"], last_grads=es_state_saved["opt_state"]["last_grads"], gen_counter=es_state_saved["opt_state"]["gen_counter"])
-# es_state=es_state.replace(mean=es_state_saved['mean'], sigma=es_state_saved["sigma"], opt_state=opt_state, best_member = es_state_saved["best_member"], best_fitness=es_state_saved["best_fitness"], gen_counter=es_state_saved["gen_counter"])
-# print("Now matched,", es_state,"\n")
+es_stuff = Restore(
+    "/home/batsy/MetaLearnCuriosity/MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/rc_rnn_minatar_default_delayed_breakout_SAVED"
+)
+es_state_saved, _ = es_stuff
+print(es_state_saved)
+print()
+print(es_state)
+print()
+opt_state = es_state.opt_state.replace(
+    lrate=es_state_saved["opt_state"]["lrate"],
+    m=es_state_saved["opt_state"]["m"],
+    v=es_state_saved["opt_state"]["v"],
+    n=es_state_saved["opt_state"]["n"],
+    last_grads=es_state_saved["opt_state"]["last_grads"],
+    gen_counter=es_state_saved["opt_state"]["gen_counter"],
+)
+es_state = es_state.replace(
+    mean=es_state_saved["mean"],
+    sigma=es_state_saved["sigma"],
+    opt_state=opt_state,
+    best_member=es_state_saved["best_member"],
+    best_fitness=es_state_saved["best_fitness"],
+    gen_counter=es_state_saved["gen_counter"],
+)
+print("Now matched,", es_state, "\n")
 
 train_fns, make_seeds = compile_fns(config=config)
 rng = jax.random.PRNGKey(config["SEED"])
@@ -116,7 +133,9 @@ fit_log = wandb.init(
 # step_intervals = [0.1,0.3,0.5,0.8]
 step_intervals = [3, 10, 20, 30]
 
-for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations"):
+for gen in tqdm(
+    range(config["NUM_GENERATIONS"] - es_state_saved["gen_counter"]), desc="Processing Generations"
+):
     begin_gen = time.time()
     es_rng, es_rng_ask = jax.random.split(es_rng)
     x, es_state = strategy.ask(es_rng_ask, es_state, es_params)
@@ -183,6 +202,8 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
             )
         )
         output = process_output_general(output)
+        episode_returns = output["episode_returns"].mean(-1)
+
         raw_episode_return = output["rewards"].mean(-1)  # This is the raw fitness
         int_lambdas = output["int_lambdas"].mean(
             -1
@@ -193,6 +214,9 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
 
         binary_fitness = jnp.where(raw_episode_return == jnp.max(raw_episode_return), 1.0, 0.0)
         fitness.append(binary_fitness)
+        print("Here is the episode return of the pair:", episode_returns)
+        print("Here is the int_lambda of the pair:", int_lambdas)
+        print("Here is the fitness of the pair:", raw_episode_return)
         print(f"Time for the Pair in {env_name}_{step_int} is {(time.time()-t)/60}")
 
     fitness = jnp.array(fitness).flatten()
