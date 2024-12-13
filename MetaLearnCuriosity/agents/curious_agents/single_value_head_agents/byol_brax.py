@@ -42,14 +42,14 @@ from MetaLearnCuriosity.wrappers import (
 environments = [
     # "ant",
     # "halfcheetah",
-    # "hopper",
+    "hopper",
     # "humanoid",
     # "humanoidstandup",
-    "inverted_pendulum",
-    # "inverted_double_pendulum",
+    # "inverted_pendulum",
+    "inverted_double_pendulum",
     # "pusher",
     # "reacher",
-    # "walker2d",
+    "walker2d",
 ]
 
 config = {
