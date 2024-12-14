@@ -116,6 +116,7 @@ config = {
     "ACTIVATION": "relu",
     "ANNEAL_LR": True,
     "DEBUG": False,
+    "HIST_LEN": 128,
 }
 
 environments = [
