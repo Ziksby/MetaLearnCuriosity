@@ -709,6 +709,7 @@ for env_name in environments:
         init_rnd_obs = replicate(init_rnd_obs, jax.local_devices())
         ext_reward_hist = replicate(ext_reward_hist, jax.local_devices())
         int_reward_hist = replicate(int_reward_hist, jax.local_devices())
+        rc_params = replicate(rc_params, jax.local_devices())
         train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0))
         train_fn = jax.pmap(train_fn, axis_name="devices")
         output = jax.block_until_ready(
