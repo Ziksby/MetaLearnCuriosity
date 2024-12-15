@@ -84,8 +84,8 @@ def compile_rnd_fns(config):  # noqa: C901
         config["ENV_NAME"] = env_name
         num_devices = jax.local_device_count()
         assert config["NUM_ENVS"] % num_devices == 0
-        config["NUM_ENVS_PER_DEVICE"] = config["NUM_ENVS"] // 1
-        config["TOTAL_TIMESTEPS_PER_DEVICE"] = config["TOTAL_TIMESTEPS"] // 1
+        config["NUM_ENVS_PER_DEVICE"] = config["NUM_ENVS"] // num_devices
+        config["TOTAL_TIMESTEPS_PER_DEVICE"] = config["TOTAL_TIMESTEPS"] // num_devices
         # config["EVAL_EPISODES_PER_DEVICE"] = config["EVAL_EPISODES"] // num_devices
         config["NUM_UPDATES"] = (
             config["TOTAL_TIMESTEPS_PER_DEVICE"]

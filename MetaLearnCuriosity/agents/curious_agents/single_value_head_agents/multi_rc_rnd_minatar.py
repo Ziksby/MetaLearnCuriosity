@@ -131,8 +131,8 @@ def make_config_env(config, env_name):
     config["ENV_NAME"] = env_name
     num_devices = jax.local_device_count()
     assert config["NUM_ENVS"] % num_devices == 0
-    config["NUM_ENVS_PER_DEVICE"] = config["NUM_ENVS"] // 1
-    config["TOTAL_TIMESTEPS_PER_DEVICE"] = config["TOTAL_TIMESTEPS"] // 1
+    config["NUM_ENVS_PER_DEVICE"] = config["NUM_ENVS"] // num_devices
+    config["TOTAL_TIMESTEPS_PER_DEVICE"] = config["TOTAL_TIMESTEPS"] // num_devices
     # config["EVAL_EPISODES_PER_DEVICE"] = config["EVAL_EPISODES"] // num_devices
     config["NUM_UPDATES"] = (
         config["TOTAL_TIMESTEPS_PER_DEVICE"] // config["NUM_STEPS"] // config["NUM_ENVS_PER_DEVICE"]
@@ -684,14 +684,14 @@ strategy = OpenES(
 for env_name in environments:
     for step_int in step_intervals:
         es_stuff = Restore("/home/batsy/MetaLearnCuriosity/rc_cnn_RND_flax-checkpoints_v0")
-        config["RUN_NAME"] = f"DELAY_RC_CNN_RND_{env_name}_{step_int}"
+        config["RUN_NAME"] = f"NUM_DEVICES_EFFECT_DELAY_RC_CNN_RND_{env_name}_{step_int}"
         es_state, _, _, _ = es_stuff
         # print(es_state["gen_counter"])
         rc_params = strategy.param_reshaper.reshape_single(es_state["mean"])
         rng = jax.random.PRNGKey(config["SEED"])
         t = time.time()
         config["STEP_INTERVAL"] = step_int
-        config["RUN_NAME"] = f"delayed_rnd_{step_int}_{env_name}_optimal"
+        # config["RUN_NAME"] = f"delayed_rnd_{step_int}_{env_name}_optimal"
         config, env, env_params = make_config_env(config, env_name)
         rng = jax.random.split(rng, config["NUM_SEEDS"])
         (
