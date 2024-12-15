@@ -872,25 +872,122 @@ def plot_final_episode_returns(directories, save_location, file_name):
         plt.close()
 
 
-# name_to_normalises=["DELAY_RC_CNN_EPISODE","DELAY_RC_RNN"]
-# step_intervals=[1,3,10,20,30,40]
+def plot_int_lambdas_for_seed(
+    path_to_saved_metrics: str,
+    type_agent: str,
+    env_name: str,
+    path_to_save: str,
+    seed_selection: str = "highest",
+    filename: str = None,
+):
+    """
+    Plot int_lambdas for a specified seed or the best-performing seed based on saved episode returns.
+
+    Parameters:
+    -----------
+    path_to_saved_metrics : str
+        Path to the directory containing the saved metric files
+    type_agent : str
+        Type of agent
+    env_name : str
+        Name of the environment
+    path_to_save : str
+        Path to save the generated plot
+    seed_selection : str or int, optional (default='highest')
+        Can be 'highest' to select the seed with the highest last timestep return,
+        or an integer representing the specific seed index (0-based)
+    filename : str, optional
+        Custom filename for the saved plot
+
+    Returns:
+    --------
+    int : Seed index used for plotting
+    """
+    # Construct paths to metric files
+    base_path = os.path.join(path_to_saved_metrics, type_agent, env_name)
+
+    # Load episode returns
+    episode_returns_file = os.path.join(base_path, "metric_seeds_episode_return.npy")
+    episode_returns = np.load(episode_returns_file)
+
+    # Determine seed selection
+    if isinstance(seed_selection, str) and seed_selection.lower() == "highest":
+        # Find the seed with the highest value at the last timestep
+        seed_index = np.argmax(episode_returns[-1])
+    elif isinstance(seed_selection, int):
+        # Use the specified seed index (0-based)
+        seed_index = seed_selection
+    else:
+        raise ValueError("seed_selection must be 'highest' or an integer")
+
+    # Load int_lambdas
+    int_lambdas_file = os.path.join(base_path, "int_lambda_seeds_episode_return.npy")
+    int_lambdas = np.load(int_lambdas_file)
+
+    # Select the specific seed's int_lambdas
+    seed_int_lambdas = int_lambdas[:, seed_index]
+
+    # Create a clean, publication-quality plot
+    plt.figure(figsize=(10, 6), dpi=300)
+    plt.plot(seed_int_lambdas, color="dodgerblue", linewidth=2.5)
+
+    # Styling for a scientific publication-like plot
+    plt.title(
+        f"Intrinsic Lambdas - {env_name}\n{type_agent} Agent, Seed {seed_index}",
+        fontsize=16,
+        fontweight="bold",
+    )
+    plt.xlabel("Training Steps", fontsize=14)
+    plt.ylabel("Intrinsic Lambda Value", fontsize=14)
+    plt.grid(True, linestyle="--", linewidth=0.5, color="lightgray")
+
+    # Tight layout and spines
+    plt.tight_layout()
+    plt.gca().spines["top"].set_visible(False)
+    plt.gca().spines["right"].set_visible(False)
+
+    # Determine save path and filename
+    save_path = os.path.join(path_to_save, type_agent, env_name)
+    os.makedirs(save_path, exist_ok=True)
+
+    if filename is None:
+        filename = f"int_lambdas_seed_{seed_index}.png"
+
+    full_save_path = os.path.join(save_path, filename)
+    plt.savefig(full_save_path, bbox_inches="tight")
+    plt.close()
+
+    print(f"Plot saved to: {full_save_path}")
+    print(f"Seed index used: {seed_index}")
+
+    return seed_index
+
+
+name_to_normalises = [  # "DELAY_RC_CNN",
+    # "TIMED_DELAY_RC_CNN",
+    # "DELAY_RC_RNN",
+    # "TIMED_DELAY_RC_RNN",
+    "DELAY_RC_CNN_EPISODE"
+]
+step_intervals = [1, 40]
 # for name_to_normalise in name_to_normalises:
 #     for step_int in step_intervals:
-#         save_episode_return(
+#         save_int_lambdas(
 #             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/{name_to_normalise}_Breakout-MinAtar_{step_int}_Breakout-MinAtar_flax-checkpoints_v0",
 #             "/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments",
 #             f"{name_to_normalise}_{step_int}",
 #             "Breakout-MinAtar",
 #         )
 
-
 # Example usage
 base_path = "/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments"
+step_interval = 40
 names = [
     "DELAY_RC_CNN",
     "TIMED_DELAY_RC_CNN",
     "DELAY_RC_RNN",
     "TIMED_DELAY_RC_RNN",
+    "DELAY_RC_CNN_EPISODE",
     "delayed_byol",
     "delayed_rnd",
     "minatar_baseline_ppo",
@@ -901,8 +998,27 @@ env_name = "Breakout-MinAtar"
 # Get directories
 experiment_dirs = get_experiment_directories(base_path, names, step_intervals, env_name)
 
-# Plot results
+# # Plot results
 save_location = "/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/images/Breakout-MinAtar"
 
-# Plot results
+# # Plot results
 plot_final_episode_returns(experiment_dirs, save_location, "breakout_final_returns")
+names = [
+    f"DELAY_RC_CNN_{step_interval}",
+    f"TIMED_DELAY_RC_CNN_{step_interval}",
+    f"DELAY_RC_RNN_{step_interval}",
+    f"TIMED_DELAY_RC_RNN_{step_interval}",
+    f"DELAY_RC_CNN_EPISODE_{step_interval}",
+    # "delayed_byol",
+    # "delayed_rnd",
+    # "minatar_baseline_ppo",
+]
+for name in names:
+    plot_int_lambdas_for_seed(
+        base_path,
+        name,
+        "Breakout-MinAtar",
+        save_location,
+        1,
+        filename=f"{name}_highest_seed_int_lambda",
+    )
