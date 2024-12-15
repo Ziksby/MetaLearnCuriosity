@@ -94,6 +94,87 @@ def plot_sample_std(names, labels, alphas):
     plt.savefig(f"{env_name}_mean_seeds_std.png")
 
 
+def save_int_lambdas(path_to_extract, path_to_save, type_agent, env_name):
+    start_time = time.time()
+    output = Restore(path_to_extract)
+    metric = output["int_lambdas"]
+    # env_name = output["config"]["ENV_NAME"]
+    print(f"\n Here's the shape:\n {metric.shape}")
+
+    # # Average among the number of environments
+    # metric = jnp.mean(metric, axis=-1)
+
+    # A 2D array of shape (num_seeds, update step)
+    metric = metric.reshape(metric.shape[0], -1)
+
+    # Transpose to make it (update steps, num_seeds)
+    metric = metric.T
+
+    # Initialize lists to store means, confidence intervals, and standard deviations
+    means = []
+    # ci_lows = []
+    # ci_highs = []
+    # stds = []
+
+    for timestep_values in metric:
+        mean_value = jnp.mean(timestep_values)
+        means.append(mean_value)  # Store the mean for the current timestep
+
+    #     ci = bootstrap(
+    #         (timestep_values,),
+    #         jnp.mean,
+    #         confidence_level=0.95,
+    #         method="percentile",
+    #     )
+
+    #     ci_lows.append(ci.confidence_interval.low)
+    #     ci_highs.append(ci.confidence_interval.high)
+
+    #     std_value = jnp.std(timestep_values, ddof=1)  # Sample standard deviation
+    #     stds.append(std_value)
+
+    # Convert lists to numpy arrays
+    metric = np.array(metric)
+    means = np.array(means)
+    # ci_highs = np.array(ci_highs)
+    # ci_lows = np.array(ci_lows)
+    # stds = np.array(stds)
+
+    # Ensure the save directory exists
+    save_path = os.path.join(path_to_save, type_agent, env_name)
+    os.makedirs(save_path, exist_ok=True)
+
+    # Save the arrays
+    metric_file = os.path.join(save_path, "int_lambda_seeds_episode_return.npy")
+    means_file = os.path.join(save_path, "means_int_lambda.npy")
+    # ci_highs_file = os.path.join(save_path, "ci_highs_episode_return.npy")
+    # ci_lows_file = os.path.join(save_path, "ci_lows_episode_return.npy")
+    # stds_file = os.path.join(save_path, "stds_episode_return.npy")
+
+    np.save(means_file, means)
+    np.save(metric_file, metric)
+    # np.save(ci_highs_file, ci_highs)
+    # np.save(ci_lows_file, ci_lows)
+    # np.save(stds_file, stds)
+
+    # Print the sizes of the saved files in MB
+    print(f"Size of means_episode_return.npy: {os.path.getsize(means_file) / (1024 * 1024):.7f} MB")
+    print(
+        f"Size of metric_seeds_episode_return.npy: {os.path.getsize(metric_file) / (1024 * 1024):.7f} MB"
+    )
+
+    # print(
+    #     f"Size of ci_highs_episode_return.npy: {os.path.getsize(ci_highs_file) / (1024 * 1024):.7f} MB"
+    # )
+    # print(
+    #     f"Size of ci_lows_episode_return.npy: {os.path.getsize(ci_lows_file) / (1024 * 1024):.7f} MB"
+    # )
+    # print(f"Size of stds_episode_return.npy: {os.path.getsize(stds_file) / (1024 * 1024):.7f} MB")
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    print(f"Time taken to run the code: {elapsed_time:.2f} seconds in {env_name}")
+
+
 def save_episode_return(path_to_extract, path_to_save, type_agent, env_name):
     start_time = time.time()
     output = Restore(path_to_extract)
@@ -791,14 +872,29 @@ def plot_final_episode_returns(directories, save_location, file_name):
         plt.close()
 
 
+# name_to_normalises=["DELAY_RC_CNN_EPISODE","DELAY_RC_RNN"]
+# step_intervals=[1,3,10,20,30,40]
+# for name_to_normalise in name_to_normalises:
+#     for step_int in step_intervals:
+#         save_episode_return(
+#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/{name_to_normalise}_Breakout-MinAtar_{step_int}_Breakout-MinAtar_flax-checkpoints_v0",
+#             "/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments",
+#             f"{name_to_normalise}_{step_int}",
+#             "Breakout-MinAtar",
+#         )
+
+
 # Example usage
 base_path = "/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments"
 names = [
     "DELAY_RC_CNN",
+    "TIMED_DELAY_RC_CNN",
+    "DELAY_RC_RNN",
+    "TIMED_DELAY_RC_RNN",
     "delayed_byol",
     "delayed_rnd",
     "minatar_baseline_ppo",
-]  # , "TIMED_DELAY_RC_CNN", "TIMED_DELAY_RC_RNN"
+]
 step_intervals = [1, 40]
 env_name = "Breakout-MinAtar"
 
