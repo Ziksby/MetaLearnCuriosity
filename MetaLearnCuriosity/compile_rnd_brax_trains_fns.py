@@ -163,8 +163,17 @@ def compile_rnd_fns(config):  # noqa: C901
         )
 
         rng = jax.random.split(rng, jax.local_device_count())
-
-        return rng, train_state, predictor_state, target_params, _init_obs_rng
+        ext_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], config["HIST_LEN"]))
+        int_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], config["HIST_LEN"]))
+        return (
+            rng,
+            train_state,
+            predictor_state,
+            target_params,
+            _init_obs_rng,
+            ext_reward_history,
+            int_reward_history,
+        )
 
     def train(
         rng,

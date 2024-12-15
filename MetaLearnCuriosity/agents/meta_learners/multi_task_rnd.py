@@ -16,7 +16,7 @@ from tqdm import tqdm
 import wandb
 from MetaLearnCuriosity.agents.nn import RewardCombiner
 from MetaLearnCuriosity.checkpoints import Save
-from MetaLearnCuriosity.compile_rnd_brax_trains import compile_rnd_fns
+from MetaLearnCuriosity.compile_rnd_brax_trains_fns import compile_rnd_fns
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import (
     create_adjacent_pairs,
