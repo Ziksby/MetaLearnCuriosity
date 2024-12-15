@@ -77,7 +77,7 @@ config = {
     "ACTIVATION": "tanh",
     "ANNEAL_LR": False,
     "NORMALIZE_ENV": True,
-    "DELAY_REWARDS": False,
+    "DELAY_REWARDS": True,
     "ANNEAL_PRED_LR": False,
     "DEBUG": False,
     "PRED_LR": 0.001,
@@ -729,7 +729,6 @@ def train(
         )
         train_state, pred_state, target_state, update_target_counter = update_state[:4]
         metric = traj_batch.info
-        metric = jax.tree_util.tree_map(partial(jnp.mean, axis=-1), metric)
         rng = update_state[-1]
         if config.get("DEBUG"):
 
@@ -765,11 +764,11 @@ def train(
         return runner_state, (
             metric,
             loss_info,
-            traj_batch.int_reward.mean(-1),
-            norm_int_reward.mean(-1),
-            norm_ext_reward.mean(-1),
-            int_lambdas.mean(-1),
-            traj_batch.reward.mean(-1),
+            traj_batch.int_reward,
+            norm_int_reward,
+            norm_ext_reward,
+            int_lambdas,
+            traj_batch.reward,
         )
 
     rng, _rng = jax.random.split(rng)
