@@ -769,7 +769,7 @@ def compile_brax_byol_fns(config):  # noqa: C901
 
     train_fns = {}
     make_seeds = {}
-    env_name = "inverted_double_pendulum"
+    env_name = "hopper"
     for step_interval in step_intervals:
         config["STEP_INTERVAL"] = step_interval
         config, env, env_params = make_config_env(config, env_name)

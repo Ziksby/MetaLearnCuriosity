@@ -1,24 +1,18 @@
 import os
 import shutil
 import time
-from typing import Sequence
+from typing import Any, NamedTuple, Sequence
 
 import distrax
-import flax
 import flax.linen as nn
-import gymnax
 import jax
 import jax.numpy as jnp
-import jax.tree_util
 import numpy as np
 import optax
-from evosax import OpenES
 from flax.jax_utils import replicate, unreplicate
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
-from tqdm import tqdm
 
-import wandb
 from MetaLearnCuriosity.agents.nn import PredictorNetwork, RewardCombiner, TargetNetwork
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
@@ -34,14 +28,17 @@ from MetaLearnCuriosity.utils import (
     update_obs_norm_params,
 )
 from MetaLearnCuriosity.wrappers import (
-    FlattenObservationWrapper,
+    BraxGymnaxWrapper,
+    ClipAction,
+    DelayedReward,
     LogWrapper,
-    MinAtarDelayedReward,
+    NormalizeVecObservation,
+    NormalizeVecReward,
     VecEnv,
 )
 
 
-class PPOActorCritic(nn.Module):
+class ActorCritic(nn.Module):
     action_dim: Sequence[int]
     activation: str = "tanh"
 
@@ -51,37 +48,31 @@ class PPOActorCritic(nn.Module):
             activation = nn.relu
         else:
             activation = nn.tanh
-        actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
+        actor_mean = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
         actor_mean = activation(actor_mean)
-        actor_mean = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(
+        actor_mean = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(
             actor_mean
         )
         actor_mean = activation(actor_mean)
         actor_mean = nn.Dense(
             self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0)
         )(actor_mean)
-        pi = distrax.Categorical(logits=actor_mean)
+        actor_logtstd = self.param("log_std", nn.initializers.zeros, (self.action_dim,))
+        pi = distrax.MultivariateNormalDiag(actor_mean, jnp.exp(actor_logtstd))
 
-        critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
+        critic = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(x)
         critic = activation(critic)
-        critic = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(critic)
+        critic = nn.Dense(256, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0))(critic)
         critic = activation(critic)
         critic = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0))(critic)
 
         return pi, jnp.squeeze(critic, axis=-1)
 
 
-environments = [
-    # "Asterix-MinAtar",
-    "Breakout-MinAtar",
-    # "Freeway-MinAtar",
-    # "SpaceInvaders-MinAtar",
-]
-
-
 def compile_rnd_fns(config):  # noqa: C901
     def make_config_env(config, env_name):
         config["ENV_NAME"] = env_name
+        env, env_params = BraxGymnaxWrapper(config["ENV_NAME"]), None
         num_devices = jax.local_device_count()
         assert config["NUM_ENVS"] % num_devices == 0
         config["NUM_ENVS_PER_DEVICE"] = config["NUM_ENVS"] // num_devices
@@ -100,11 +91,15 @@ def compile_rnd_fns(config):  # noqa: C901
         )
         assert config["NUM_ENVS_PER_DEVICE"] >= 4
         config["UPDATE_PROPORTION"] = 4 / config["NUM_ENVS_PER_DEVICE"]
-        env, env_params = gymnax.make(config["ENV_NAME"])
-        env = FlattenObservationWrapper(env)
+
         env = LogWrapper(env)
-        env = MinAtarDelayedReward(env, config["STEP_INTERVAL"])
+        env = ClipAction(env)
+        if config["DELAY_REWARDS"]:
+            env = DelayedReward(env, config["STEP_INTERVAL"])
         env = VecEnv(env)
+        if config["NORMALIZE_ENV"]:
+            env = NormalizeVecObservation(env)
+            env = NormalizeVecReward(env, config["GAMMA"])
 
         return config, env, env_params
 
@@ -117,18 +112,20 @@ def compile_rnd_fns(config):  # noqa: C901
             )
             return config["LR"] * frac
 
-        def pred_linear_schedule(count):
-            frac = (
-                1.0
-                - (count // (config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"]))
-                / config["NUM_UPDATES"]
-            )
-            return config["PRED_LR"] * frac
+        # def pred_linear_schedule(count):
+        #     frac = (
+        #         1.0
+        #         - (count // (config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"]))
+        #         / config["NUM_UPDATES"]
+        #     )
+        #     return config["PRED_LR"] * frac
 
-        # INIT NETWORKS
-        network = PPOActorCritic(env.action_space(env_params).n, activation=config["ACTIVATION"])
-        target = TargetNetwork(64)
-        predictor = PredictorNetwork(64)
+        # INIT NETWORK
+        network = ActorCritic(
+            env.action_space(env_params).shape[0], activation=config["ACTIVATION"]
+        )
+        target = TargetNetwork(256)
+        predictor = PredictorNetwork(256)
 
         rng, _rng = jax.random.split(rng)
         rng, _pred_rng = jax.random.split(rng)
@@ -136,10 +133,6 @@ def compile_rnd_fns(config):  # noqa: C901
         rng, _init_obs_rng = jax.random.split(rng)
 
         init_x = jnp.zeros(env.observation_space(env_params).shape)
-
-        ext_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], config["HIST_LEN"]))
-        int_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], config["HIST_LEN"]))
-
         network_params = network.init(_rng, init_x)
         target_params = target.init(_tar_rng, init_x)
         pred_params = predictor.init(_pred_rng, init_x)
@@ -162,7 +155,7 @@ def compile_rnd_fns(config):  # noqa: C901
 
         pred_tx = optax.chain(
             optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
-            optax.adam(pred_linear_schedule, eps=1e-5),
+            optax.adam(config["PRED_LR"], eps=1e-5),
         )
 
         predictor_state = TrainState.create(
@@ -171,15 +164,7 @@ def compile_rnd_fns(config):  # noqa: C901
 
         rng = jax.random.split(rng, jax.local_device_count())
 
-        return (
-            rng,
-            train_state,
-            predictor_state,
-            target_params,
-            _init_obs_rng,
-            ext_reward_history,
-            int_reward_history,
-        )
+        return rng, train_state, predictor_state, target_params, _init_obs_rng
 
     def train(
         rng,
@@ -218,7 +203,7 @@ def compile_rnd_fns(config):  # noqa: C901
         )
 
         obs_norm_params = update_obs_norm_params(init_obs_norm_params, init_obs)
-        target = TargetNetwork(64)
+        target = TargetNetwork(256)
 
         # INIT ENV
         rng, _rng = jax.random.split(rng)
@@ -634,7 +619,7 @@ def compile_rnd_fns(config):  # noqa: C901
     train_fns = {}
     make_seeds = {}
     step_intervals = [3, 10, 20, 30]
-    env_name = "Breakout-MinAtar"
+    env_name = "hopper"
     for step_int in step_intervals:
         config["STEP_INTERVAL"] = step_int
 
