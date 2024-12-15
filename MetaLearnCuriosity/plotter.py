@@ -61,52 +61,6 @@ def plot_distribution(agent_type, path):
     plt.savefig(f"{path}/{agent_type}_histogram_{output['config']['NUM_SEEDS']}.png")
 
 
-def plot_CI(names, labels, alphas):
-    plt.figure(figsize=(8, 6))
-    means = []
-    ci_lows = []
-    ci_highs = []
-    for name, label, alpha in zip(names, labels, alphas):
-        path = f"MLC_logs/flax_ckpt/Empty-misc/{name}_empty_30"
-        output = Restore(path)
-        metric = output["metrics"]["returned_episode_returns"]
-        env_name = output["config"]["ENV_NAME"]
-        # avg among the num of evns
-        metric = jnp.mean(metric, axis=-1)
-
-        # A 2d array of shape num_seeds, update step
-        metric = metric.reshape(metric.shape[0], -1)
-
-        # Transpose to make it (update steps, num_seeds)
-        metric = metric.T
-
-        timestep_values = (metric[-1],)
-        means.append(jnp.mean(metric[-1]))
-        ci = bootstrap(
-            timestep_values,
-            jnp.mean,
-            confidence_level=0.95,
-            method="percentile",
-        )
-        ci_lows.append(ci.confidence_interval.low)
-        ci_highs.append(ci.confidence_interval.high)
-
-    means = np.array(means)
-    ci_highs = np.array(ci_highs)
-    ci_lows = np.array(ci_lows)
-
-    error_bar = np.array([means - ci_lows, ci_highs - means])
-    plt.errorbar(labels, means, yerr=error_bar, fmt="o", capsize=5, label="Mean Episode Return")
-    plt.xlabel("RL Agent")
-    plt.ylabel("Mean Episode Return")
-
-    plt.legend(loc="upper center", bbox_to_anchor=(0.5, 1.15))
-    plt.grid()
-    plt.xticks(rotation=45, ha="right")
-    plt.tight_layout()
-    plt.savefig(f"{env_name}_mean_seeds_CI.png")
-
-
 def plot_sample_std(names, labels, alphas):
     """
     This function plots the sample std during training for each algorithm
@@ -412,7 +366,7 @@ def plot_algorithm_comparison(
     y_axis_algo_name,
     save_path,
     file_name,
-    environment,
+    environments,
 ):
     """
     Plots a scatter plot comparing the episode returns of two algorithms across different environments.
@@ -709,253 +663,150 @@ def plot_grouped_histogram(
     plt.show()
 
 
-# Example usage
-# plot_error_bars_macro_envs(curious_paths, "SomeMacroEnvType", ["Algo1", "Algo2", "Algo3"])
+def get_experiment_directories(base_path, names, step_intervals, env_name):
+    """
+    Generate full paths to experiment directories.
+
+    Args:
+        base_path (str): Base directory containing experiments
+        names (list): List of algorithm names
+        step_intervals (list): List of step intervals
+        env_name (str): Environment name
+
+    Returns:
+        dict: Directories organized by step interval
+    """
+    directories = {}
+    for step_int in step_intervals:
+        step_dirs = []
+        for name in names:
+            full_dir = os.path.join(base_path, f"{name}_{step_int}", env_name)
+            step_dirs.append(full_dir)
+        directories[step_int] = step_dirs
+    return directories
 
 
-# environments = [
-# 0,1,2,3
-# ]
+def plot_final_episode_returns(directories, save_location, file_name):
+    """
+    Plot final episode returns with 95% confidence intervals for each step interval.
 
+    Args:
+        directories (dict): Directories containing experiment results, organized by step interval
+        save_location (str): Directory to save plots
+        file_name (str): Base filename for saved plots
+    """
+    # Set up the plotting style
+    plt.style.use("seaborn-v0_8-whitegrid")
+    plt.rcParams.update(
+        {
+            "font.size": 12,
+            "axes.labelsize": 14,
+            "axes.titlesize": 16,
+            "xtick.labelsize": 10,
+            "ytick.labelsize": 10,
+            "legend.fontsize": 10,
+        }
+    )
 
-# # name_to_normalises=["rc_simpler","rc_bias_off","rc_128_arch_bias_off", "rc_128_arch" ]
-name_to_normalises = ["baseline"]
+    # Process each step interval separately
+    for step_interval, dir_paths in directories.items():
+        # Prepare data for plotting
+        final_returns_data = []
+        labels = []
 
-# # #MinAtar
-# for name_to_normalise in name_to_normalises:
-#     for env_name in environments:
-#         save_episode_return(
-#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/minatar_baseline_ppo_flax-checkpoints_v{env_name}",
-#             "/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments",
-#             name_to_normalise,
-#         )
+        # Load and process data from each directory
+        for dir_path in dir_paths:
+            # Extract algorithm name
+            parts = os.path.basename(os.path.dirname(dir_path)).split("_")
+            algo_name = "_".join(parts[:-1])
+            label = algo_name
 
-#         normalize_curious_agent_returns(
-#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/baseline/{env_name}/metric_seeds_episode_return.npy",
-#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/random_agents/{env_name}_epi_rets.npy",
-#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/{name_to_normalise}/{env_name}/metric_seeds_episode_return.npy",
-#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/{name_to_normalise}/{env_name}",
-#         )
-environments = [
-    "MiniGrid-DoorKey-8x8",
-    # "MiniGrid-Empty-16x16",
-    # "MiniGrid-EmptyRandom-16x16",
-    # "MiniGrid-FourRooms",
-    # "MiniGrid-MemoryS16",
-    # "MiniGrid-Unlock",
-]
-for name_to_normalise in name_to_normalises:
-    for env_name in environments:
-        save_episode_return(
-            f"/home/batsi/Documents/Masters/MetaLearnCuriosity/minigrid-ppo-baseline_{env_name}_flax-checkpoints_v0",
-            "/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments",
-            name_to_normalise,
-            env_name,
+            # Load numpy array
+            metric_path = os.path.join(dir_path, "metric_seeds_episode_return.npy")
+            if not os.path.exists(metric_path):
+                print(f"Warning: {metric_path} not found. Skipping.")
+                continue
+
+            returns_data = np.load(metric_path)
+
+            # Get final episode returns (last row of the array)
+            final_returns = returns_data[-1, :]
+
+            # Compute bootstrap confidence interval
+            ci = bootstrap(
+                (final_returns,),
+                np.mean,
+                confidence_level=0.95,
+                method="percentile",
+                n_resamples=10000,
+            )
+
+            final_returns_data.append(
+                {
+                    "mean": np.mean(final_returns),
+                    "ci_low": ci.confidence_interval.low,
+                    "ci_high": ci.confidence_interval.high,
+                }
+            )
+
+            labels.append(label)
+
+        # Create final returns plot for this step interval
+        plt.figure(figsize=(10, 6))
+
+        # Prepare data for plotting
+        means = [d["mean"] for d in final_returns_data]
+        ci_lows = [d["ci_low"] for d in final_returns_data]
+        ci_highs = [d["ci_high"] for d in final_returns_data]
+
+        # Plot error bars
+        plt.errorbar(
+            range(len(labels)),
+            means,
+            yerr=[np.array(means) - np.array(ci_lows), np.array(ci_highs) - np.array(means)],
+            fmt="o",  # Circular markers
+            capsize=5,  # Cap width for error bars
+            capthick=1.5,  # Cap thickness
+            ecolor="black",  # Error bar color
+            markerfacecolor="blue",  # Marker fill color
+            markeredgecolor="black",  # Marker edge color
+            markersize=10,  # Marker size
+            elinewidth=1.5,  # Error bar line width
         )
 
-#         normalize_curious_agent_returns(
-#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/baseline/{env_name}/metric_seeds_episode_return.npy",
-#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/random_agents/{env_name}_epi_rets.npy",
-#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/{name_to_normalise}/{env_name}/metric_seeds_episode_return.npy",
-#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/{name_to_normalise}/{env_name}",
-#         )
-# environments = [
-#     "ant",
-#     "halfcheetah",
-#     "hopper",
-#     "humanoid",
-#     "humanoidstandup",
-#     "inverted_pendulum",
-#     "inverted_double_pendulum",
-#     "pusher",
-#     "reacher",
-#     "walker2d",
-# ]
-# environments = [
-#     "MiniGrid-BlockedUnlockPickUp",
-#     "MiniGrid-Empty-16x16",
-#     "MiniGrid-EmptyRandom-16x16",
-#     "MiniGrid-FourRooms",
-#     "MiniGrid-MemoryS128",
-#     "MiniGrid-Unlock",
-#     "ant",
-#     "halfcheetah",
-#     "hopper",
-#     "humanoid",
-#     "humanoidstandup",
-#     "inverted_pendulum",
-#     "inverted_double_pendulum",
-#     "pusher",
-#     "reacher",
-#     "walker2d",
-#     "Asterix-MinAtar",
-#     "Breakout-MinAtar",
-#     "Freeway-MinAtar",
-#     "SpaceInvaders-MinAtar",
-# ]
-# for env_name in environments:
+        plt.xlabel("Algorithms")
+        plt.ylabel("Final Episode Return")
+        plt.title(f"Final Episode Returns (Step Interval: {step_interval})")
+        plt.xticks(range(len(labels)), labels, rotation=45, ha="right")
+        plt.tight_layout()
 
-#     old_folder = f"/home/batsi/Documents/Masters/MetaLearnCuriosity/rc_128_arch_bias_off_temporal/rc_128_arch_bias_off_temporal_brax_byol_default_{env_name}_flax-checkpoints_v0"
-#     new_folder = f"/home/batsi/Documents/Masters/MetaLearnCuriosity/rc_128_arch_bias_off_temporal_/rc_128_arch_bias_off_temporal_delayed_brax_byol_{env_name}_flax-checkpoints_v0"
+        # Ensure save directory exists
+        os.makedirs(save_location, exist_ok=True)
 
-#     if os.path.exists(old_folder):
-#         os.rename(old_folder, new_folder)
-#         print(f"Renamed: {old_folder} to {new_folder}")
-#     else:
-#         print(f"Folder not found: {old_folder}")
-# name_to_normalises=["rc_128_arch_bias_off_temporal"]
-# for name_to_normalise in name_to_normalises:
-#     for env_name in environments:
-#         save_episode_return(
-#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/delayed_brax_baseline_ppo_{env_name}_flax-checkpoints_v0",
-#             "/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments",
-#             name_to_normalise,
-#             env_name
-#         )
+        # Save the plot
+        plt.savefig(
+            os.path.join(save_location, f"{file_name}_step_{step_interval}_final_returns.png"),
+            dpi=300,
+        )
+        plt.close()
 
-#         normalize_curious_agent_returns(
-#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/baseline/{env_name}/metric_seeds_episode_return.npy",
-#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/random_agents/{env_name}_epi_rets.npy",
-#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/{name_to_normalise}/{env_name}/metric_seeds_episode_return.npy",
-#             f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/{name_to_normalise}/{env_name}",
-#         )
-#     print()
-# byol_paths = []
-# byol_zero_paths = []
-# rnd_paths = []
-# rc_simpler_paths = []
-# rc_simpler_100_paths = []
-# # rc_bias_off_paths=[]
-# rc_128_arch_bias_off_paths = []
-# # rc_128_arch_paths=[]
-# rc_simpler_paths_temporal = []
-# rc_128_arch_bias_off_paths_temporal = []
-# # rc_128_arch_paths_temporal=[]
-# for env_name in environments:
-# byol_paths.append(
-#     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/byol/{env_name}/normalized_curious_agent_returns.npy"
-# )
-# byol_zero_paths.append(
-#     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/byol_zero/{env_name}/normalized_curious_agent_returns.npy"
-# )
-# rnd_paths.append(
-#     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rnd/{env_name}/normalized_curious_agent_returns.npy"
-# )
-# rc_simpler_paths.append(
-#     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_simpler/{env_name}/normalized_curious_agent_returns.npy"
-# )
-# rc_128_arch_bias_off_paths.append(
-#     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_128_arch_bias_off/{env_name}/normalized_curious_agent_returns.npy"
-# )
-# rc_128_arch_paths.append(
-#     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_128_arch/{env_name}/normalized_curious_agent_returns.npy"
-# )
-# rc_bias_off_paths.append(
-#     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_bias_off/{env_name}/normalized_curious_agent_returns.npy"
-# )
-# rc_simpler_paths_temporal.append(
-#     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_simpler/{env_name}/normalized_curious_agent_returns.npy"
-# )
-# rc_simpler_100_paths.append(
-#     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_simpler_100/{env_name}/normalized_curious_agent_returns.npy"
-# )
-# rc_128_arch_bias_off_paths_temporal.append(
-#     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_128_arch_bias_off/{env_name}/normalized_curious_agent_returns.npy"
-# )
-# rc_128_arch_paths_temporal.append(
-#     f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/rc_128_arch/{env_name}/normalized_curious_agent_returns.npy"
-# )
 
-curious_paths = [
-    # byol_paths,
-    # byol_zero_paths,                    # Paths for the BYOL algorithm
-    # rnd_paths,                     # Paths for the RND algorithm
-    # rc_simpler_paths,  # Paths for the RC-Simpler algorithm
-    # rc_simpler_100_paths,  # Paths for the RC-Simpler algorithm
-    # rc_128_arch_bias_off_paths,    # Paths for the RC-128-Arch-Bias-Off algorithm
-    # rc_simpler_paths_temporal,     # Paths for the RC-Simpler-Temporal algorithm
-    # rc_128_arch_bias_off_paths_temporal  # Paths for the RC-128-Arch-Bias-Off-Temporal algorithm
-]
-# curious_algo_types = [
-#     # 'BYOL',                     # BYOL algorithm
-#     # 'BYOL-Zero',
-#     # 'RND',                      # RND algorithm
-#     "RC-Simpler",  # RC-Simpler algorithm
-#     "RC-Simpler_100"
-#     # 'RC-128-Arch-Bias-Off',      # RC-128-Arch-Bias-Off algorithm
-#     # 'RC-Simpler-Temporal',       # RC-Simpler-Temporal algorithm
-#     # 'RC-128-Arch-Bias-Off-Temporal'  # RC-128-Arch-Bias-Off-Temporal algorithm
-# ]
+# Example usage
+base_path = "/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments"
+names = [
+    "DELAY_RC_CNN",
+    "delayed_byol",
+    "delayed_rnd",
+    "minatar_baseline_ppo",
+]  # , "TIMED_DELAY_RC_CNN", "TIMED_DELAY_RC_RNN"
+step_intervals = [1, 40]
+env_name = "Breakout-MinAtar"
 
-# curious_paths = [rnd_paths,byol_paths,rc_128_arch_bias_off]
-# curious_paths =[rnd_paths, byol_paths,rc_simpler_paths, rc_128_arch_bias_off_paths,rc_128_arch_paths,rc_bias_off_paths]
-# plot_error_bars_macro_envs(curious_paths, "RCs_brax", ["RND","BYOL","rc_simpler","rc_128_arch_bias_off","rc_128_arch","rc_bias_off"])
-# for rnd_path,byol_path,rc_simpler_path,rc_bias_off_path,rc_128_arch_bias_off_path,rc_128_arch_path, env_name in zip(rnd_paths,byol_paths,rc_simpler_paths,rc_bias_off_paths,rc_128_arch_bias_off_paths,rc_128_arch_paths, environments):
-#     plot_error_bars_env([rnd_path,byol_path,rc_simpler_path,rc_bias_off_path,rc_128_arch_bias_off_path,rc_128_arch_path], env_name, ["rnd","byol","rc_simpler","rc_bias_off","rc_128_arch_bias_off", "rc_128_arch"])
-# plot_grouped_histogram(curious_paths, curious_algo_types)
-# plot_error_bars_macro_envs(curious_paths, "RCs_simpler_curious_mini", ["RND","BYOL","rc_simpler"])
-# for rnd_path,byol_path,rc_simpler_path, env_name in zip(rnd_paths,byol_paths,rc_simpler_paths, environments):
-#     plot_error_bars_env([rnd_path,byol_path,rc_simpler_path], env_name, ["rnd","byol","rc_simpler"])
+# Get directories
+experiment_dirs = get_experiment_directories(base_path, names, step_intervals, env_name)
 
-# plot_error_bars_macro_envs(curious_paths, "RCs_simpler_curious_mini", ["RND","BYOL","rc_simpler"])
-# print(np.load("MetaLearnCuriosity/experiments/byol/MiniGrid-Empty-16x16/normalized_curious_agent_returns.npy").mean())
+# Plot results
+save_location = "/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/images/Breakout-MinAtar"
 
-environments = [
-    "MiniGrid-BlockedUnlockPickUp",
-    "MiniGrid-Empty-16x16",
-    "MiniGrid-EmptyRandom-16x16",
-    "MiniGrid-FourRooms",
-    "MiniGrid-MemoryS128",
-    "MiniGrid-Unlock",
-    "ant",
-    "halfcheetah",
-    "hopper",
-    "humanoid",
-    "humanoidstandup",
-    "inverted_pendulum",
-    "inverted_double_pendulum",
-    "pusher",
-    "reacher",
-    "walker2d",
-    "Asterix-MinAtar",
-    "Breakout-MinAtar",
-    "Freeway-MinAtar",
-    "SpaceInvaders-MinAtar",
-]
-# x_algo_paths,y_algo_paths=[],[]
-# for name in name_to_normalises:
-#     for env_name in environments:
-#             x_algo_paths.append(f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/baseline/{env_name}/metric_seeds_episode_return.npy")
-#             y_algo_paths.append(f"/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/{name}/{env_name}/metric_seeds_episode_return.npy"
-#                                 )
-
-#     plot_algorithm_comparison(x_algo_paths,
-#                             y_algo_paths,
-#                             "Vanilla PPO",
-#                             name,
-#                             "/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/algo_compo",
-#                             name,
-#                             environments)
-#     x_algo_paths,y_algo_paths=[],[]
-# List of environment names
-# env_names = ['Asterix-MinAtar', 'Breakout-MinAtar', 'SpaceInvaders-MinAtar']  # Add the other environments here
-
-# Base directory path
-# base_dir = "/home/batsi/Documents/Masters/MetaLearnCuriosity/MetaLearnCuriosity/experiments/baseline/"
-
-# # File to delete in each environment folder
-# file_to_delete = "means_episode_return.npy"
-
-# for env in environments:
-#     # Construct the full path to the file
-#     file_path = os.path.join(base_dir, env, file_to_delete)
-
-#     # Check if the file exists before attempting to delete it
-#     if os.path.exists(file_path):
-#         try:
-#             os.remove(file_path)
-#             print(f"Deleted: {file_path}")
-#         except Exception as e:
-#             print(f"Error deleting {file_path}: {e}")
-#     else:
-#         print(f"File not found: {file_path}")
+# Plot results
+plot_final_episode_returns(experiment_dirs, save_location, "breakout_final_returns")
