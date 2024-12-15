@@ -433,16 +433,7 @@ def train(
 
             def _get_advantages(gae_and_next_value_w_hstate, transition):
                 gae, next_value, rc_hstate = gae_and_next_value_w_hstate
-                (
-                    done,
-                    value,
-                    reward,
-                    int_reward,
-                    norm_time_step,
-                    _,
-                    ext_reward_hist,
-                    int_reward_hist,
-                ) = (
+                (done, value, reward, int_reward, _, _, ext_reward_hist, int_reward_hist,) = (
                     transition.done,
                     transition.value,
                     transition.reward,
@@ -453,7 +444,7 @@ def train(
                     transition.int_reward_hist,
                 )
                 rc_input = jnp.stack(
-                    (ext_reward_hist, int_reward_hist, norm_time_step[:, None]),
+                    (ext_reward_hist, int_reward_hist),
                     axis=-1,
                 )
                 rc_input = jnp.transpose(rc_input, (1, 0, 2))
@@ -791,7 +782,7 @@ def train(
 reward_combiner_network = RNNRewardCombiner()
 
 rc_params_pholder = reward_combiner_network.init(
-    jax.random.PRNGKey(9), jnp.zeros((1, 32)), jnp.zeros((1, 1, 3))
+    jax.random.PRNGKey(9), jnp.zeros((1, 32)), jnp.zeros((1, 1, 2))
 )
 strategy = OpenES(
     popsize=64,
@@ -807,7 +798,7 @@ strategy = OpenES(
 for env_name in environments:
     for step_int in step_intervals:
         es_stuff = Restore(
-            "/home/batsy/MetaLearnCuriosity/rc_rnn_minatar_timed_delayed_breakout_flax-checkpoints_v0"
+            "/home/batsy/MetaLearnCuriosity/rc_rnn_minatar_default_delayed_breakout_SAVED_flax-checkpoints_v0"
         )
         config["RUN_NAME"] = f"DELAY_RC_RNN_{env_name}_{step_int}"
         es_state, _ = es_stuff
@@ -878,11 +869,11 @@ for env_name in environments:
         gc.collect()
         output = process_output_general(output)
 
-        # logger.log_episode_return(output, config["NUM_SEEDS"])
+        logger.log_episode_return(output, config["NUM_SEEDS"])
         # logger.log_int_rewards(output, config["NUM_SEEDS"])
-        # logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
+        logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
         # logger.log_norm_ext_rewards(output, config["NUM_SEEDS"])
-        # logger.log_int_lambdas(output, config["NUM_SEEDS"])
+        logger.log_int_lambdas(output, config["NUM_SEEDS"])
         # logger.log_reward(output, config["NUM_SEEDS"])
         output = compress_output_for_reasoning(output)
         output["config"] = config

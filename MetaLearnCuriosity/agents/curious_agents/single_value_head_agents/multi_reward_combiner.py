@@ -46,20 +46,20 @@ from MetaLearnCuriosity.wrappers import (
 )
 
 environments = [
-    "ant",
-    "halfcheetah",
-    "hopper",
-    "humanoid",
-    "humanoidstandup",
-    "inverted_pendulum",
+    # "ant",
+    # "halfcheetah",
+    # "hopper",
+    # "humanoid",
+    # "humanoidstandup",
+    # "inverted_pendulum",
     "inverted_double_pendulum",
-    "pusher",
-    "reacher",
-    "walker2d",
+    # "pusher",
+    # "reacher",
+    # "walker2d",
 ]
 
 config = {
-    "RUN_NAME": "rc_cnn_prob_delayed_brax_byol_test",
+    "RUN_NAME": "DELAY_RC_CNN_brax_byol_test",
     "SEED": 42,
     "NUM_SEEDS": 30,
     "LR": 3e-4,
@@ -77,7 +77,7 @@ config = {
     "ACTIVATION": "tanh",
     "ANNEAL_LR": False,
     "NORMALIZE_ENV": True,
-    "DELAY_REWARDS": False,
+    "DELAY_REWARDS": True,
     "ANNEAL_PRED_LR": False,
     "DEBUG": False,
     "PRED_LR": 0.001,
@@ -86,7 +86,7 @@ config = {
     "EMA_PARAMETER": 0.99,
 }
 
-step_intervals = [1]
+step_intervals = [1, 3, 10, 20, 30, 40]
 
 
 class PPOActorCritic(nn.Module):
@@ -729,7 +729,6 @@ def train(
         )
         train_state, pred_state, target_state, update_target_counter = update_state[:4]
         metric = traj_batch.info
-        metric = jax.tree_util.tree_map(partial(jnp.mean, axis=-1), metric)
         rng = update_state[-1]
         if config.get("DEBUG"):
 
@@ -765,11 +764,11 @@ def train(
         return runner_state, (
             metric,
             loss_info,
-            traj_batch.int_reward.mean(-1),
-            norm_int_reward.mean(-1),
-            norm_ext_reward.mean(-1),
-            int_lambdas.mean(-1),
-            traj_batch.reward.mean(-1),
+            traj_batch.int_reward,
+            norm_int_reward,
+            norm_ext_reward,
+            int_lambdas,
+            traj_batch.reward,
         )
 
     rng, _rng = jax.random.split(rng)
@@ -827,14 +826,13 @@ strategy = OpenES(
 
 for env_name in environments:
     for step_int in step_intervals:
-        es_stuff = Restore(
-            "/home/batsy/MetaLearnCuriosity/rc_cnn_multi_task_october_prob_flax-checkpoints_v0"
-        )
-        es_state, _ = es_stuff
+        es_stuff = Restore("/home/batsy/MetaLearnCuriosity/rc_cnn_brax_flax-checkpoints_v0")
+        es_state, _, _, _ = es_stuff
         # print(es_state["mean"])
         rc_params = strategy.param_reshaper.reshape_single(es_state["mean"])
         rng = jax.random.PRNGKey(config["SEED"])
         config["STEP_INTERVAL"] = step_int
+        config["RUN_NAME"] = f"DELAY_RC_RNN_{env_name}_{step_int}"
         config, env, env_params = make_config_env(config, env_name)
         print(f"Training in {config['ENV_NAME']}")
         rng = jax.random.split(rng, config["NUM_SEEDS"])
@@ -904,20 +902,18 @@ for env_name in environments:
         output = process_output_general(output)
 
         logger.log_episode_return(output, config["NUM_SEEDS"])
-        logger.log_int_rewards(output, config["NUM_SEEDS"])
+        # logger.log_int_rewards(output, config["NUM_SEEDS"])
         logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
-        logger.log_norm_ext_rewards(output, config["NUM_SEEDS"])
+        # logger.log_norm_ext_rewards(output, config["NUM_SEEDS"])
         logger.log_int_lambdas(output, config["NUM_SEEDS"])
         logger.log_reward(output, config["NUM_SEEDS"])
-        # output = compress_output_for_reasoning(output)
+        output = compress_output_for_reasoning(output)
         output["config"] = config
         checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
         # Get the absolute path of the directory
-        episode_returns = {}
-        episode_returns["returned_episode_returns"] = output["metrics"]["returned_episode_returns"]
         path = os.path.abspath(checkpoint_directory)
-        Save(path, episode_returns)
+        Save(path, output)
         logger.save_artifact(path)
         shutil.rmtree(path)
         print(f"Deleted local checkpoint directory: {path}")

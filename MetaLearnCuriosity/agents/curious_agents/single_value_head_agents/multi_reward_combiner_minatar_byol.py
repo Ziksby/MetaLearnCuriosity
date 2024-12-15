@@ -785,9 +785,9 @@ strategy = OpenES(
 for env_name in environments:
     for step_int in step_intervals:
         es_stuff = Restore(
-            "/home/batsy/MetaLearnCuriosity/rc_cnn_64_64_minatar_default_delayed_breakout_flax-checkpoints_v0"
+            "/home/batsy/MetaLearnCuriosity/rc_cnn_minatar_default_delayed_breakout_EPISODE_RETURNS_flax-checkpoints_v0"
         )
-        config["RUN_NAME"] = f"DELAY_RC_CNN_{env_name}_{step_int}"
+        config["RUN_NAME"] = f"DELAY_RC_CNN_EPISODE_{env_name}_{step_int}"
         es_state, _ = es_stuff
         # print(es_state["gen_counter"])
         rc_params = strategy.param_reshaper.reshape_single(es_state["mean"])
@@ -853,12 +853,12 @@ for env_name in environments:
         gc.collect()
         output = process_output_general(output)
 
-        # logger.log_episode_return(output, config["NUM_SEEDS"])
+        logger.log_episode_return(output, config["NUM_SEEDS"])
         # logger.log_int_rewards(output, config["NUM_SEEDS"])
         # logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
-        # logger.log_norm_ext_rewards(output, config["NUM_SEEDS"])
-        # logger.log_int_lambdas(output, config["NUM_SEEDS"])
-        # logger.log_reward(output, config["NUM_SEEDS"])
+        logger.log_norm_ext_rewards(output, config["NUM_SEEDS"])
+        logger.log_int_lambdas(output, config["NUM_SEEDS"])
+        logger.log_reward(output, config["NUM_SEEDS"])
         output = compress_output_for_reasoning(output)
         output["config"] = config
         checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}/{config["STEP_INTERVAL"]}'
