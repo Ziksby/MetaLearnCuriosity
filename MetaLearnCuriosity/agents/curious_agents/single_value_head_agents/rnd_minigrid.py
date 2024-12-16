@@ -482,6 +482,8 @@ def train(rng, init_hstate, train_state, pred_state, target_params, init_obs_rng
         # "rnd_loss": loss["rnd_loss"],
     }
 
+    # No step intervals
+
 
 for env_name in environments:
     rng = jax.random.PRNGKey(config["SEED"])
