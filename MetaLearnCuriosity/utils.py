@@ -230,7 +230,6 @@ def rc_byol_calculate_gae(
     rew_norm_parameter: float,
     byol_reward_norm_params: BYOLRewardNorm,
     ext_reward_norm_params: BYOLRewardNorm,
-    rc_hstate,
 ) -> tuple[jax.Array, jax.Array]:
     rc_network = RewardCombiner()
     norm_int_reward, byol_reward_norm_params, int_reward_hist = byol_normalize_prior_int_rewards(
@@ -273,18 +272,18 @@ def rc_byol_calculate_gae(
             (transition.ext_reward_hist, transition.int_reward_hist),
             axis=-1,
         )
-        int_lambda = rc_network.apply(rc_params, rc_hstate, rc_input)
+        int_lambda = rc_network.apply(rc_params, rc_input)
         delta = (
             (transition.reward + (transition.int_reward * int_lambda))
             + gamma * next_value * (1 - transition.done)
             - transition.value
         )
         gae = delta + gamma * gae_lambda * (1 - transition.done) * gae
-        return (gae, transition.value, rc_hstate), (gae, int_lambda)
+        return (gae, transition.value), (gae, int_lambda)
 
-    (_, _, rc_hstate), (advantages, int_lambda) = jax.lax.scan(
+    (_, _), (advantages, int_lambda) = jax.lax.scan(
         _get_advantages,
-        (jnp.zeros_like(last_val), last_val, rc_hstate),
+        (jnp.zeros_like(last_val), last_val),
         norm_traj_batch,
         reverse=True,
     )
@@ -297,7 +296,6 @@ def rc_byol_calculate_gae(
         byol_reward_norm_params,
         ext_reward_norm_params,
         int_lambda,
-        rc_hstate,
     )
 
 
