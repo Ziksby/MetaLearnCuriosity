@@ -488,7 +488,7 @@ def train(rng, init_hstate, train_state, pred_state, target_params, init_obs_rng
 for env_name in environments:
     rng = jax.random.PRNGKey(config["SEED"])
     observations_shape, config, env, env_params = make_env_config(config, env_name)
-
+    config["RUN_NAME"] = f"rnd_minigrid_{env_name}"
     if config["NUM_SEEDS"] > 1:
         rng = jax.random.split(rng, config["NUM_SEEDS"])
         init_hstate, train_state, pred_state, target_params, rng, init_obs_rng = jax.jit(
