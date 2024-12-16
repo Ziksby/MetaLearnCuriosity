@@ -27,11 +27,11 @@ from MetaLearnCuriosity.utils import (
     reorder_antithetic_pairs,
 )
 
-env_name = "inverted_double_pendulum"
+env_name = "hopper"
 step_intervals = [3, 10, 20, 30]
 config = {
-    "RUN_NAME": "rc_cnn_brax",
-    "SEED": 42,
+    "RUN_NAME": f"rc_cnn_brax_{env_name}",
+    "SEED": 46583,
     "NUM_SEEDS": 1,
     "LR": 3e-4,
     "NUM_ENVS": 2048,
@@ -57,7 +57,7 @@ config = {
     "HIST_LEN": 128,
     "POP_SIZE": 64,
     "RC_SEED": 23 * 2 * 8,
-    "ES_SEED": 23_000,
+    "ES_SEED": 76569876,
     "NUM_GENERATIONS": 48,
 }
 # Store the commit hash in a string

@@ -9,14 +9,14 @@ import time
 import jax
 import jax.numpy as jnp
 import jax.tree_util
-import wandb
 from evosax import OpenES
 from flax.jax_utils import replicate
 from tqdm import tqdm
 
+import wandb
 from MetaLearnCuriosity.agents.nn import RewardCombiner
 from MetaLearnCuriosity.checkpoints import Save
-from MetaLearnCuriosity.compile_rnd_gymnax_trains import compile_rnd_fns
+from MetaLearnCuriosity.compile_rnd_brax_trains_fns import compile_rnd_fns
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import (
     create_adjacent_pairs,
@@ -25,7 +25,7 @@ from MetaLearnCuriosity.utils import (
 )
 
 environments = [
-    "ant",
+    # "ant",
     # "halfcheetah",
     # "hopper",
     # "humanoid",
@@ -38,8 +38,8 @@ environments = [
 ]
 
 config = {
-    "RUN_NAME": "rc_cnn_multi_task_november_rnd",
-    "SEED": 42,
+    "RUN_NAME": "DELAY_RC_CNN_brax",
+    "SEED": 89,
     "NUM_SEEDS": 1,
     "LR": 3e-4,
     "NUM_ENVS": 2048,
@@ -63,9 +63,9 @@ config = {
     "PRED_LR": 1e-3,
     # "INT_LAMBDA": 0.02,
     "HIST_LEN": 128,
-    "POP_SIZE": 36,
+    "POP_SIZE": 64,
     "RC_SEED": 23,
-    "ES_SEED": 42 * 8**2,
+    "ES_SEED": 98647,
     "NUM_GENERATIONS": 48,
 }
 step_intervals = [3, 10, 20, 30]
@@ -102,7 +102,7 @@ fit_log = wandb.init(
     tags=tags,
     name=f"{name}_fitness",
 )
-env_name = "ant"
+env_name = "hopper"
 for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations"):
     begin_gen = time.time()
     es_rng, es_rng_ask = jax.random.split(es_rng)
@@ -111,6 +111,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
     pairs = create_adjacent_pairs(x)
     fitness = []
     raw_fitness_dict = {step_int: [] for step_int in step_intervals}
+    int_lambda_dict = {step_int: [] for step_int in step_intervals}
 
     for pair in pairs:
         t = time.time()
@@ -159,7 +160,15 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
         )
         output = process_output_general(output)
         raw_episode_return = output["rewards"].mean(-1)  # This is the raw fitness
+        int_lambdas = output["int_lambdas"].mean(
+            -1
+        )  # Get the int_lambdas and average across episodes
+        episode_returns = output["episode_returns"].mean(-1)
         raw_fitness_dict[step_int].append(raw_episode_return)  # Store raw fitness
+        int_lambda_dict[step_int].append(int_lambdas)  # Store int_lambdas
+        print("Here is the episode return of the pair:", episode_returns)
+        print("Here is the int_lambda of the pair:", int_lambdas)
+        print("Here is the fitness of the pair:", raw_episode_return)
         binary_fitness = jnp.where(raw_episode_return == jnp.max(raw_episode_return), 1.0, 0.0)
         fitness.append(binary_fitness)
         print(f"Time for the Pair in {env_name}_{step_int} is {(time.time()-t)/60}")
@@ -170,29 +179,46 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
     # Save the state
     checkpoint_directory = f'MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/{config["RUN_NAME"]}'
     path = os.path.abspath(checkpoint_directory)
-    details = (es_state, config)
+    details = (es_state, config, es_rng, rng)
     Save(path, details)
     print("Generation ", gen, "Time:", (time.time() - begin_gen) / 60)
+
     # logging now to W&Bs
     for step_int in step_intervals:
         raw_fitness = raw_fitness_dict[step_int]
+        int_lambdas = int_lambda_dict[step_int]
+
         if len(raw_fitness) > 0:
+            # Convert to numpy arrays for easier manipulation
+            raw_fitness_array = jnp.array(raw_fitness)
+            int_lambda_array = jnp.array(int_lambdas)
+
+            # Find the best individual based on raw fitness
+            best_idx = jnp.argmax(raw_fitness_array)
+
             fit_log.log(
                 {
-                    f"ant_{step_int}_mean_fitness": jnp.array(raw_fitness).mean(),
-                    f"ant_{step_int}_best_fitness": jnp.max(jnp.array(raw_fitness)),
+                    f"{env_name}_{step_int}_mean_fitness": raw_fitness_array.mean(),
+                    f"{env_name}_{step_int}_best_fitness": jnp.max(raw_fitness_array),
+                    f"{env_name}_{step_int}_mean_lambda": int_lambda_array.mean(),  # Average lambda across generation
+                    f"{env_name}_{step_int}_best_lambda": int_lambda_array[best_idx][
+                        0
+                    ],  # Lambda of best individual
                 }
             )
         else:
-            print(f"Warning: No fitness data for ant_{step_int} in generation {gen}")
+            print(f"Warning: No fitness data for Breakout_{step_int} in generation {gen}")
             fit_log.log(
                 {
-                    f"ant_{step_int}_mean_fitness": 0.0,
-                    f"ant_{step_int}_best_fitness": 0.0,
+                    f"{env_name}_{step_int}_mean_fitness": 0.0,
+                    f"{env_name}_{step_int}_best_fitness": 0.0,
+                    f"{env_name}_{step_int}_mean_lambda": 0.0,
+                    f"{env_name}_{step_int}_best_lambda": 0.0,
                 }
             )
     gc.collect()
 fit_log.finish()
+
 logger = WBLogger(
     config=config,
     group="meta_learners",

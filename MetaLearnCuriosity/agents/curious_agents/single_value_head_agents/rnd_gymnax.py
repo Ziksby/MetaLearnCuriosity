@@ -117,9 +117,9 @@ config = {
 
 environments = [
     # "Asterix-MinAtar",
-    # "Breakout-MinAtar",
+    "Breakout-MinAtar",
     # "Freeway-MinAtar",
-    "SpaceInvaders-MinAtar",
+    # "SpaceInvaders-MinAtar",
 ]
 
 
@@ -536,8 +536,8 @@ def train(rng, train_state, pred_state, target_params, init_obs_rng):
     }
 
 
-step_intervals = [1, 3, 30]
-optimal_lambdas = [0.02, 0.005, 0.0001]
+step_intervals = [1, 3, 30, 40, 10, 20]
+optimal_lambdas = [1, 1, 1, 1, 1, 1]
 
 
 for env_name in environments:

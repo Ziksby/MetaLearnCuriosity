@@ -361,8 +361,8 @@ def rnd_calculate_gae(
 ) -> tuple[jax.Array, jax.Array]:
     # single iteration for the loop
 
-    norm_int_reward, rnd_int_return_norm_params = rnd_normalise_int_rewards(
-        transitions, rnd_int_return_norm_params, int_gamma
+    norm_int_reward, rnd_int_return_norm_params, _ = rnd_normalise_int_rewards(
+        transitions, rnd_int_return_norm_params, int_gamma, jnp.ones((1, 1))
     )
 
     # *** Wrong transition class used here.
