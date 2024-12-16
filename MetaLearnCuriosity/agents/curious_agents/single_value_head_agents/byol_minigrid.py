@@ -39,12 +39,16 @@ from MetaLearnCuriosity.wrappers import (
 jax.config.update("jax_threefry_partitionable", True)
 
 environments = [
-    "MiniGrid-BlockedUnlockPickUp",
-    "MiniGrid-Empty-16x16",
-    "MiniGrid-EmptyRandom-16x16",
+    # "MiniGrid-BlockedUnlockPickUp",
+    # "MiniGrid-Empty-16x16",
+    # "MiniGrid-EmptyRandom-16x16",
     # "MiniGrid-FourRooms",
     # "MiniGrid-MemoryS128",
     # "MiniGrid-Unlock",
+    "MiniGrid-DoorKey-16x16",
+    "MiniGrid-DoorKey-8x8",
+    "MiniGrid-DoorKey-6x6",
+    "MiniGrid-DoorKey-5x5",
 ]
 
 config = {
@@ -64,7 +68,7 @@ config = {
     "NUM_STEPS": 16,
     "UPDATE_EPOCHS": 1,
     "NUM_MINIBATCHES": 16,
-    "TOTAL_TIMESTEPS": 50_000_000,
+    "TOTAL_TIMESTEPS": 5_000_000,
     "LR": 0.001,
     "CLIP_EPS": 0.2,
     "GAMMA": 0.99,
@@ -77,7 +81,7 @@ config = {
     "ANNEAL_PRED_LR": False,
     "DEBUG": False,
     "PRED_LR": 0.001,
-    "INT_LAMBDA": 0.0001,
+    "INT_LAMBDA": 0.005,
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
 }
@@ -557,7 +561,7 @@ def train(
 for env_name in environments:
 
     observations_shape, config, env, env_params = make_env_config(config, env_name)
-
+    config["RUN_NAME"] = f"byol_minigrid_{env_name}"
     # experiments
     rng = jax.random.PRNGKey(config["SEED"])
 
@@ -635,11 +639,11 @@ for env_name in environments:
     )
     output = process_output_general(output)
 
-    logger.log_pred_losses(output, config["NUM_SEEDS"])
-    logger.log_episode_return(output, config["NUM_SEEDS"])
-    logger.log_rl_losses(output, config["NUM_SEEDS"])
-    logger.log_int_rewards(output, config["NUM_SEEDS"])
-    logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
+    # logger.log_pred_losses(output, config["NUM_SEEDS"])
+    logger.log_episode_return_minigrid(output, config["NUM_SEEDS"])
+    # logger.log_rl_losses(output, config["NUM_SEEDS"])
+    # logger.log_int_rewards(output, config["NUM_SEEDS"])
+    # logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
     output = compress_output_for_reasoning(output, minigrid=True)
     # Get the absolute path of the directory
