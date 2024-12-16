@@ -762,7 +762,10 @@ lambda_vals = sorted(y_values.keys())
 for lambda_value in lambda_vals:
     # Collect all returns for this lambda across all step intervals
     all_returns = []
-    for env_name in env_name:
+    for env_name in environments:
+        print(env_name)
+        print(lambda_value)
+        print(y_values.keys())
         all_returns.extend(y_values[lambda_value][env_name])
 
     # Convert to numpy array
