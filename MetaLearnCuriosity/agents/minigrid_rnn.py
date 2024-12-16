@@ -38,13 +38,13 @@ environments = [
     # "MiniGrid-BlockedUnlockPickUp",
     # "MiniGrid-Empty-16x16",
     # "MiniGrid-EmptyRandom-16x16",
-    # "MiniGrid-FourRooms",
+    "MiniGrid-FourRooms",
     # "MiniGrid-MemoryS16",
     # "MiniGrid-Unlock",
-    "MiniGrid-DoorKey-16x16",
-    "MiniGrid-DoorKey-8x8",
-    "MiniGrid-DoorKey-6x6",
-    "MiniGrid-DoorKey-5x5",
+    "MiniGrid-EmptyRandom-16x16",
+    "MiniGrid-EmptyRandom-8x8",
+    "MiniGrid-EmptyRandom-6x6",
+    "MiniGrid-EmptyRandom-5x5",
 ]
 
 config = {
