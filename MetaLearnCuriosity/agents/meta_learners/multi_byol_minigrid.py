@@ -9,11 +9,11 @@ import time
 import jax
 import jax.numpy as jnp
 import jax.tree_util
-import wandb
 from evosax import OpenES
 from flax.jax_utils import replicate
 from tqdm import tqdm
 
+import wandb
 from MetaLearnCuriosity.agents.nn import RCRNN, RewardCombiner
 from MetaLearnCuriosity.checkpoints import Restore, Save
 from MetaLearnCuriosity.compile_minigrid_fns import compile_fns
@@ -32,7 +32,7 @@ environments = [
 ]
 
 config = {
-    "RUN_NAME": "rc_cnn_minigrid_multi_task_november",
+    "RUN_NAME": "rc_cnn_minigrid",
     "BENCHMARK_ID": None,
     "NUM_SEEDS": 1,
     "RULESET_ID": None,
@@ -47,7 +47,7 @@ config = {
     "NUM_STEPS": 16,
     "UPDATE_EPOCHS": 1,
     "NUM_MINIBATCHES": 16,
-    "TOTAL_TIMESTEPS": 50_000_000,
+    "TOTAL_TIMESTEPS": 5_000_000,
     "LR": 0.001,
     "CLIP_EPS": 0.2,
     "GAMMA": 0.99,
@@ -56,17 +56,17 @@ config = {
     "VF_COEF": 0.5,
     "MAX_GRAD_NORM": 0.5,
     "EVAL_EPISODES": 80,
-    "SEED": 42,
+    "SEED": 42 * 7,
     "ANNEAL_PRED_LR": False,
     "DEBUG": False,
     "PRED_LR": 0.001,
     # "INT_LAMBDA": 0.0003,
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
-    "HIST_LEN": 128,
+    "HIST_LEN": 32,
     "POP_SIZE": 64,
     "RC_SEED": 23,
-    "ES_SEED": 42**2,
+    "ES_SEED": 9_869_690,
     "NUM_GENERATIONS": 48,
 }
 
@@ -121,7 +121,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
     pairs = create_adjacent_pairs(x)
     fitness = []
     raw_fitness_dict = {env_name: [] for env_name in environments}
-
+    int_lambda_dict = {env_name: [] for env_name in environments}  # New dictionary for int_lambdas
     for pair in pairs:
         t = time.time()
         rng, env_key = jax.random.split(rng)
@@ -175,10 +175,19 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
             )
         )
         output = process_output_general(output)
-        raw_episode_return = output["rewards"].mean(-1)  # This is the raw fitness
+        raw_episode_return = output["episode_returns"].mean(-1)  # This is the raw fitness
+        int_lambdas = output["int_lambdas"].mean(
+            -1
+        )  # Get the int_lambdas and average across episodes
+        episode_returns = output["episode_returns"].mean(-1)
         raw_fitness_dict[env_name].append(raw_episode_return)  # Store raw fitness
+        int_lambda_dict[env_name].append(int_lambdas)  # Store int_lambdas
+
         binary_fitness = jnp.where(raw_episode_return == jnp.max(raw_episode_return), 1.0, 0.0)
         fitness.append(binary_fitness)
+        print("Here is the episode return of the pair:", episode_returns)
+        print("Here is the int_lambda of the pair:", int_lambdas)
+        print("Here is the fitness of the pair:", raw_episode_return)
         print(f"Time for the Pair in {env_name} is {(time.time()-t)/60}")
 
     fitness = jnp.array(fitness).flatten()
@@ -187,7 +196,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
     # Save the state
     checkpoint_directory = f'MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/{config["RUN_NAME"]}'
     path = os.path.abspath(checkpoint_directory)
-    details = (es_state, config)
+    details = (es_state, config, rng, es_rng)
     Save(path, details)
     print("Generation ", gen, "Time:", (time.time() - begin_gen) / 60)
     # logging now to W&Bs
@@ -196,16 +205,16 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
         if len(raw_fitness) > 0:
             fit_log.log(
                 {
-                    f"ant_{env_name}_mean_fitness": jnp.array(raw_fitness).mean(),
-                    f"ant_{env_name}_best_fitness": jnp.max(jnp.array(raw_fitness)),
+                    f"{env_name}_mean_fitness": jnp.array(raw_fitness).mean(),
+                    f"{env_name}_best_fitness": jnp.max(jnp.array(raw_fitness)),
                 }
             )
         else:
             print(f"Warning: No fitness data for {env_name} in generation {gen}")
             fit_log.log(
                 {
-                    f"ant_{env_name}_mean_fitness": 0.0,
-                    f"ant_{env_name}_best_fitness": 0.0,
+                    f"{env_name}_mean_fitness": 0.0,
+                    f"{env_name}_best_fitness": 0.0,
                 }
             )
 

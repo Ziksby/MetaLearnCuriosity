@@ -41,18 +41,22 @@ from MetaLearnCuriosity.wrappers import (
 jax.config.update("jax_threefry_partitionable", True)
 
 environments = [
-    "MiniGrid-BlockedUnlockPickUp",
-    "MiniGrid-Empty-16x16",
-    "MiniGrid-EmptyRandom-16x16",
-    "MiniGrid-FourRooms",
-    "MiniGrid-MemoryS128",
-    "MiniGrid-Unlock",
+    # "MiniGrid-BlockedUnlockPickUp",
+    # "MiniGrid-Empty-16x16",
+    # "MiniGrid-EmptyRandom-16x16",
+    # "MiniGrid-FourRooms",
+    # "MiniGrid-MemoryS128",
+    # "MiniGrid-Unlock",
+    # "MiniGrid-DoorKey-16x16",
+    "MiniGrid-DoorKey-8x8",
+    "MiniGrid-DoorKey-6x6",
+    # "MiniGrid-DoorKey-5x5",
 ]
 
 config = {
     "NUM_SEEDS": 10,
     "PROJECT": "MetaLearnCuriosity",
-    "RUN_NAME": "rc_default_minigrid_byol",
+    "RUN_NAME": "rc_minigrid_byol",
     "BENCHMARK_ID": None,
     "RULESET_ID": None,
     "USE_CNNS": False,
@@ -153,20 +157,13 @@ def compile_fns(config):
             "prev_action": jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1), dtype=jnp.int32),
             "prev_reward": jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1)),
         }
-        total_ext_reward_history = jnp.zeros(
-            (config["NUM_STEPS"], config["NUM_ENVS_PER_DEVICE"], 128)
-        )
-        total_int_reward_history = jnp.zeros(
-            (config["NUM_STEPS"], config["NUM_ENVS_PER_DEVICE"], 128)
-        )
-        ext_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 128))
-        int_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 128))
+        ext_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], config["HIST_LEN"]))
+        int_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], config["HIST_LEN"]))
         init_hstate = network.initialize_carry(batch_size=config["NUM_ENVS_PER_DEVICE"])
         init_x = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1, *observations_shape))
         init_action = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1), dtype=jnp.int32)
         close_init_hstate = pred.initialize_carry(config["NUM_ENVS_PER_DEVICE"])
         open_init_hstate = pred.initialize_carry(config["NUM_ENVS_PER_DEVICE"])
-        rc_hstate = RCRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 32)
 
         print(init_hstate.shape, close_init_hstate.shape, open_init_hstate.shape)
         init_bt = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1, 256))
@@ -219,9 +216,6 @@ def compile_fns(config):
             rng,
             ext_reward_history,
             int_reward_history,
-            total_ext_reward_history,
-            total_int_reward_history,
-            rc_hstate,
         )
 
     def train(
@@ -235,9 +229,6 @@ def compile_fns(config):
         target_state,
         ext_reward_hist,
         int_reward_hist,
-        tot_ext_reward_hist,
-        tot_int_reward_hist,
-        rc_hstate,
     ):
         rng, _rng = jax.random.split(rng)
 
@@ -344,8 +335,8 @@ def compile_fns(config):
                     prev_reward=prev_reward,
                     prev_bt=prev_bt,
                     norm_time_step=norm_time_step,
-                    ext_reward_hist=tot_ext_reward_hist,
-                    int_reward_hist=tot_int_reward_hist,
+                    ext_reward_hist=ext_reward_hist,
+                    int_reward_hist=int_reward_hist,
                     info=info,
                 )
                 runner_state = (
@@ -366,9 +357,6 @@ def compile_fns(config):
                     update_target_counter,
                     ext_reward_hist,
                     int_reward_hist,
-                    tot_ext_reward_hist,
-                    tot_int_reward_hist,
-                    rc_hstate,
                 )
                 return runner_state, transition
 
@@ -397,9 +385,6 @@ def compile_fns(config):
                 update_target_counter,
                 ext_reward_hist,
                 int_reward_hist,
-                tot_ext_reward_hist,
-                tot_int_reward_hist,
-                rc_hstate,
             ) = runner_state
 
             _, last_val, _ = train_state.apply_fn(
@@ -419,8 +404,7 @@ def compile_fns(config):
                 norm_ext_reward,
                 byol_reward_norm_params,
                 ext_reward_norm_params,
-                int_lambda,
-                rc_hstate,
+                int_lambdas,
             ) = rc_byol_calculate_gae(
                 transitions,
                 rc_params,
@@ -430,9 +414,6 @@ def compile_fns(config):
                 config["REW_NORM_PARAMETER"],
                 byol_reward_norm_params,
                 ext_reward_norm_params,
-                tot_ext_reward_hist,
-                tot_int_reward_hist,
-                rc_hstate,
             )
 
             # UPDATE NETWORK
@@ -619,9 +600,6 @@ def compile_fns(config):
                 ext_reward_norm_params,
                 ext_reward_hist,
                 int_reward_hist,
-                tot_ext_reward_hist,
-                tot_int_reward_hist,
-                rc_hstate,
                 update_target_counter,
             )
             return runner_state, (
@@ -631,7 +609,7 @@ def compile_fns(config):
                 norm_int_reward,
                 reward,
                 norm_ext_reward,
-                int_lambda,
+                int_lambdas,
             )
 
         runner_state = (
@@ -652,9 +630,6 @@ def compile_fns(config):
             update_target_counter,
             ext_reward_hist,
             int_reward_hist,
-            tot_ext_reward_hist,
-            tot_int_reward_hist,
-            rc_hstate,
         )
         runner_state, (
             metric,
@@ -663,12 +638,16 @@ def compile_fns(config):
             _,
             _,
             _,
-            _,
+            int_lambdas,
         ) = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
         rewards = metric["sum_of_rewards"].mean(axis=-1)
         rewards = rewards.reshape(-1)
         rewards = rewards[-1]
-        return {"rewards": rewards}
+        int_lambdas = int_lambdas.mean()
+        episode_returns = metric["returned_episode_returns"].mean(axis=-1)
+        episode_returns = episode_returns.reshape(-1)
+        episode_returns = episode_returns[-1]
+        return {"rewards": rewards, "int_lambdas": int_lambdas, "episode_returns": episode_returns}
 
     train_fns = {}
     make_seeds = {}
@@ -682,11 +661,11 @@ def compile_fns(config):
         # experiments
         rng = jax.random.PRNGKey(config["SEED"])
         rng = jax.random.split(rng, config["NUM_SEEDS"])
-        make_train_fn = jax.jit(jax.vmap(make_train, out_axes=(0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0)))
-        train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+        make_train_fn = jax.jit(jax.vmap(make_train, out_axes=(0, 0, 0, 0, 0, 0, 1, 0, 0)))
+        train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0, 0))
         train_fn = jax.vmap(
             train_fn,
-            in_axes=(None, 0, None, None, None, None, None, None, None, None, None, None, None),
+            in_axes=(None, 0, None, None, None, None, None, None, None, None),
         )
         train_fn = jax.pmap(train_fn, axis_name="devices")
 
