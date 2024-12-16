@@ -501,13 +501,13 @@ for lambda_value in lambda_values:
         rng = jax.random.PRNGKey(config["SEED"])
         rng = jax.random.split(rng, config["NUM_SEEDS"])
         (init_hstate, train_state, pred_state, target_params, rng, init_obs_rng) = jax.jit(
-            jax.vmap(make_train, out_axes=(0, 0, 0, 0, 0, 0, 1))
+            jax.vmap(make_train, out_axes=(0, 0, 0, 0, 1, 0))
         )(rng)
         init_hstate = replicate(init_hstate, jax.local_devices())
         train_state = replicate(train_state, jax.local_devices())
         pred_state = replicate(pred_state, jax.local_devices())
         target_params = replicate(target_params, jax.local_devices())
-        init_obs_rng = replicate(init_obs_rng, jax.local_devices)
+        init_obs_rng = replicate(init_obs_rng, jax.local_devices())
         # init_hstate, train_state, pred_state, target_params, rng, _init_obs_rng
         train_fn = jax.vmap(train)
         train_fn = jax.pmap(train_fn, axis_name="devices")
@@ -670,7 +670,7 @@ lambda_vals = sorted(y_values.keys())
 for lambda_value in lambda_vals:
     # Collect all returns for this lambda across all step intervals
     all_returns = []
-    for env_name in env_name:
+    for env_name in environments:
         all_returns.extend(y_values[lambda_value][env_name])
 
     # Convert to numpy array
