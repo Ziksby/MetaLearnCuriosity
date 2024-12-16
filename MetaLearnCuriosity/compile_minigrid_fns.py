@@ -593,9 +593,9 @@ def compile_fns(config):
                 open_hstate,
                 byol_reward_norm_params,
                 ext_reward_norm_params,
+                update_target_counter,
                 ext_reward_hist,
                 int_reward_hist,
-                update_target_counter,
             )
             return runner_state, (
                 metric,
