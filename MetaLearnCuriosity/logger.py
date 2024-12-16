@@ -36,6 +36,23 @@ class WBLogger:
                 self.episode_returns.log({f"episode_return_{self.config['ENV_NAME']}": returns})
             self.episode_returns.finish()
 
+    def log_episode_return_minigrid(self, output, num_seeds):
+        self.episode_returns = wandb.init(
+            project="MetaLearnCuriosity",
+            name=f"{self.name}_epi_ret",
+            config=self.config,
+            group=self.group,
+            tags=self.tags,
+            notes=self.notes,
+        )
+
+        outs_avg = jnp.mean(output["metrics"]["returned_episode_returns"], axis=0)
+        for returns in outs_avg.mean(-1).reshape(-1):
+            self.episode_returns.log(
+                {f"episode_return_{self.config['ENV_NAME']}_{num_seeds}_seeds": returns}
+            )
+        self.episode_returns.finish()
+
     def log_int_rewards(self, output, num_seeds):
         self.episode_int_rewards = wandb.init(
             project="MetaLearnCuriosity",
