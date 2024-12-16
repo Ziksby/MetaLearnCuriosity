@@ -267,7 +267,7 @@ def rc_byol_calculate_gae(
     # single iteration for the loop
 
     def _get_advantages(gae_and_next_value, transition):
-        gae, next_value, rc_hstate = gae_and_next_value
+        gae, next_value = gae_and_next_value
         rc_input = jnp.stack(
             (transition.ext_reward_hist, transition.int_reward_hist),
             axis=-1,
