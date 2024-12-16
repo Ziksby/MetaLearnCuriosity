@@ -159,7 +159,7 @@ def make_train(rng):
     open_init_hstate = pred.initialize_carry(config["NUM_ENVS_PER_DEVICE"])
     print(init_hstate.shape, close_init_hstate.shape, open_init_hstate.shape)
     init_bt = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1, 256))
-    init_pred_input = (init_bt, init_x, init_action)
+    init_pred_input = (init_bt, init_x, init_action, init_action)
     pred_params = pred.init(_pred_rng, close_init_hstate, open_init_hstate, init_pred_input)
     target_params = target.init(_tar_rng, init_x)
 
@@ -269,7 +269,8 @@ def train(
             )
             # INT REWARD
             tar_obs = target_state.apply_fn(target_state.params, obsv[:, None])
-            pred_input = (prev_bt, prev_obs[:, None], prev_action[:, None])
+            pred_input = (prev_bt, prev_obs[:, None], prev_action[:, None], action[:, None])
+
             pred_obs, new_bt, new_close_hstate, new_open_hstate = pred_state.apply_fn(
                 pred_state.params, close_prev_hstate, open_prev_hstate, pred_input
             )
