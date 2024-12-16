@@ -600,7 +600,7 @@ for env_name in environments:
             )
         )
         elapsed_time = time.time() - t
-
+    # Else for 1 seed
     else:
         (
             init_hstate,
