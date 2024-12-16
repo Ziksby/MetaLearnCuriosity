@@ -547,14 +547,14 @@ def train(
     return {
         "train_states": runner_state[1:4],
         "metrics": metric,
-        "loss_info": loss,
-        "rl_total_loss": loss["total_loss"],
-        "rl_value_loss": loss["value_loss"],
-        "rl_actor_loss": loss["actor_loss"],
-        "rl_entrophy_loss": loss["entropy"],
+        # "loss_info": loss,
+        # "rl_total_loss": loss["total_loss"],
+        # "rl_value_loss": loss["value_loss"],
+        # "rl_actor_loss": loss["actor_loss"],
+        # "rl_entrophy_loss": loss["entropy"],
         "int_reward": int_reward,
         "norm_int_reward": norm_int_reward,
-        "pred_loss": loss["pred_loss"],
+        # "pred_loss": loss["pred_loss"],
     }
 
 
