@@ -268,8 +268,6 @@ def compile_fns(config):
                     update_target_counter,
                     ext_reward_hist,
                     int_reward_hist,
-                    tot_ext_reward_hist,
-                    tot_int_reward_hist,
                 ) = runner_state
 
                 # SELECT ACTION
@@ -317,9 +315,6 @@ def compile_fns(config):
                 int_reward_hist = jnp.roll(int_reward_hist, shift=-1, axis=1)
                 ext_reward_hist = ext_reward_hist.at[:, -1].set(reward)
                 int_reward_hist = int_reward_hist.at[:, -1].set(int_reward)
-
-                tot_ext_reward_hist = tot_ext_reward_hist.at[step_index].set(ext_reward_hist)
-                tot_int_reward_hist = tot_int_reward_hist.at[step_index].set(int_reward_hist)
 
                 transition = Transition(
                     done=done,
