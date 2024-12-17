@@ -10,6 +10,7 @@ import jax.numpy as jnp
 import jax.tree_util as jtu
 import numpy as np
 import optax
+from evosax import OpenES
 from flax.jax_utils import replicate, unreplicate
 from flax.training.train_state import TrainState
 
@@ -18,13 +19,16 @@ from MetaLearnCuriosity.agents.nn import (
     BYOLTarget,
     MiniGridActorCriticRNN,
     MiniGridBYOLPredictor,
+    RewardCombiner,
 )
 from MetaLearnCuriosity.checkpoints import Restore, Save
 from MetaLearnCuriosity.logger import WBLogger
+from MetaLearnCuriosity.utils import BYOLMiniGridTransition as BatchTransition
 from MetaLearnCuriosity.utils import BYOLRewardNorm
 from MetaLearnCuriosity.utils import RCBYOLMiniGridTransition as Transition
 from MetaLearnCuriosity.utils import (
     byol_minigrid_ppo_update_networks,
+    compress_output_for_reasoning,
     process_output_general,
     rc_byol_calculate_gae,
     rnn_rollout,
@@ -39,18 +43,16 @@ from MetaLearnCuriosity.wrappers import (
 jax.config.update("jax_threefry_partitionable", True)
 
 environments = [
-    "MiniGrid-BlockedUnlockPickUp",
-    "MiniGrid-Empty-16x16",
-    "MiniGrid-EmptyRandom-16x16",
-    "MiniGrid-FourRooms",
-    "MiniGrid-MemoryS128",
-    "MiniGrid-Unlock",
+    "MiniGrid-DoorKey-5x5",
+    "MiniGrid-DoorKey-6x6",
+    "MiniGrid-DoorKey-8x8",
+    "MiniGrid-DoorKey-16x16",
 ]
 
 config = {
-    "NUM_SEEDS": 10,
+    "NUM_SEEDS": 30,
     "PROJECT": "MetaLearnCuriosity",
-    "RUN_NAME": "rc_default_minigrid_byol",
+    "RUN_NAME": "DELETE_byol-RC",
     "BENCHMARK_ID": None,
     "RULESET_ID": None,
     "USE_CNNS": False,
@@ -64,7 +66,7 @@ config = {
     "NUM_STEPS": 16,
     "UPDATE_EPOCHS": 1,
     "NUM_MINIBATCHES": 16,
-    "TOTAL_TIMESTEPS": 50_000_000,
+    "TOTAL_TIMESTEPS": 5_000_000,
     "LR": 0.001,
     "CLIP_EPS": 0.2,
     "GAMMA": 0.99,
@@ -80,6 +82,7 @@ config = {
     # "INT_LAMBDA": 0.0003,
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
+    "HIST_LEN": 32,
 }
 
 
@@ -150,11 +153,14 @@ def make_train(rng):
         "prev_action": jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1), dtype=jnp.int32),
         "prev_reward": jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1)),
     }
+    ext_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], config["HIST_LEN"]))
+    int_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], config["HIST_LEN"]))
     init_hstate = network.initialize_carry(batch_size=config["NUM_ENVS_PER_DEVICE"])
     init_x = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1, *observations_shape))
     init_action = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1), dtype=jnp.int32)
     close_init_hstate = pred.initialize_carry(config["NUM_ENVS_PER_DEVICE"])
     open_init_hstate = pred.initialize_carry(config["NUM_ENVS_PER_DEVICE"])
+
     print(init_hstate.shape, close_init_hstate.shape, open_init_hstate.shape)
     init_bt = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1, 256))
     init_pred_input = (init_bt, init_x, init_action, init_action)
@@ -202,6 +208,8 @@ def make_train(rng):
         pred_state,
         target_state,
         rng,
+        ext_reward_history,
+        int_reward_history,
     )
 
 
@@ -214,6 +222,8 @@ def train(
     train_state,
     pred_state,
     target_state,
+    ext_reward_hist,
+    int_reward_hist,
 ):
     rng, _rng = jax.random.split(rng)
 
@@ -234,7 +244,7 @@ def train(
 
         # COLLECT TRAJECTORIES
 
-        def _env_step(runner_state, _):
+        def _env_step(runner_state, step_index):
             (
                 rng,
                 train_state,
@@ -251,6 +261,8 @@ def train(
                 byol_reward_norm_params,
                 ext_reward_norm_params,
                 update_target_counter,
+                ext_reward_hist,
+                int_reward_hist,
             ) = runner_state
 
             # SELECT ACTION
@@ -290,6 +302,12 @@ def train(
             )
 
             int_reward = jnp.square(jnp.linalg.norm((pred_norm - tar_norm), axis=-1)) * (1 - done)
+
+            ext_reward_hist = jnp.roll(ext_reward_hist, shift=-1, axis=1)
+            int_reward_hist = jnp.roll(int_reward_hist, shift=-1, axis=1)
+            ext_reward_hist = ext_reward_hist.at[:, -1].set(reward)
+            int_reward_hist = int_reward_hist.at[:, -1].set(int_reward)
+
             transition = Transition(
                 done=done,
                 action=action,
@@ -304,6 +322,8 @@ def train(
                 prev_reward=prev_reward,
                 prev_bt=prev_bt,
                 norm_time_step=norm_time_step,
+                ext_reward_hist=ext_reward_hist,
+                int_reward_hist=int_reward_hist,
                 info=info,
             )
             runner_state = (
@@ -322,11 +342,15 @@ def train(
                 byol_reward_norm_params,
                 ext_reward_norm_params,
                 update_target_counter,
+                ext_reward_hist,
+                int_reward_hist,
             )
             return runner_state, transition
 
         initial_hstate, close_initial_hstate, open_initial_hstate = runner_state[9:12]
-        runner_state, transitions = jax.lax.scan(_env_step, runner_state, None, config["NUM_STEPS"])
+        runner_state, transitions = jax.lax.scan(
+            _env_step, runner_state, np.arange(config["NUM_STEPS"])
+        )
 
         # CALCULATE ADVANTAGE
 
@@ -346,6 +370,8 @@ def train(
             byol_reward_norm_params,
             ext_reward_norm_params,
             update_target_counter,
+            ext_reward_hist,
+            int_reward_hist,
         ) = runner_state
 
         _, last_val, _ = train_state.apply_fn(
@@ -365,7 +391,7 @@ def train(
             norm_ext_reward,
             byol_reward_norm_params,
             ext_reward_norm_params,
-            int_lambda,
+            int_lambdas,
         ) = rc_byol_calculate_gae(
             transitions,
             rc_params,
@@ -435,11 +461,25 @@ def train(
             rng, _rng = jax.random.split(rng)
             permutation = jax.random.permutation(_rng, config["NUM_ENVS_PER_DEVICE"])
             # [seq_len, batch_size, ...]
+            batch_transitions = BatchTransition(
+                transitions.done,
+                transitions.action,
+                transitions.value,
+                transitions.reward,
+                transitions.int_reward,
+                transitions.log_prob,
+                transitions.obs,
+                transitions.next_obs,
+                transitions.prev_action,
+                transitions.prev_reward,
+                transitions.prev_bt,
+                transitions.info,
+            )
             batch = (
                 init_hstate,
                 close_init_hstate,
                 open_init_hstate,
-                transitions,
+                batch_transitions,
                 advantages,
                 targets,
             )
@@ -546,6 +586,8 @@ def train(
             byol_reward_norm_params,
             ext_reward_norm_params,
             update_target_counter,
+            ext_reward_hist,
+            int_reward_hist,
         )
         return runner_state, (
             metric,
@@ -554,7 +596,7 @@ def train(
             norm_int_reward,
             reward,
             norm_ext_reward,
-            int_lambda,
+            int_lambdas,
         )
 
     runner_state = (
@@ -573,6 +615,8 @@ def train(
         byol_reward_norm_params,
         ext_reward_norm_params,
         update_target_counter,
+        ext_reward_hist,
+        int_reward_hist,
     )
     runner_state, (
         metric,
@@ -581,7 +625,7 @@ def train(
         norm_int_reward,
         reward,
         norm_ext_reward,
-        int_lambda,
+        int_lambdas,
     ) = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
 
     return {
@@ -595,88 +639,80 @@ def train(
         "int_reward": int_reward,
         "norm_int_reward": norm_int_reward,
         # "pred_loss": loss["pred_loss"],
-        "int_lambdas": int_lambda,
+        "int_lambdas": int_lambdas,
         "reward": reward,
         "norm_ext_reward": norm_ext_reward,
     }
 
 
+reward_combiner_network = RewardCombiner()
+
+rc_params_pholder = reward_combiner_network.init(
+    jax.random.PRNGKey(9), jnp.zeros((1, config["HIST_LEN"], 2))
+)
+strategy = OpenES(
+    popsize=64,
+    pholder_params=rc_params_pholder,
+    opt_name="adam",
+    lrate_decay=1,
+    sigma_decay=0.999,
+    sigma_init=0.04,
+    n_devices=1,
+    maximize=True,
+)
+
 for env_name in environments:
-    rc_params = Restore(
-        "/home/batsy/MetaLearnCuriosity/rc_meta_default_SpaceInvaders-MinAtar_flax-checkpoints_v0"
+    es_state, _, _, _ = Restore(
+        "/home/batsy/MetaLearnCuriosity/rc_cnn_minigrid_flax-checkpoints_v0"
     )
+    rc_params = strategy.param_reshaper.reshape_single(es_state["mean"])
+
     observations_shape, config, env, env_params = make_env_config(config, env_name)
 
     # experiments
     rng = jax.random.PRNGKey(config["SEED"])
+    rng = jax.random.split(rng, config["NUM_SEEDS"])
+    (
+        init_hstate,
+        close_init_hstate,
+        open_init_hstate,
+        train_state,
+        pred_state,
+        target_state,
+        rng,
+        ext_reward_hist,
+        int_reward_hist,
+    ) = jax.jit(jax.vmap(make_train, out_axes=(0, 0, 0, 0, 0, 0, 1, 0, 0)))(rng)
+    init_hstate = replicate(init_hstate, jax.local_devices())
 
-    if config["NUM_SEEDS"] > 1:
-        rng = jax.random.split(rng, config["NUM_SEEDS"])
-        (
+    open_init_hstate = replicate(open_init_hstate, jax.local_devices())
+    close_init_hstate = replicate(close_init_hstate, jax.local_devices())
+    train_state = replicate(train_state, jax.local_devices())
+    pred_state = replicate(pred_state, jax.local_devices())
+    target_state = replicate(target_state, jax.local_devices())
+    rc_params = replicate(rc_params, jax.local_devices())
+    ext_reward_hist = replicate(ext_reward_hist, jax.local_devices())
+    int_reward_hist = replicate(int_reward_hist, jax.local_devices())
+
+    train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0, 0))
+    train_fn = jax.pmap(train_fn, axis_name="devices")
+    print(f"Training in {config['ENV_NAME']}")
+    t = time.time()
+    output = jax.block_until_ready(
+        train_fn(
+            rng,
+            rc_params,
             init_hstate,
             close_init_hstate,
             open_init_hstate,
             train_state,
             pred_state,
             target_state,
-            rng,
-        ) = jax.jit(jax.vmap(make_train, out_axes=(0, 0, 0, 0, 0, 0, 1)))(rng)
-        init_hstate = replicate(init_hstate, jax.local_devices())
-
-        open_init_hstate = replicate(open_init_hstate, jax.local_devices())
-        close_init_hstate = replicate(close_init_hstate, jax.local_devices())
-        train_state = replicate(train_state, jax.local_devices())
-        pred_state = replicate(pred_state, jax.local_devices())
-        target_state = replicate(target_state, jax.local_devices())
-        rc_params = replicate(rc_params, jax.local_devices())
-
-        train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0))
-        train_fn = jax.pmap(train_fn, axis_name="devices")
-        print(f"Training in {config['ENV_NAME']}")
-        t = time.time()
-        output = jax.block_until_ready(
-            train_fn(
-                rng,
-                rc_params,
-                init_hstate,
-                close_init_hstate,
-                open_init_hstate,
-                train_state,
-                pred_state,
-                target_state,
-            )
+            ext_reward_hist,
+            int_reward_hist,
         )
-        elapsed_time = time.time() - t
-
-    else:
-        (
-            init_hstate,
-            close_init_hstate,
-            open_init_hstate,
-            train_state,
-            pred_state,
-            target_state,
-            rng,
-        ) = make_train(rng)
-        init_hstate = replicate(init_hstate, jax.local_devices())
-        open_init_hstate = replicate(open_init_hstate, jax.local_devices())
-        close_init_hstate = replicate(close_init_hstate, jax.local_devices())
-        train_state = replicate(train_state, jax.local_devices())
-        pred_state = replicate(pred_state, jax.local_devices())
-        target_state = replicate(target_state, jax.local_devices())
-        train_fn = jax.pmap(train, axis_name="devices")
-        t = time.time()
-        output = jax.block_until_ready(
-            train_fn(
-                rng,
-                init_hstate,
-                close_init_hstate,
-                open_init_hstate,
-                train_state,
-                pred_state,
-                target_state,
-            )
-        )
+    )
+    elapsed_time = time.time() - t
 
     logger = WBLogger(
         config=config,
@@ -686,20 +722,19 @@ for env_name in environments:
     )
     output = process_output_general(output)
 
-    logger.log_reward(output, config["NUM_SEEDS"])
-    logger.log_norm_ext_rewards(output, config["NUM_SEEDS"])
+    # logger.log_reward(output, config["NUM_SEEDS"])
+    # logger.log_norm_ext_rewards(output, config["NUM_SEEDS"])
     logger.log_int_lambdas(output, config["NUM_SEEDS"])
     logger.log_episode_return(output, config["NUM_SEEDS"])
-    logger.log_int_rewards(output, config["NUM_SEEDS"])
+    # logger.log_int_rewards(output, config["NUM_SEEDS"])
     logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
+    output = compress_output_for_reasoning(output, minigrid=True)
     output["config"] = config
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
     # Get the absolute path of the directory
-    episode_returns = {}
-    episode_returns["returned_episode_returns"] = output["metrics"]["returned_episode_returns"]
     path = os.path.abspath(checkpoint_directory)
-    Save(path, episode_returns)
+    Save(path, output)
     logger.save_artifact(path)
     shutil.rmtree(path)
     print(f"Deleted local checkpoint directory: {path}")
