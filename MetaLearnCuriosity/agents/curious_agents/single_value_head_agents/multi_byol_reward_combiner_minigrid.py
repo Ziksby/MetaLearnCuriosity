@@ -724,10 +724,10 @@ for env_name in environments:
 
     # logger.log_reward(output, config["NUM_SEEDS"])
     # logger.log_norm_ext_rewards(output, config["NUM_SEEDS"])
-    logger.log_int_lambdas(output, config["NUM_SEEDS"])
-    logger.log_episode_return(output, config["NUM_SEEDS"])
+    logger.log_int_lambdas_minigrid(output, config["NUM_SEEDS"])
+    logger.log_episode_return_minigrid(output, config["NUM_SEEDS"])
     # logger.log_int_rewards(output, config["NUM_SEEDS"])
-    logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
+    # logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
     output = compress_output_for_reasoning(output, minigrid=True)
     output["config"] = config
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'

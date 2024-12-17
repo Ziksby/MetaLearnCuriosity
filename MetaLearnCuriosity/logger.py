@@ -448,6 +448,26 @@ class WBLogger:
                 )
             self.int_lambdas.finish()
 
+    def log_int_lambdas_minigrid(self, output, num_seeds):
+        self.int_lambdas = wandb.init(
+            project="MetaLearnCuriosity",
+            config=self.config,
+            group=self.group,
+            tags=self.tags,
+            notes=self.notes,
+            name=f"{self.name}_int_lambdas",
+        )
+        int_value_avg = jnp.mean(output["int_lambdas"], axis=0)
+        for int_lambda in range(len(int_value_avg.mean(-1).reshape(-1))):
+            self.int_lambdas.log(
+                {
+                    f"int_lambdas_{self.config['ENV_NAME']}_{num_seeds}_seeds": int_value_avg.mean(
+                        -1
+                    ).reshape(-1)[int_lambda]
+                }
+            )
+        self.int_lambdas.finish()
+
     def log_reward(self, output, num_seeds):
         self.reward = wandb.init(
             project="MetaLearnCuriosity",
