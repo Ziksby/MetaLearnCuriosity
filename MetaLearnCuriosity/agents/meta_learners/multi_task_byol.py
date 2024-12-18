@@ -9,11 +9,11 @@ import time
 import jax
 import jax.numpy as jnp
 import jax.tree_util
+import wandb
 from evosax import OpenES
 from flax.jax_utils import replicate
 from tqdm import tqdm
 
-import wandb
 from MetaLearnCuriosity.agents.nn import RCRNN, RewardCombiner
 from MetaLearnCuriosity.checkpoints import Restore, Save
 from MetaLearnCuriosity.compile_byol_brax_fns import (
@@ -67,6 +67,7 @@ config["COMMIT_HARSH"] = commit_hash
 
 reward_combiner_network = RewardCombiner()
 
+rng = jax.random.PRNGKey(config["SEED"])
 rc_params_pholder = reward_combiner_network.init(
     jax.random.PRNGKey(config["RC_SEED"]), jnp.zeros((1, config["HIST_LEN"], 2))
 )
@@ -87,33 +88,32 @@ name = f'{config["RUN_NAME"]}'
 es_rng, es_rng_init = jax.random.split(es_rng)
 es_params = strategy.default_params
 es_state = strategy.initialize(es_rng_init, es_params)
-# es_stuff = Restore(
-#     "/home/batsy/MetaLearnCuriosity/MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/rc_cnn_64_64_delayed_brax_1_seed_continued"
-# )
-# es_state_saved, _ = es_stuff
-# print(es_state_saved)
-# print()
-# print(es_state)
-# print()
-# opt_state = es_state.opt_state.replace(
-#     lrate=es_state_saved["opt_state"]["lrate"],
-#     m=es_state_saved["opt_state"]["m"],
-#     v=es_state_saved["opt_state"]["v"],
-#     n=es_state_saved["opt_state"]["n"],
-#     last_grads=es_state_saved["opt_state"]["last_grads"],
-#     gen_counter=es_state_saved["opt_state"]["gen_counter"],
-# )
-# es_state = es_state.replace(
-#     mean=es_state_saved["mean"],
-#     sigma=es_state_saved["sigma"],
-#     opt_state=opt_state,
-#     best_member=es_state_saved["best_member"],
-#     best_fitness=es_state_saved["best_fitness"],
-#     gen_counter=es_state_saved["gen_counter"],
-# )
-# print("Now matched,", es_state, "\n")
+es_stuff = Restore(
+    "/home/batsy/MetaLearnCuriosity/MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/rc_cnn_brax"
+)
+es_state_saved, _, es_rng, rng = es_stuff
+print(es_state_saved)
+print(es_rng)
+print(es_state)
+print(rng)
+opt_state = es_state.opt_state.replace(
+    lrate=es_state_saved["opt_state"]["lrate"],
+    m=es_state_saved["opt_state"]["m"],
+    v=es_state_saved["opt_state"]["v"],
+    n=es_state_saved["opt_state"]["n"],
+    last_grads=es_state_saved["opt_state"]["last_grads"],
+    gen_counter=es_state_saved["opt_state"]["gen_counter"],
+)
+es_state = es_state.replace(
+    mean=es_state_saved["mean"],
+    sigma=es_state_saved["sigma"],
+    opt_state=opt_state,
+    best_member=es_state_saved["best_member"],
+    best_fitness=es_state_saved["best_fitness"],
+    gen_counter=es_state_saved["gen_counter"],
+)
+print("Now matched,", es_state, "\n")
 train_fns, make_seeds = compile_fns(config=config)
-rng = jax.random.PRNGKey(config["SEED"])
 fit_log = wandb.init(
     project="MetaLearnCuriosity",
     config=config,
@@ -122,7 +122,9 @@ fit_log = wandb.init(
     name=f"{name}_fitness",
 )
 
-for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations"):
+for gen in tqdm(
+    range(config["NUM_GENERATIONS"] - es_state_saved["gen_counter"]), desc="Processing Generations"
+):
     begin_gen = time.time()
     es_rng, es_rng_ask = jax.random.split(es_rng)
     x, es_state = strategy.ask(es_rng_ask, es_state, es_params)
