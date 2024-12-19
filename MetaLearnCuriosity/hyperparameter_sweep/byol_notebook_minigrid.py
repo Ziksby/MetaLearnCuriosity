@@ -43,12 +43,12 @@ jax.config.update("jax_threefry_partitionable", True)
 key = jax.random.PRNGKey(76)
 environments = [
     # "MiniGrid-DoorKey-8x8",
-    "MiniGrid-DoorKey-16x16",
-    "MiniGrid-DoorKey-8x8",
-    "MiniGrid-DoorKey-6x6",
-    "MiniGrid-DoorKey-5x5",
+    # "MiniGrid-DoorKey-16x16",
+    # "MiniGrid-DoorKey-8x8",
+    # "MiniGrid-DoorKey-6x6",
+    # "MiniGrid-DoorKey-5x5",
     # "MiniGrid-EmptyRandom-16x16",
-    # "MiniGrid-FourRooms",
+    "MiniGrid-FourRooms",
     # "MiniGrid-MemoryS16",
     # "MiniGrid-Unlock",
 ]

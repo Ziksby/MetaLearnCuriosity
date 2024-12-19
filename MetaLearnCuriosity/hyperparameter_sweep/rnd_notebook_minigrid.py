@@ -45,10 +45,11 @@ from MetaLearnCuriosity.wrappers import (
 jax.config.update("jax_threefry_partitionable", True)
 
 environments = [
-    "MiniGrid-DoorKey-16x16",
-    "MiniGrid-DoorKey-8x8",
-    "MiniGrid-DoorKey-6x6",
-    "MiniGrid-DoorKey-5x5",
+    # "MiniGrid-DoorKey-16x16",
+    # "MiniGrid-DoorKey-8x8",
+    # "MiniGrid-DoorKey-6x6",
+    "MiniGrid-FourRooms",
+    # "MiniGrid-DoorKey-5x5",
 ]
 
 config = {

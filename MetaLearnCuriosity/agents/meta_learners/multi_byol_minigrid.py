@@ -26,15 +26,18 @@ from MetaLearnCuriosity.utils import (
 
 environments = [
     #  'MiniGrid-DoorKey-5x5',
-    "MiniGrid-DoorKey-6x6",
+    # "MiniGrid-DoorKey-6x6",
     "MiniGrid-DoorKey-8x8",
     #  'MiniGrid-DoorKey-16x16',
+    "MiniGrid-Empty-16x16",
+    "MiniGrid-EmptyRandom-16x16",
+    # "MiniGrid-Empty-5x5"
 ]
 
 config = {
-    "RUN_NAME": "rc_cnn_minigrid",
+    "RUN_NAME": "rc_cnn_minigrid_multi",
     "BENCHMARK_ID": None,
-    "NUM_SEEDS": 1,
+    "NUM_SEEDS": 2,
     "RULESET_ID": None,
     "USE_CNNS": False,
     # Agent
@@ -64,10 +67,10 @@ config = {
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
     "HIST_LEN": 32,
-    "POP_SIZE": 64,
+    "POP_SIZE": 128,
     "RC_SEED": 23,
     "ES_SEED": 9_869_690,
-    "NUM_GENERATIONS": 48,
+    "NUM_GENERATIONS": 98,
 }
 
 reward_combiner_network = RewardCombiner()
@@ -175,7 +178,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
             )
         )
         output = process_output_general(output)
-        raw_episode_return = output["episode_returns"].mean(-1)  # This is the raw fitness
+        raw_episode_return = output["rewards"].mean(-1)  # This is the raw fitness
         int_lambdas = output["int_lambdas"].mean(
             -1
         )  # Get the int_lambdas and average across episodes
@@ -202,11 +205,20 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
     # logging now to W&Bs
     for env_name in environments:
         raw_fitness = raw_fitness_dict[env_name]
+        int_lambdas = int_lambda_dict[env_name]
+
         if len(raw_fitness) > 0:
+            int_lambda_array = jnp.array(int_lambdas)
+            best_idx = jnp.argmax(jnp.array(raw_fitness))
+
             fit_log.log(
                 {
                     f"{env_name}_mean_fitness": jnp.array(raw_fitness).mean(),
                     f"{env_name}_best_fitness": jnp.max(jnp.array(raw_fitness)),
+                    f"{env_name}_mean_lambda": int_lambda_array.mean(),  # Average lambda across generation
+                    f"{env_name}_best_lambda": int_lambda_array[best_idx][
+                        0
+                    ],  # Lambda of best individual
                 }
             )
         else:
@@ -215,6 +227,8 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
                 {
                     f"{env_name}_mean_fitness": 0.0,
                     f"{env_name}_best_fitness": 0.0,
+                    f"{env_name}_mean_lambda": 0.0,
+                    f"{env_name}_best_lambda": 0.0,
                 }
             )
 
