@@ -152,7 +152,6 @@ def compile_fns(config, environments):
         close_init_hstate = pred.initialize_carry(config["NUM_ENVS_PER_DEVICE"])
         open_init_hstate = pred.initialize_carry(config["NUM_ENVS_PER_DEVICE"])
 
-        print(init_hstate.shape, close_init_hstate.shape, open_init_hstate.shape)
         init_bt = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1, 256))
         init_pred_input = (init_bt, init_x, init_action, init_action)
         pred_params = pred.init(_pred_rng, close_init_hstate, open_init_hstate, init_pred_input)
@@ -643,7 +642,7 @@ def compile_fns(config, environments):
         # experiments
         rng = jax.random.PRNGKey(config["SEED"])
         rng = jax.random.split(rng, config["NUM_SEEDS"])
-        make_train_fn = jax.vmap(make_train, out_axes=(0, 0, 0, 0, 0, 0, 1, 0, 0))
+        make_train_fn = jax.jit(jax.vmap(make_train, out_axes=(0, 0, 0, 0, 0, 0, 1, 0, 0)))
         train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0, 0))
         train_fn = jax.vmap(
             train_fn,
