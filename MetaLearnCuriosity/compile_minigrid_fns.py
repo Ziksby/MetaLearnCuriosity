@@ -40,19 +40,6 @@ from MetaLearnCuriosity.wrappers import (
 
 jax.config.update("jax_threefry_partitionable", True)
 
-environments = [
-    # "MiniGrid-BlockedUnlockPickUp",
-    # "MiniGrid-Empty-16x16",
-    # "MiniGrid-EmptyRandom-16x16",
-    # "MiniGrid-FourRooms",
-    # "MiniGrid-MemoryS128",
-    # "MiniGrid-Unlock",
-    # "MiniGrid-DoorKey-16x16",
-    "MiniGrid-DoorKey-8x8",
-    "MiniGrid-DoorKey-6x6",
-    # "MiniGrid-DoorKey-5x5",
-]
-
 config = {
     "NUM_SEEDS": 10,
     "PROJECT": "MetaLearnCuriosity",
@@ -117,7 +104,7 @@ def make_env_config(config, env_name):
     return observations_shape, config, env, env_params
 
 
-def compile_fns(config):
+def compile_fns(config, environments):
     def make_train(rng):
         rng, _rng = jax.random.split(rng)
         rng, _tar_rng = jax.random.split(rng)

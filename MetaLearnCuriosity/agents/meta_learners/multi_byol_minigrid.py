@@ -106,7 +106,7 @@ es_state = strategy.initialize(es_rng_init, es_params)
 # opt_state = es_state.opt_state.replace(lrate=es_state_saved["opt_state"]["lrate"], m=es_state_saved["opt_state"]["m"], v=es_state_saved["opt_state"]["v"], n=es_state_saved["opt_state"]["n"], last_grads=es_state_saved["opt_state"]["last_grads"], gen_counter=es_state_saved["opt_state"]["gen_counter"])
 # es_state=es_state.replace(mean=es_state_saved['mean'], sigma=es_state_saved["sigma"], opt_state=opt_state, best_member = es_state_saved["best_member"], best_fitness=es_state_saved["best_fitness"], gen_counter=es_state_saved["gen_counter"])
 # print("Now matched,", es_state,"\n")
-train_fns, make_seeds = compile_fns(config=config)
+train_fns, make_seeds = compile_fns(config=config, environments=environments)
 rng = jax.random.PRNGKey(config["SEED"])
 fit_log = wandb.init(
     project="MetaLearnCuriosity",
