@@ -27,7 +27,7 @@ from MetaLearnCuriosity.utils import (
 environments = [
     #  'MiniGrid-DoorKey-5x5',
     # "MiniGrid-DoorKey-6x6",
-    "MiniGrid-DoorKey-8x8",
+    "MiniGrid-DoorKey-5x5",
     #  'MiniGrid-DoorKey-16x16',
     "MiniGrid-Empty-16x16",
     "MiniGrid-EmptyRandom-16x16",
@@ -37,7 +37,7 @@ environments = [
 config = {
     "RUN_NAME": "rc_cnn_minigrid_multi",
     "BENCHMARK_ID": None,
-    "NUM_SEEDS": 2,
+    "NUM_SEEDS": 3,
     "RULESET_ID": None,
     "USE_CNNS": False,
     # Agent
