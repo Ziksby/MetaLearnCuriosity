@@ -35,7 +35,7 @@ environments = [
 ]
 
 config = {
-    "RUN_NAME": "rc_cnn_minigrid_multi",
+    "RUN_NAME": "rc_cnn_minigrid_multi_default",
     "BENCHMARK_ID": None,
     "NUM_SEEDS": 3,
     "RULESET_ID": None,

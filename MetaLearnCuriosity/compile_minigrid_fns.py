@@ -643,7 +643,7 @@ def compile_fns(config, environments):
         # experiments
         rng = jax.random.PRNGKey(config["SEED"])
         rng = jax.random.split(rng, config["NUM_SEEDS"])
-        make_train_fn = jax.jit(jax.vmap(make_train, out_axes=(0, 0, 0, 0, 0, 0, 1, 0, 0)))
+        make_train_fn = jax.vmap(make_train, out_axes=(0, 0, 0, 0, 0, 0, 1, 0, 0))
         train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0, 0))
         train_fn = jax.vmap(
             train_fn,
