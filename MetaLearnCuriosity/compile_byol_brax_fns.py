@@ -41,35 +41,6 @@ from MetaLearnCuriosity.wrappers import (
     VecEnv,
 )
 
-config = {
-    "RUN_NAME": "rc_delayed_brax_byol",
-    "SEED": 42,
-    "NUM_SEEDS": 30,
-    "LR": 3e-4,
-    "NUM_ENVS": 2048,
-    "NUM_STEPS": 10,  # unroll length
-    "TOTAL_TIMESTEPS": 5e7,
-    "UPDATE_EPOCHS": 4,
-    "NUM_MINIBATCHES": 32,
-    "GAMMA": 0.99,
-    "GAE_LAMBDA": 0.95,
-    "CLIP_EPS": 0.2,
-    "ENT_COEF": 0.0,
-    "VF_COEF": 0.5,
-    "MAX_GRAD_NORM": 0.5,
-    "ACTIVATION": "tanh",
-    "ANNEAL_LR": False,
-    "NORMALIZE_ENV": True,
-    "DELAY_REWARDS": True,
-    "ANNEAL_PRED_LR": False,
-    "DEBUG": False,
-    "PRED_LR": 0.001,
-    "REW_NORM_PARAMETER": 0.99,
-    "EMA_PARAMETER": 0.99,
-}
-
-step_intervals = [3, 10, 20, 30]
-
 
 class PPOActorCritic(nn.Module):
     action_dim: Sequence[int]
@@ -102,7 +73,7 @@ class PPOActorCritic(nn.Module):
         return pi, jnp.squeeze(critic, axis=-1)
 
 
-def compile_brax_byol_fns(config):  # noqa: C901
+def compile_brax_byol_fns(config, env_name, step_intervals):  # noqa: C901
     def make_config_env(config, env_name):
         config["ENV_NAME"] = env_name
         env, env_params = BraxGymnaxWrapper(config["ENV_NAME"]), None
@@ -769,7 +740,6 @@ def compile_brax_byol_fns(config):  # noqa: C901
 
     train_fns = {}
     make_seeds = {}
-    env_name = "hopper"
     for step_interval in step_intervals:
         config["STEP_INTERVAL"] = step_interval
         config, env, env_params = make_config_env(config, env_name)
