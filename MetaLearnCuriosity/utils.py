@@ -290,7 +290,7 @@ def rnn_rc_byol_calculate_gae(
 
     (_, _, rc_hstate), (advantages, int_lambda) = jax.lax.scan(
         _get_advantages,
-        (jnp.zeros_like(last_val), last_val),
+        (jnp.zeros_like(last_val), last_val, rc_hstate),
         norm_traj_batch,
         reverse=True,
     )
