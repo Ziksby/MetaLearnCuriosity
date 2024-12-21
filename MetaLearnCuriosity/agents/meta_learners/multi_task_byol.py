@@ -87,6 +87,7 @@ name = f'{config["RUN_NAME"]}'
 es_rng, es_rng_init = jax.random.split(es_rng)
 es_params = strategy.default_params
 es_state = strategy.initialize(es_rng_init, es_params)
+
 # es_stuff = Restore(
 #     "/home/batsy/MetaLearnCuriosity/MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/rc_cnn_64_64_delayed_brax_1_seed_continued"
 # )
@@ -95,6 +96,7 @@ es_state = strategy.initialize(es_rng_init, es_params)
 # print()
 # print(es_state)
 # print()
+
 # opt_state = es_state.opt_state.replace(
 #     lrate=es_state_saved["opt_state"]["lrate"],
 #     m=es_state_saved["opt_state"]["m"],
@@ -103,6 +105,7 @@ es_state = strategy.initialize(es_rng_init, es_params)
 #     last_grads=es_state_saved["opt_state"]["last_grads"],
 #     gen_counter=es_state_saved["opt_state"]["gen_counter"],
 # )
+
 # es_state = es_state.replace(
 #     mean=es_state_saved["mean"],
 #     sigma=es_state_saved["sigma"],
@@ -112,6 +115,7 @@ es_state = strategy.initialize(es_rng_init, es_params)
 #     gen_counter=es_state_saved["gen_counter"],
 # )
 # print("Now matched,", es_state, "\n")
+
 train_fns, make_seeds = compile_fns(config=config, step_intervals=step_intervals, env_name="hopper")
 rng = jax.random.PRNGKey(config["SEED"])
 fit_log = wandb.init(

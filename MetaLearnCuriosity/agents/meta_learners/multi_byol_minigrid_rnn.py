@@ -66,7 +66,7 @@ config = {
     # "INT_LAMBDA": 0.0003,
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
-    "HIST_LEN": 32,
+    "HIST_LEN": 1,
     "POP_SIZE": 128,
     "RC_SEED": 23,
     "ES_SEED": 9_869_690,
@@ -147,6 +147,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
             rng_train,
             ext_reward_hist,
             int_reward_hist,
+            rc_hstate,
         ) = make_seeds[env_name](rng_train)
 
         # duplicating here for pmap
@@ -159,6 +160,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
         # init_bt = replicate(init_bt, jax.local_devices())
         # init_action = replicate(init_action, jax.local_devices())
         pair = replicate(pair, jax.local_devices())
+        rc_hstate = replicate(rc_hstate, jax.local_devices())
         ext_reward_hist = replicate(ext_reward_hist, jax.local_devices())
         int_reward_hist = replicate(int_reward_hist, jax.local_devices())
         t = time.time()
@@ -175,6 +177,7 @@ for gen in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations")
                 target_state,
                 ext_reward_hist,
                 int_reward_hist,
+                rc_hstate,
             )
         )
         output = process_output_general(output)
