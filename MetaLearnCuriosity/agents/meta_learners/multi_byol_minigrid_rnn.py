@@ -14,7 +14,7 @@ from flax.jax_utils import replicate
 from tqdm import tqdm
 
 import wandb
-from MetaLearnCuriosity.agents.nn import RCRNN, EmbeddedRewardCombiner
+from MetaLearnCuriosity.agents.nn import RCRNN, EmbeddedRNNRewardCombiner
 from MetaLearnCuriosity.checkpoints import Restore, Save
 from MetaLearnCuriosity.compile_minigrid_rnns_fns import compile_fns
 from MetaLearnCuriosity.logger import WBLogger
@@ -73,7 +73,7 @@ config = {
     "NUM_GENERATIONS": 98,
 }
 
-reward_combiner_network = EmbeddedRewardCombiner(features=64)
+reward_combiner_network = EmbeddedRNNRewardCombiner(features=64)
 
 rc_params_pholder = reward_combiner_network.init(
     jax.random.PRNGKey(config["RC_SEED"]), jnp.zeros((1, 64)), jnp.zeros((1, config["HIST_LEN"], 3))
