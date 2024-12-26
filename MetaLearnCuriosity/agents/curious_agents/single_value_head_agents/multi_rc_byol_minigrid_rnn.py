@@ -91,6 +91,8 @@ config = {
     "HIST_LEN": 1,
 }
 
+# config prep
+
 
 def make_env_config(config, env_name):
     num_devices = jax.local_device_count()
