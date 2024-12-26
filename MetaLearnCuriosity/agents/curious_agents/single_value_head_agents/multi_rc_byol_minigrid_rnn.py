@@ -58,7 +58,7 @@ environments = [
 config = {
     "NUM_SEEDS": 30,
     "PROJECT": "MetaLearnCuriosity",
-    "RUN_NAME": "DELETE_RNN_byol-RC_most_least_test",
+    "RUN_NAME": "DELETE_RNN_byol-RC_most_least_tests",
     "BENCHMARK_ID": None,
     "RULESET_ID": None,
     "USE_CNNS": False,
