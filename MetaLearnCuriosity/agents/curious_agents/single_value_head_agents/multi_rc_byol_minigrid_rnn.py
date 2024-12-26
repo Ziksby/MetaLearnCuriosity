@@ -88,7 +88,7 @@ config = {
     # "INT_LAMBDA": 0.0003,
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
-    "HIST_LEN": 32,
+    "HIST_LEN": 1,
 }
 
 
@@ -631,6 +631,7 @@ def train(
         update_target_counter,
         ext_reward_hist,
         int_reward_hist,
+        rc_hstate,
     )
     runner_state, (
         metric,
@@ -662,7 +663,7 @@ def train(
 reward_combiner_network = EmbeddedRNNRewardCombiner()
 
 rc_params_pholder = reward_combiner_network.init(
-    jax.random.PRNGKey(9), jnp.zeros((1, 64)), jnp.zeros((1, config["HIST_LEN"], 2))
+    jax.random.PRNGKey(9897), jnp.zeros((32, 64)), jnp.zeros((1, config["HIST_LEN"], 2))
 )
 strategy = OpenES(
     popsize=64,
