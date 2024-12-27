@@ -43,21 +43,21 @@ from MetaLearnCuriosity.wrappers import (
 jax.config.update("jax_threefry_partitionable", True)
 
 environments = [
-    "MiniGrid-DoorKey-5x5",
-    "MiniGrid-FourRooms",
-    "MiniGrid-Empty-16x16",
-    "MiniGrid-DoorKey-6x6",
-    "MiniGrid-DoorKey-8x8",
-    "MiniGrid-DoorKey-16x16",
     "MiniGrid-Empty-5x5",
     "MiniGrid-Empty-6x6",
     "MiniGrid-Empty-8x8",
+    "MiniGrid-Empty-16x16",
+    "MiniGrid-DoorKey-5x5",
+    "MiniGrid-DoorKey-6x6",
+    "MiniGrid-DoorKey-8x8",
+    "MiniGrid-DoorKey-16x16",
+    "MiniGrid-FourRooms",
 ]
 
 config = {
     "NUM_SEEDS": 30,
     "PROJECT": "MetaLearnCuriosity",
-    "RUN_NAME": "DELETE_byol-RC_more_least",
+    "RUN_NAME": "DELETE_byol-RC_more_least_RNN_MIDDLE",
     "BENCHMARK_ID": None,
     "RULESET_ID": None,
     "USE_CNNS": False,
@@ -667,7 +667,9 @@ strategy = OpenES(
 )
 
 for env_name in environments:
-    es_state, _, _, _ = Restore("/home/batsy/MetaLearnCuriosity/rc_cnn_minigrid_empty_most_least")
+    es_state, _, _, _ = Restore(
+        "/home/batsy/MetaLearnCuriosity/MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/rc_cnn_minigrid_middle_rnn"
+    )
     rc_params = strategy.param_reshaper.reshape_single(es_state["mean"])
 
     observations_shape, config, env, env_params = make_env_config(config, env_name)

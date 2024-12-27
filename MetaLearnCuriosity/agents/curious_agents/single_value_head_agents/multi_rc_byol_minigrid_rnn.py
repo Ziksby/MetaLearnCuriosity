@@ -58,7 +58,7 @@ environments = [
 config = {
     "NUM_SEEDS": 30,
     "PROJECT": "MetaLearnCuriosity",
-    "RUN_NAME": "DELETE_RNN_byol-RC_most_least_tests",
+    "RUN_NAME": "DELETE_RNN_byol-RC_MIDDLES",
     "BENCHMARK_ID": None,
     "RULESET_ID": None,
     "USE_CNNS": False,
@@ -680,7 +680,7 @@ strategy = OpenES(
 
 for env_name in environments:
     es_state, _, _, _ = Restore(
-        "/home/batsy/MetaLearnCuriosity/MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/rc_rnn_minigrid_most_least"
+        "/home/batsy/MetaLearnCuriosity/MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/rc_cnn_minigrid_middle_rnn"
     )
     rc_params = strategy.param_reshaper.reshape_single(es_state["mean"])
 
