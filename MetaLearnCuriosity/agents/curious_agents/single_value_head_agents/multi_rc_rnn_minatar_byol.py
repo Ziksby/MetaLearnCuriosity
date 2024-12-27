@@ -443,6 +443,7 @@ def train(
                     transition.ext_reward_hist,
                     transition.int_reward_hist,
                 )
+                # no time step
                 rc_input = jnp.stack(
                     (ext_reward_hist, int_reward_hist),
                     axis=-1,
