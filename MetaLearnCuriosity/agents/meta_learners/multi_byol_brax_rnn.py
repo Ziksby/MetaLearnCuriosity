@@ -56,7 +56,7 @@ config = {
     "HIST_LEN": 1,
     "POP_SIZE": 64,
     "RC_SEED": 23 * 2 * 8,
-    "ES_SEED": 23_000,
+    "ES_SEED": 23_000 * 62,
     "NUM_GENERATIONS": 48,
 }
 
