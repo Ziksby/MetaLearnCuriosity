@@ -22,8 +22,8 @@ from MetaLearnCuriosity.agents.nn import (
     AtariBYOLPredictor,
     BYOLTarget,
     CloseScannedRNN,
+    EmbeddedRNNRewardCombiner,
     OpenScannedRNN,
-    RNNRewardCombiner,
 )
 from MetaLearnCuriosity.checkpoints import Restore, Save
 from MetaLearnCuriosity.logger import WBLogger
@@ -109,7 +109,7 @@ config = {
     # "INT_LAMBDA": 0.001,
     "ENV_KEY": 102,
 }
-step_intervals = [1, 3, 10, 20, 30, 40]
+step_intervals = [1, 40]
 
 
 def make_config_env(config, env_name):
@@ -251,7 +251,7 @@ def train(
     rc_hstate,
 ):
     # REWARD COMBINER
-    rc_network = RNNRewardCombiner()
+    rc_network = EmbeddedRNNRewardCombiner()
     # INIT STUFF FOR OPTIMIZATION AND NORMALIZATION
     update_target_counter = 0
     byol_reward_norm_params = BYOLRewardNorm(0, 0, 1, 0)
@@ -444,7 +444,7 @@ def train(
                     transition.int_reward_hist,
                 )
                 rc_input = jnp.stack(
-                    (ext_reward_hist, int_reward_hist),
+                    (ext_reward_hist, int_reward_hist, transition.norm_time_step[:, None]),
                     axis=-1,
                 )
                 rc_input = jnp.transpose(rc_input, (1, 0, 2))
@@ -779,10 +779,10 @@ def train(
     }
 
 
-reward_combiner_network = RNNRewardCombiner()
+reward_combiner_network = EmbeddedRNNRewardCombiner()
 
 rc_params_pholder = reward_combiner_network.init(
-    jax.random.PRNGKey(9), jnp.zeros((1, 32)), jnp.zeros((1, 1, 2))
+    jax.random.PRNGKey(9), jnp.zeros((1, 64)), jnp.zeros((1, 1, 3))
 )
 strategy = OpenES(
     popsize=64,
@@ -798,9 +798,9 @@ strategy = OpenES(
 for env_name in environments:
     for step_int in step_intervals:
         es_stuff = Restore(
-            "/home/batsy/MetaLearnCuriosity/rc_rnn_minatar_default_delayed_breakout_SAVED_flax-checkpoints_v0"
+            "/home/batsy/MetaLearnCuriosity/EMBEDDED_TIMED_rc_rnn_minatar_default_delayed_breakout_flax-checkpoints_v0"
         )
-        config["RUN_NAME"] = f"DELAY_RC_RNN_{env_name}_{step_int}"
+        config["RUN_NAME"] = f"EMBED_TIMED_DELAY_RC_RNN_{env_name}_{step_int}"
         es_state, _ = es_stuff
         # print(es_state["gen_counter"])
         rc_params = strategy.param_reshaper.reshape_single(es_state["mean"])
