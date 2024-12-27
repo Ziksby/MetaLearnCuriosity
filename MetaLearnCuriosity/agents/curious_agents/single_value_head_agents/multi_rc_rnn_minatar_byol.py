@@ -174,7 +174,7 @@ def ppo_make_train(rng):
     init_pred_input = (init_bt, init_x, init_action[np.newaxis, :], init_action[np.newaxis, :])
     ext_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1))
     int_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1))
-    rc_hstate = RCRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 32)
+    rc_hstate = RCRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 64)
 
     network_params = network.init(_rng, init_x)
     pred_params = pred.init(_pred_rng, close_init_hstate, open_init_hstate, init_pred_input)
