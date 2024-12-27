@@ -64,7 +64,7 @@ reward_combiner_network = EmbeddedRNNRewardCombiner()
 
 rc_params_pholder = reward_combiner_network.init(
     jax.random.PRNGKey(config["RC_SEED"]),
-    jnp.zeros((512, 32)),
+    jnp.zeros((512, 64)),
     jnp.zeros((1, config["HIST_LEN"], 3)),
 )
 es_rng = jax.random.PRNGKey(config["ES_SEED"])
