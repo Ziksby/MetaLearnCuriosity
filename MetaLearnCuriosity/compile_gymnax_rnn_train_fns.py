@@ -450,7 +450,7 @@ def compile_fns(config):  # noqa: C901
                         transition.int_reward_hist,
                     )
                     rc_input = jnp.stack(
-                        (ext_reward_hist, int_reward_hist),
+                        (ext_reward_hist, int_reward_hist, transition.norm_time_step[:, None]),
                         axis=-1,
                     )
                     rc_input = jnp.transpose(rc_input, (1, 0, 2))

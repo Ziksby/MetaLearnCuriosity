@@ -23,7 +23,7 @@ from MetaLearnCuriosity.utils import (
 )
 
 config = {
-    "RUN_NAME": "EMBEDDED_64_rc_rnn_minatar_default_delayed_breakout",
+    "RUN_NAME": "EMBEDDED_64_TIMED_rc_rnn_minatar_default_delayed_breakout",
     "SEED": 789_125,
     "NUM_SEEDS": 2,
     "LR": 5e-3,
@@ -61,7 +61,7 @@ env_name = "Breakout-MinAtar"
 rc_params_pholder = reward_combiner_network.init(
     jax.random.PRNGKey(config["RC_SEED"]),
     jnp.zeros((16, 64)),
-    jnp.zeros((1, config["HIST_LEN"], 2)),
+    jnp.zeros((1, config["HIST_LEN"], 3)),
 )
 es_rng = jax.random.PRNGKey(config["ES_SEED"])
 strategy = OpenES(
