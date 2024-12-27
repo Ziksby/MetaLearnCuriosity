@@ -29,7 +29,7 @@ from MetaLearnCuriosity.utils import (
 env_name = "walker2d"
 step_intervals = [3, 10]
 config = {
-    "RUN_NAME": f"rc_rnn_EMBED_64_{env_name}",
+    "RUN_NAME": f"rc_rnn_EMBED_TIMED_64_{env_name}",
     "SEED": 42,
     "NUM_SEEDS": 1,
     "LR": 3e-4,
