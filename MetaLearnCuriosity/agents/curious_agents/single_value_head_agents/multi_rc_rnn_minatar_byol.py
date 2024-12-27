@@ -444,7 +444,7 @@ def train(
                     transition.int_reward_hist,
                 )
                 rc_input = jnp.stack(
-                    (ext_reward_hist, int_reward_hist, transition.norm_time_step[:, None]),
+                    (ext_reward_hist, int_reward_hist),
                     axis=-1,
                 )
                 rc_input = jnp.transpose(rc_input, (1, 0, 2))
@@ -782,7 +782,7 @@ def train(
 reward_combiner_network = EmbeddedRNNRewardCombiner()
 
 rc_params_pholder = reward_combiner_network.init(
-    jax.random.PRNGKey(9), jnp.zeros((1, 64)), jnp.zeros((1, 1, 3))
+    jax.random.PRNGKey(9), jnp.zeros((1, 64)), jnp.zeros((1, 1, 2))
 )
 strategy = OpenES(
     popsize=64,
@@ -798,7 +798,7 @@ strategy = OpenES(
 for env_name in environments:
     for step_int in step_intervals:
         es_stuff = Restore(
-            "/home/batsy/MetaLearnCuriosity/EMBEDDED_TIMED_rc_rnn_minatar_default_delayed_breakout_flax-checkpoints_v0"
+            "/home/batsy/MetaLearnCuriosity/EMBEDDED_rc_rnn_minatar_default_delayed_breakout_flax-checkpoints_v0"
         )
         config["RUN_NAME"] = f"EMBED_TIMED_DELAY_RC_RNN_{env_name}_{step_int}"
         es_state, _ = es_stuff
