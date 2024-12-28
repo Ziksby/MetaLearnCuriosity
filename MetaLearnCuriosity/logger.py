@@ -24,7 +24,7 @@ class WBLogger:
 
         if num_seeds > 1:
             outs_avg = jnp.mean(output["metrics"]["returned_episode_returns"], axis=0)
-            for returns in outs_avg.mean(-1).reshape(-1):
+            for returns in outs_avg.reshape(-1):
                 self.episode_returns.log(
                     {
                         f"episode_return_{self.config['ENV_NAME']}_{num_seeds}_seeds_{self.config['STEP_INTERVAL']}": returns
@@ -65,7 +65,7 @@ class WBLogger:
 
         if num_seeds > 1:
             outs_avg = jnp.mean(output["int_reward"], axis=0)
-            for returns in outs_avg.mean(-1).reshape(-1):
+            for returns in outs_avg.reshape(-1):
                 self.episode_int_rewards.log(
                     {
                         f"int_rewards_{self.config['ENV_NAME']}_{num_seeds}_seeds_{self.config['STEP_INTERVAL']}": returns
@@ -89,7 +89,7 @@ class WBLogger:
 
         if num_seeds > 1:
             outs_avg = jnp.mean(output["norm_int_reward"], axis=0)
-            for returns in outs_avg.mean(-1).reshape(-1):
+            for returns in outs_avg.reshape(-1):
                 self.episode_norm_int_rewards.log(
                     {
                         f"norm_int_rewards_{self.config['ENV_NAME']}_{num_seeds}_seeds_{self.config['STEP_INTERVAL']}": returns
@@ -115,7 +115,7 @@ class WBLogger:
 
         if num_seeds > 1:
             outs_avg = jnp.mean(output["norm_ext_reward"], axis=0)
-            for returns in outs_avg.mean(-1).reshape(-1):
+            for returns in outs_avg.reshape(-1):
                 self.episode_norm_ext_rewards.log(
                     {
                         f"norm_ext_rewards_{self.config['ENV_NAME']}_{num_seeds}_seeds_{self.config['STEP_INTERVAL']}": returns
@@ -424,7 +424,7 @@ class WBLogger:
 
         if num_seeds > 1:
             int_value_avg = jnp.mean(output["int_lambdas"], axis=0)
-            for int_lambda in range(len(int_value_avg.mean(-1).reshape(-1))):
+            for int_lambda in range(len(int_value_avg.reshape(-1))):
                 self.int_lambdas.log(
                     {
                         f"int_lambdas_{self.config['ENV_NAME']}_{num_seeds}_seeds_{self.config['STEP_INTERVAL']}": int_value_avg.mean(
@@ -480,7 +480,7 @@ class WBLogger:
 
         if num_seeds > 1:
             reward_avg = jnp.mean(output["reward"], axis=0)
-            for rew in range(len(reward_avg.mean(-1).reshape(-1))):
+            for rew in range(len(reward_avg.reshape(-1))):
                 self.reward.log(
                     {
                         f"ext_reward_{self.config['ENV_NAME']}_{num_seeds}_seeds_{self.config['STEP_INTERVAL']}": reward_avg.mean(

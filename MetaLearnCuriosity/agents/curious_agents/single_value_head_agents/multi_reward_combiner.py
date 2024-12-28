@@ -52,14 +52,13 @@ environments = [
     # "humanoid",
     # "humanoidstandup",
     # "inverted_pendulum",
-    "inverted_double_pendulum",
+    # "inverted_double_pendulum",
     # "pusher",
     # "reacher",
-    # "walker2d",
+    "walker2d",
 ]
 
 config = {
-    "RUN_NAME": "DELAY_RC_CNN_brax_byol_test",
     "SEED": 42,
     "NUM_SEEDS": 30,
     "LR": 3e-4,
@@ -81,7 +80,7 @@ config = {
     "ANNEAL_PRED_LR": False,
     "DEBUG": False,
     "PRED_LR": 0.001,
-    "HIST_LEN": 128,
+    "HIST_LEN": 64,
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
 }
@@ -793,6 +792,7 @@ def train(
     )
     runner_state, extra_info = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
     metric, _, int_reward, norm_int_reward, norm_ext_reward, int_lambdas, reward = extra_info
+    metric = jax.tree_map(lambda x: jnp.mean(x, -1), metric)
     return {
         # "train_state": runner_state[0],
         "metrics": metric,
@@ -801,18 +801,18 @@ def train(
         # "rl_actor_loss": rl_total_loss[1][1],
         # "rl_entrophy_loss": rl_total_loss[1][2],
         # "pred_loss": rl_total_loss[2],
-        "int_reward": int_reward,
-        "norm_int_reward": norm_int_reward,
-        "norm_ext_reward": norm_ext_reward,
-        "int_lambdas": int_lambdas,
-        "reward": reward,
+        "int_reward": int_reward.mean(-1),
+        "norm_int_reward": norm_int_reward.mean(-1),
+        "norm_ext_reward": norm_ext_reward.mean(-1),
+        "int_lambdas": int_lambdas.mean(-1),
+        "reward": reward.mean(-1),
         # "rng": runner_state[-1],
     }
 
 
 reward_combiner_network = RewardCombiner()
 
-rc_params_pholder = reward_combiner_network.init(jax.random.PRNGKey(9), jnp.zeros((1, 128, 2)))
+rc_params_pholder = reward_combiner_network.init(jax.random.PRNGKey(9), jnp.zeros((1, 64, 2)))
 strategy = OpenES(
     popsize=36,
     pholder_params=rc_params_pholder,
@@ -826,9 +826,11 @@ strategy = OpenES(
 
 for env_name in environments:
     for step_int in step_intervals:
-        es_stuff = Restore("/home/batsy/MetaLearnCuriosity/rc_cnn_brax_flax-checkpoints_v0")
+        es_stuff = Restore(
+            "/home/batsy/MetaLearnCuriosity/rc_cnn_brax_walker2d_shorter_ints_too_flax-checkpoints_v0"
+        )
         es_state, _, _, _ = es_stuff
-        # print(es_state["mean"])
+        print(es_state["mean"].shape)
         rc_params = strategy.param_reshaper.reshape_single(es_state["mean"])
         rng = jax.random.PRNGKey(config["SEED"])
         config["STEP_INTERVAL"] = step_int
@@ -907,7 +909,7 @@ for env_name in environments:
         # logger.log_norm_ext_rewards(output, config["NUM_SEEDS"])
         logger.log_int_lambdas(output, config["NUM_SEEDS"])
         logger.log_reward(output, config["NUM_SEEDS"])
-        output = compress_output_for_reasoning(output)
+        # output = compress_output_for_reasoning(output)
         output["config"] = config
         checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
