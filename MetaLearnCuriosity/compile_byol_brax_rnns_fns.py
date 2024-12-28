@@ -458,10 +458,11 @@ def compile_brax_byol_fns(config):  # noqa: C901
                         transition.int_reward_hist,
                     )
                     rc_input = jnp.stack(
-                        (ext_reward_hist, int_reward_hist, transition.norm_time_step),
+                        (ext_reward_hist, int_reward_hist, transition.norm_time_step[:, None]),
                         axis=-1,
                     )
                     rc_input = jnp.transpose(rc_input, (1, 0, 2))
+
                     rc_hstate, int_lambda = rc_network.apply(rc_params, rc_hstate, rc_input)
                     delta = (
                         (reward + (int_reward * int_lambda))
