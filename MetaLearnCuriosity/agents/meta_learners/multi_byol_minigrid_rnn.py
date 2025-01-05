@@ -25,7 +25,7 @@ from MetaLearnCuriosity.utils import (
 )
 
 environments = [
-    "MiniGrid-DoorKey-5x5",
+    "MiniGrid-DoorKey-6x6",
     # "MiniGrid-DoorKey-6x6",
     "MiniGrid-DoorKey-8x8",
     #  'MiniGrid-DoorKey-16x16',
@@ -35,9 +35,9 @@ environments = [
 ]
 
 config = {
-    "RUN_NAME": "rc_cnn_minigrid_middle_rnn",
+    "RUN_NAME": "rc_rnn_timed_doorkey_middle_diff_ES",
     "BENCHMARK_ID": None,
-    "NUM_SEEDS": 3,
+    "NUM_SEEDS": 1,
     "RULESET_ID": None,
     "USE_CNNS": False,
     # Agent
@@ -59,7 +59,7 @@ config = {
     "VF_COEF": 0.5,
     "MAX_GRAD_NORM": 0.5,
     "EVAL_EPISODES": 80,
-    "SEED": 42 * 7,
+    "SEED": 128,
     "ANNEAL_PRED_LR": False,
     "DEBUG": False,
     "PRED_LR": 0.001,
@@ -70,22 +70,38 @@ config = {
     "POP_SIZE": 128,
     "RC_SEED": 23,
     "ES_SEED": 9_869_690,
-    "NUM_GENERATIONS": 98,
+    "NUM_GENERATIONS": 128,
 }
 
 reward_combiner_network = EmbeddedRNNRewardCombiner()
 
 rc_params_pholder = reward_combiner_network.init(
-    jax.random.PRNGKey(config["RC_SEED"]), jnp.zeros((1, 64)), jnp.zeros((1, config["HIST_LEN"], 2))
+    jax.random.PRNGKey(config["RC_SEED"]),
+    jnp.zeros((1, 128)),
+    jnp.zeros((1, config["HIST_LEN"], 3)),
 )
 es_rng = jax.random.PRNGKey(config["ES_SEED"])
+# strategy = OpenES(
+#     popsize=config["POP_SIZE"],
+#     pholder_params=rc_params_pholder,
+#     opt_name="adam",
+#     lrate_decay=1,
+#     sigma_decay=0.999,
+#     sigma_init=0.04,
+#     n_devices=1,
+#     maximize=True,
+# )
+
 strategy = OpenES(
     popsize=config["POP_SIZE"],
     pholder_params=rc_params_pholder,
     opt_name="adam",
-    lrate_decay=1,
-    sigma_decay=0.999,
-    sigma_init=0.04,
+    lrate_init=1e-2,
+    lrate_decay=0.999,
+    lrate_limit=1e-5,
+    sigma_init=0.1,
+    sigma_decay=1.0,
+    sigma_limit=0.1,
     n_devices=1,
     maximize=True,
 )
@@ -95,10 +111,11 @@ name = f'{config["RUN_NAME"]}'
 es_rng, es_rng_init = jax.random.split(es_rng)
 es_params = strategy.default_params
 es_state = strategy.initialize(es_rng_init, es_params)
+rng = jax.random.PRNGKey(config["SEED"])
 # es_stuff = Restore(
-#     "/home/batsy/MetaLearnCuriosity/rc_cnn_multi_task_october_flax-checkpoints_v0"
+#     "/home/batsy/MetaLearnCuriosity/rc_rnn_timed_minigrid_middle_doorkey_128_PART_2_flax-checkpoints_v0"
 # )
-# es_state_saved, _ = es_stuff
+# es_state_saved, _, rng, es_rng = es_stuff
 # print(es_state_saved)
 # print()
 # print(es_state)
@@ -107,7 +124,6 @@ es_state = strategy.initialize(es_rng_init, es_params)
 # es_state=es_state.replace(mean=es_state_saved['mean'], sigma=es_state_saved["sigma"], opt_state=opt_state, best_member = es_state_saved["best_member"], best_fitness=es_state_saved["best_fitness"], gen_counter=es_state_saved["gen_counter"])
 # print("Now matched,", es_state,"\n")
 train_fns, make_seeds = compile_fns(config=config, environments=environments)
-rng = jax.random.PRNGKey(config["SEED"])
 fit_log = wandb.init(
     project="MetaLearnCuriosity",
     config=config,
@@ -244,4 +260,4 @@ logger = WBLogger(
     name=config["RUN_NAME"],
 )
 logger.save_artifact(path)
-shutil.rmtree(path)
+# shutil.rmtree(path)

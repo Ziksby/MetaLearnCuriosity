@@ -151,7 +151,7 @@ def compile_fns(config, environments):
         init_action = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1), dtype=jnp.int32)
         close_init_hstate = pred.initialize_carry(config["NUM_ENVS_PER_DEVICE"])
         open_init_hstate = pred.initialize_carry(config["NUM_ENVS_PER_DEVICE"])
-        rc_hstate = RCRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 64)
+        rc_hstate = RCRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 128)
 
         init_bt = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1, 256))
         init_pred_input = (init_bt, init_x, init_action, init_action)

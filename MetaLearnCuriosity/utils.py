@@ -274,7 +274,11 @@ def rnn_rc_byol_calculate_gae(
     def _get_advantages(gae_and_next_value_w_rc_hstate, transition):
         gae, next_value, rc_hstate = gae_and_next_value_w_rc_hstate
         rc_input = jnp.stack(
-            (transition.ext_reward_hist, transition.int_reward_hist),
+            (
+                transition.ext_reward_hist,
+                transition.int_reward_hist,
+                transition.norm_time_step[:, None],
+            ),
             axis=-1,
         )
 

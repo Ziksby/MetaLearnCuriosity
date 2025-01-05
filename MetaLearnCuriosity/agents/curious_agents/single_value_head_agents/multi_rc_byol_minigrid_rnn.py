@@ -44,21 +44,21 @@ from MetaLearnCuriosity.wrappers import (
 jax.config.update("jax_threefry_partitionable", True)
 
 environments = [
-    "MiniGrid-Empty-16x16",
-    "MiniGrid-Empty-5x5",
-    "MiniGrid-Empty-6x6",
-    "MiniGrid-Empty-8x8",
     "MiniGrid-DoorKey-5x5",
-    "MiniGrid-FourRooms",
     "MiniGrid-DoorKey-6x6",
     "MiniGrid-DoorKey-8x8",
     "MiniGrid-DoorKey-16x16",
+    "MiniGrid-FourRooms",
+    # "MiniGrid-Empty-16x16",
+    # "MiniGrid-Empty-5x5",
+    # "MiniGrid-Empty-6x6",
+    # "MiniGrid-Empty-8x8",
 ]
 
 config = {
     "NUM_SEEDS": 30,
     "PROJECT": "MetaLearnCuriosity",
-    "RUN_NAME": "DELETE_RNN_byol-RC_MIDDLES",
+    "RUN_NAME": "FINAL__DELETE_RNN_128_byol-RC_MIDDLES_PART_4",
     "BENCHMARK_ID": None,
     "RULESET_ID": None,
     "USE_CNNS": False,
@@ -168,7 +168,7 @@ def make_train(rng):
     init_action = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1), dtype=jnp.int32)
     close_init_hstate = pred.initialize_carry(config["NUM_ENVS_PER_DEVICE"])
     open_init_hstate = pred.initialize_carry(config["NUM_ENVS_PER_DEVICE"])
-    rc_hstate = RCRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 64)
+    rc_hstate = RCRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 128)
 
     init_bt = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], 1, 256))
     init_pred_input = (init_bt, init_x, init_action, init_action)
@@ -665,7 +665,7 @@ def train(
 reward_combiner_network = EmbeddedRNNRewardCombiner()
 
 rc_params_pholder = reward_combiner_network.init(
-    jax.random.PRNGKey(9897), jnp.zeros((32, 64)), jnp.zeros((1, config["HIST_LEN"], 2))
+    jax.random.PRNGKey(9897), jnp.zeros((32, 128)), jnp.zeros((1, config["HIST_LEN"], 3))
 )
 strategy = OpenES(
     popsize=64,
@@ -680,8 +680,9 @@ strategy = OpenES(
 
 for env_name in environments:
     es_state, _, _, _ = Restore(
-        "/home/batsy/MetaLearnCuriosity/MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/rc_cnn_minigrid_middle_rnn"
+        "/home/batsy/MetaLearnCuriosity/rc_rnn_timed_minigrid_middle_doorkey_128_PART_3_flax-checkpoints_v0"
     )
+    print(es_state["gen_counter"])
     rc_params = strategy.param_reshaper.reshape_single(es_state["mean"])
 
     observations_shape, config, env, env_params = make_env_config(config, env_name)

@@ -281,7 +281,7 @@ class EmbeddedRNNRewardCombiner(nn.Module):
         x = nn.Dense(16)(x)
         x = nn.relu(x)
 
-        carry, x = RCRNN(features=64)(carry, x)  # features is 32
+        carry, x = RCRNN(features=128)(carry, x)  # features is 32
 
         x = jnp.squeeze(x, 0)
         x = nn.Dense(128)(x)
