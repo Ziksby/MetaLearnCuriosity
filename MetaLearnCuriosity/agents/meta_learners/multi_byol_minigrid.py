@@ -26,18 +26,18 @@ from MetaLearnCuriosity.utils import (
 
 environments = [
     #  'MiniGrid-DoorKey-5x5',
-    # "MiniGrid-DoorKey-6x6",
-    "MiniGrid-DoorKey-5x5",
+    "MiniGrid-DoorKey-8x8",
+    "MiniGrid-DoorKey-6x6",
     #  'MiniGrid-DoorKey-16x16',
-    "MiniGrid-Empty-16x16",
-    "MiniGrid-EmptyRandom-16x16",
+    # "MiniGrid-Empty-16x16",
+    # "MiniGrid-EmptyRandom-16x16",
     # "MiniGrid-Empty-5x5"
 ]
 
 config = {
-    "RUN_NAME": "rc_cnn_minigrid_multi_default",
+    "RUN_NAME": "rc_cnn_doorkey_middle_not_timed_use_this",
     "BENCHMARK_ID": None,
-    "NUM_SEEDS": 3,
+    "NUM_SEEDS": 1,
     "RULESET_ID": None,
     "USE_CNNS": False,
     # Agent
@@ -59,7 +59,7 @@ config = {
     "VF_COEF": 0.5,
     "MAX_GRAD_NORM": 0.5,
     "EVAL_EPISODES": 80,
-    "SEED": 42 * 7,
+    "SEED": 2077,
     "ANNEAL_PRED_LR": False,
     "DEBUG": False,
     "PRED_LR": 0.001,
@@ -69,8 +69,8 @@ config = {
     "HIST_LEN": 32,
     "POP_SIZE": 128,
     "RC_SEED": 23,
-    "ES_SEED": 9_869_690,
-    "NUM_GENERATIONS": 98,
+    "ES_SEED": 2023,
+    "NUM_GENERATIONS": 128,
 }
 
 reward_combiner_network = RewardCombiner()
