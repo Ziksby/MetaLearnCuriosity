@@ -696,9 +696,12 @@ checkpoint_directory = f'MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/{config[
 path = os.path.abspath(checkpoint_directory)
 
 for _ in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations"):
+    # Seeds for training
+
     rng, rng_trains = jax.random.split(rng)
     rng_trains = jax.random.split(rng_trains, config["NUM_SEEDS"])
 
+    # actual training
     (
         init_hstate,
         close_init_hstate,
@@ -742,6 +745,8 @@ for _ in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations"):
             rc_hstate,
         )
     )
+
+    # update mean of distribution
     elapsed_time = time.time() - t
     fitness = output["rewards"].mean(-1)
     int_lambdas = output["int_lambdas"].mean(-1)
@@ -749,6 +754,8 @@ for _ in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations"):
     print(fitness.shape)
     print(f"Time for the gen in {env_name} is {(time.time()-t)/60}")
     es_state = strategy.tell(x, fitness, es_state, es_params)
+
+    # some logging
     fit_log.log({f"{name}_mean_fitness": fitness.mean(), f"{name}_best_fitness": jnp.max(fitness)})
     fit_log.log(
         {f"{name}_mean_lambda": int_lambdas.mean(), f"{name}_best_lambda": jnp.max(int_lambdas)}
@@ -761,6 +768,7 @@ for _ in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations"):
     )
     details = (es_state, config, rng, es_rng)
     Save(path, details)
+
 fit_log.finish()
 logger = WBLogger(
     config=config,
