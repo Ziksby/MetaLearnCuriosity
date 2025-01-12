@@ -693,8 +693,13 @@ rng = jax.random.PRNGKey(config["SEED"])
 
 checkpoint_directory = f'MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/{config["RUN_NAME"]}'
 path = os.path.abspath(checkpoint_directory)
-
-
+print("Shapes of es_state components:")
+print(f"mean: {es_state.mean.shape}")
+print(f"sigma: {jnp.shape(es_state.sigma)}")  # Handles scalar in case it's a single value
+print(f"opt_state: {es_state.opt_state}")
+print(f"best_member: {es_state.best_member.shape}")
+print(f"best_fitness: {jnp.shape(es_state.best_fitness)}")  # Handles scalar
+print(f"gen_counter: {jnp.shape(es_state.gen_counter)}")  # Handles scalar
 for _ in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations"):
     # Seeds for training
 
@@ -763,7 +768,10 @@ for _ in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations"):
             f"{name}_best_episode_return": jnp.max(episode_returns),
         }
     )
-    details = (es_state, config, rng, es_rng)
+
+    params = strategy.param_reshaper.reshape_single(es_state.mean[0])
+
+    details = (params, config, rng, es_rng)
     Save(path, details)
 
 fit_log.finish()
