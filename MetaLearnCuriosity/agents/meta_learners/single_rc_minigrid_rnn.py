@@ -661,7 +661,6 @@ strategy = OpenES(
     lrate_decay=1,
     sigma_decay=0.999,
     sigma_init=0.04,
-    maximize=True,
 )
 es_rng, es_rng_init = jax.random.split(es_rng)
 es_params = strategy.default_params
@@ -695,6 +694,7 @@ rng = jax.random.PRNGKey(config["SEED"])
 checkpoint_directory = f'MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/{config["RUN_NAME"]}'
 path = os.path.abspath(checkpoint_directory)
 
+
 for _ in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations"):
     # Seeds for training
 
@@ -713,7 +713,7 @@ for _ in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations"):
         ext_reward_hist,
         int_reward_hist,
         rc_hstate,
-    ) = jax.jit(jax.vmap(make_train, out_axes=(0, 0, 0, 0, 0, 0, 1, 0, 0, 0)))(rng_trains)
+    ) = (jax.vmap(make_train, out_axes=(0, 0, 0, 0, 0, 0, 1, 0, 0, 0)))(rng_trains)
     init_hstate = replicate(init_hstate, jax.local_devices())
     open_init_hstate = replicate(open_init_hstate, jax.local_devices())
     close_init_hstate = replicate(close_init_hstate, jax.local_devices())
@@ -724,9 +724,6 @@ for _ in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations"):
     int_reward_hist = replicate(int_reward_hist, jax.local_devices())
     rc_hstate = replicate(rc_hstate, jax.local_devices())
 
-    train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0))
-    train_fn = jax.pmap(train_fn, axis_name="devices")
-    print(f"Training in {config['ENV_NAME']}")
     t = time.time()
     es_rng, es_rng_ask = jax.random.split(es_rng)
     x, es_state = strategy.ask(es_rng_ask, es_state, es_params)
