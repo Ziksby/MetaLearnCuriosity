@@ -277,7 +277,7 @@ def rnn_rc_byol_calculate_gae(
             (
                 transition.ext_reward_hist,
                 transition.int_reward_hist,
-                transition.norm_time_step[:, None],
+                # transition.norm_time_step[:, None],
             ),
             axis=-1,
         )

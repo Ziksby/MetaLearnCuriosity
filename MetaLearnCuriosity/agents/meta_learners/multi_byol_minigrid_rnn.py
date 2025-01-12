@@ -25,9 +25,9 @@ from MetaLearnCuriosity.utils import (
 )
 
 environments = [
-    "MiniGrid-DoorKey-6x6",
+    "MiniGrid-Empty-6x6",
     # "MiniGrid-DoorKey-6x6",
-    "MiniGrid-DoorKey-8x8",
+    "MiniGrid-Empty-8x8",
     #  'MiniGrid-DoorKey-16x16',
     # "MiniGrid-Empty-16x16",
     # "MiniGrid-EmptyRandom-16x16",
@@ -35,7 +35,7 @@ environments = [
 ]
 
 config = {
-    "RUN_NAME": "rc_rnn_timed_doorkey_middle_diff_ES",
+    "RUN_NAME": "rc_rnn_empty_NOT_TIMED",
     "BENCHMARK_ID": None,
     "NUM_SEEDS": 1,
     "RULESET_ID": None,
@@ -59,7 +59,7 @@ config = {
     "VF_COEF": 0.5,
     "MAX_GRAD_NORM": 0.5,
     "EVAL_EPISODES": 80,
-    "SEED": 128,
+    "SEED": 294,
     "ANNEAL_PRED_LR": False,
     "DEBUG": False,
     "PRED_LR": 0.001,
@@ -69,7 +69,7 @@ config = {
     "HIST_LEN": 1,
     "POP_SIZE": 128,
     "RC_SEED": 23,
-    "ES_SEED": 9_869_690,
+    "ES_SEED": 69696969,
     "NUM_GENERATIONS": 128,
 }
 
@@ -78,33 +78,33 @@ reward_combiner_network = EmbeddedRNNRewardCombiner()
 rc_params_pholder = reward_combiner_network.init(
     jax.random.PRNGKey(config["RC_SEED"]),
     jnp.zeros((1, 128)),
-    jnp.zeros((1, config["HIST_LEN"], 3)),
+    jnp.zeros((1, config["HIST_LEN"], 2)),
 )
 es_rng = jax.random.PRNGKey(config["ES_SEED"])
-# strategy = OpenES(
-#     popsize=config["POP_SIZE"],
-#     pholder_params=rc_params_pholder,
-#     opt_name="adam",
-#     lrate_decay=1,
-#     sigma_decay=0.999,
-#     sigma_init=0.04,
-#     n_devices=1,
-#     maximize=True,
-# )
-
 strategy = OpenES(
     popsize=config["POP_SIZE"],
     pholder_params=rc_params_pholder,
     opt_name="adam",
-    lrate_init=1e-2,
-    lrate_decay=0.999,
-    lrate_limit=1e-5,
-    sigma_init=0.1,
-    sigma_decay=1.0,
-    sigma_limit=0.1,
+    lrate_decay=1,
+    sigma_decay=0.999,
+    sigma_init=0.04,
     n_devices=1,
     maximize=True,
 )
+
+# strategy = OpenES(
+#     popsize=config["POP_SIZE"],
+#     pholder_params=rc_params_pholder,
+#     opt_name="adam",
+#     lrate_init=1e-2,
+#     lrate_decay=0.999,
+#     lrate_limit=1e-5,
+#     sigma_init=0.1,
+#     sigma_decay=1.0,
+#     sigma_limit=0.1,
+#     n_devices=1,
+#     maximize=True,
+# )
 group = "reward_combiners"
 tags = ["meta-learner", "fitness"]
 name = f'{config["RUN_NAME"]}'
