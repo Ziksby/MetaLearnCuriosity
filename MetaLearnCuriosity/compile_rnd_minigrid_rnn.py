@@ -381,7 +381,6 @@ def compile_rnd_fns(config, environments):
                 config["GAMMA"],
                 config["INT_GAMMA"],
                 config["GAE_LAMBDA"],
-                config["INT_LAMBDA"],
                 rnd_int_return_norm_params,
                 rnd_ext_return_norm_params,
                 rc_params,
