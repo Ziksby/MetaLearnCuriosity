@@ -504,23 +504,23 @@ def rnn_rc_rnd_calculate_gae(
         gae = delta + gamma * gae_lambda * (1 - transition.done) * gae
         return (gae, transition.value, rc_hstate), (gae, int_lambda)
 
-        (_, _, rc_hstate), (advantages, int_lambdas) = jax.lax.scan(
-            _get_advantages,
-            (jnp.zeros_like(last_val), last_val, rc_hstate),
-            norm_traj_batch,
-            reverse=True,
-        )
+    (_, _, rc_hstate), (advantages, int_lambdas) = jax.lax.scan(
+        _get_advantages,
+        (jnp.zeros_like(last_val), last_val, rc_hstate),
+        norm_traj_batch,
+        reverse=True,
+    )
 
-        # advantages and values (Q)
-        return (
-            advantages,
-            advantages + transitions.value,
-            rnd_int_return_norm_params,
-            rnd_ext_return_norm_params,
-            norm_int_reward,
-            int_lambdas,
-            rc_hstate,
-        )
+    # advantages and values (Q)
+    return (
+        advantages,
+        advantages + transitions.value,
+        rnd_int_return_norm_params,
+        rnd_ext_return_norm_params,
+        norm_int_reward,
+        int_lambdas,
+        rc_hstate,
+    )
 
 
 def rnd_calculate_gae(
