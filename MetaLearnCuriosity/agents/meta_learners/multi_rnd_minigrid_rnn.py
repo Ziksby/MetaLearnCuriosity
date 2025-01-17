@@ -17,7 +17,7 @@ from tqdm import tqdm
 import wandb
 from MetaLearnCuriosity.agents.nn import RCRNN, RewardCombiner
 from MetaLearnCuriosity.checkpoints import Restore, Save
-from MetaLearnCuriosity.compile_rnd_fns import compile_rnd_fns as compile_fns
+from MetaLearnCuriosity.compile_rnd_minigrid_rnn import compile_rnd_fns as compile_fns
 from MetaLearnCuriosity.logger import WBLogger
 from MetaLearnCuriosity.utils import (
     create_adjacent_pairs,
