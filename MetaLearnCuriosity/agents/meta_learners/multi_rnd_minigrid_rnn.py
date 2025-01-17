@@ -15,7 +15,7 @@ from flax.jax_utils import replicate
 from tqdm import tqdm
 
 import wandb
-from MetaLearnCuriosity.agents.nn import RCRNN, RewardCombiner
+from MetaLearnCuriosity.agents.nn import RCRNN, EmbeddedRNNRewardCombiner
 from MetaLearnCuriosity.checkpoints import Restore, Save
 from MetaLearnCuriosity.compile_rnd_minigrid_rnn import compile_rnd_fns as compile_fns
 from MetaLearnCuriosity.logger import WBLogger
@@ -97,7 +97,7 @@ fit_log = wandb.init(
 commit_hash = get_latest_commit_hash()
 
 config["COMMIT_HARSH"] = commit_hash
-reward_combiner_network = RewardCombiner()
+reward_combiner_network = EmbeddedRNNRewardCombiner()
 
 rc_params_pholder = reward_combiner_network.init(
     jax.random.PRNGKey(config["RC_SEED"]),
