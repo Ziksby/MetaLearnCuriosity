@@ -48,7 +48,8 @@ environments = [
     # "MiniGrid-DoorKey-16x16",
     # "MiniGrid-DoorKey-8x8",
     # "MiniGrid-DoorKey-6x6",
-    "MiniGrid-FourRooms",
+    "MiniGrid-MemoryS16",
+    "MiniGrid-MemoryS8",
     # "MiniGrid-DoorKey-5x5",
 ]
 
@@ -485,7 +486,24 @@ def train(rng, init_hstate, train_state, pred_state, target_params, init_obs_rng
 
 
 lambda_values = jnp.array(
-    [0.001, 0.0001, 0.0003, 0.0005, 0.0008, 0.01, 0.1, 0.003, 0.005, 0.02, 0.03, 0.05]
+    [
+        0.001,
+        0.0001,
+        0.0003,
+        0.0005,
+        0.0008,
+        0.01,
+        0.1,
+        0.003,
+        0.005,
+        0.02,
+        0.03,
+        0.05,
+        0.2,
+        0.5,
+        0.8,
+        1,
+    ]
 ).sort()
 # lambda_values = jnp.array([0.001, 0.0001]).sort()
 y_values = {}
