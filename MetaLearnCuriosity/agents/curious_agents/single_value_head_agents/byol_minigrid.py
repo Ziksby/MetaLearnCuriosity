@@ -39,16 +39,22 @@ from MetaLearnCuriosity.wrappers import (
 jax.config.update("jax_threefry_partitionable", True)
 
 environments = [
-    # "MiniGrid-BlockedUnlockPickUp",
-    # "MiniGrid-Empty-16x16",
-    # "MiniGrid-EmptyRandom-16x16",
-    # "MiniGrid-FourRooms",
-    # "MiniGrid-MemoryS128",
-    # "MiniGrid-Unlock",
+    "MiniGrid-Empty-16x16",
+    "MiniGrid-Empty-8x8",
+    "MiniGrid-Empty-8x8",
+    "MiniGrid-Empty-5x5",
+    "MiniGrid-EmptyRandom-16x16",
+    "MiniGrid-EmptyRandom-8x8",
+    "MiniGrid-EmptyRandom-6x6",
+    "MiniGrid-EmptyRandom-5x5",
     "MiniGrid-DoorKey-16x16",
     "MiniGrid-DoorKey-8x8",
     "MiniGrid-DoorKey-6x6",
     "MiniGrid-DoorKey-5x5",
+    "MiniGrid-FourRooms",
+    "MiniGrid-MemoryS8",
+    "MiniGrid-MemoryS16",
+    "MiniGrid-Unlock",
 ]
 
 config = {
@@ -558,10 +564,28 @@ def train(
     }
 
 
-for env_name in environments:
+int_lambdas = [
+    0.0003,
+    0.0003,
+    0.0003,
+    0.0003,
+    0.01,
+    0.01,
+    0.01,
+    0.01,
+    0.005,
+    0.005,
+    0.005,
+    0.005,
+    0.0005,
+    0.0005,
+    0.0005,
+    0.001,
+]
+for env_name, int_lambda in zip(environments, int_lambdas):
 
     observations_shape, config, env, env_params = make_env_config(config, env_name)
-    config["RUN_NAME"] = f"byol_minigrid_{env_name}"
+    config["RUN_NAME"] = f"BYOL_minigrid_{env_name}"
     # experiments
     rng = jax.random.PRNGKey(config["SEED"])
 

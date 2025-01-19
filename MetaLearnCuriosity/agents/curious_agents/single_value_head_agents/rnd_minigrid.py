@@ -41,16 +41,22 @@ from MetaLearnCuriosity.wrappers import (
 jax.config.update("jax_threefry_partitionable", True)
 
 environments = [
-    # "MiniGrid-BlockedUnlockPickUp",
-    # "MiniGrid-Empty-16x16",
-    # "MiniGrid-EmptyRandom-16x16",
-    # "MiniGrid-FourRooms",
-    # "MiniGrid-MemoryS128",
-    # "MiniGrid-Unlock",
+    "MiniGrid-Empty-16x16",
+    "MiniGrid-Empty-8x8",
+    "MiniGrid-Empty-8x8",
+    "MiniGrid-Empty-5x5",
+    "MiniGrid-EmptyRandom-16x16",
+    "MiniGrid-EmptyRandom-8x8",
+    "MiniGrid-EmptyRandom-6x6",
+    "MiniGrid-EmptyRandom-5x5",
     "MiniGrid-DoorKey-16x16",
     "MiniGrid-DoorKey-8x8",
     "MiniGrid-DoorKey-6x6",
     "MiniGrid-DoorKey-5x5",
+    "MiniGrid-FourRooms",
+    "MiniGrid-MemoryS8",
+    "MiniGrid-MemoryS16",
+    "MiniGrid-Unlock",
 ]
 
 config = {
@@ -77,7 +83,7 @@ config = {
     "GAMMA": 0.99,
     "INT_GAMMA": 0.99,
     "GAE_LAMBDA": 0.95,
-    "INT_LAMBDA": 0.02,
+    "INT_LAMBDA": 0.0008,
     "ENT_COEF": 0.01,
     "VF_COEF": 0.5,
     "MAX_GRAD_NORM": 0.5,
@@ -485,10 +491,29 @@ def train(rng, init_hstate, train_state, pred_state, target_params, init_obs_rng
     # No step intervals
 
 
-for env_name in environments:
+int_lambdas = [
+    0.003,
+    0.003,
+    0.003,
+    0.003,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.02,
+    0.02,
+    0.02,
+    0.02,
+    0.0008,
+    0.1,
+    0.1,
+    0.0008,
+]
+for env_name, int_lambda in zip(environments, int_lambdas):
     rng = jax.random.PRNGKey(config["SEED"])
+    config["INT_LAMBDA"] = int_lambda
     observations_shape, config, env, env_params = make_env_config(config, env_name)
-    config["RUN_NAME"] = f"rnd_minigrid_{env_name}"
+    config["RUN_NAME"] = f"RND_minigrid_{env_name}"
     if config["NUM_SEEDS"] > 1:
         rng = jax.random.split(rng, config["NUM_SEEDS"])
         init_hstate, train_state, pred_state, target_params, rng, init_obs_rng = jax.jit(
