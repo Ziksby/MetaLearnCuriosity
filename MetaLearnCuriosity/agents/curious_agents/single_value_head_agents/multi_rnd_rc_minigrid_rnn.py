@@ -92,6 +92,7 @@ config = {
     "MAX_GRAD_NORM": 0.5,
     "EVAL_EPISODES": 80,
     "SEED": 42,
+    "HIST_LEN": 1,
 }
 
 
