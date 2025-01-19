@@ -520,6 +520,7 @@ def rnn_rc_rnd_calculate_gae(
         norm_int_reward,
         int_lambdas,
         rc_hstate,
+        norm_ext_reward,
     )
 
 
