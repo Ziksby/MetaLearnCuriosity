@@ -44,16 +44,22 @@ from MetaLearnCuriosity.wrappers import (
 jax.config.update("jax_threefry_partitionable", True)
 
 environments = [
-    # "MiniGrid-BlockedUnlockPickUp",
-    # "MiniGrid-Empty-16x16",
-    # "MiniGrid-EmptyRandom-16x16",
-    # "MiniGrid-FourRooms",
-    # "MiniGrid-MemoryS128",
-    # "MiniGrid-Unlock",
     "MiniGrid-Empty-16x16",
     "MiniGrid-Empty-8x8",
-    "MiniGrid-Empty-6x6",
+    "MiniGrid-Empty-8x8",
     "MiniGrid-Empty-5x5",
+    "MiniGrid-EmptyRandom-16x16",
+    "MiniGrid-EmptyRandom-8x8",
+    "MiniGrid-EmptyRandom-6x6",
+    "MiniGrid-EmptyRandom-5x5",
+    "MiniGrid-DoorKey-16x16",
+    "MiniGrid-DoorKey-8x8",
+    "MiniGrid-DoorKey-6x6",
+    "MiniGrid-DoorKey-5x5",
+    "MiniGrid-FourRooms",
+    "MiniGrid-MemoryS8",
+    "MiniGrid-MemoryS16",
+    "MiniGrid-Unlock",
 ]
 
 config = {
@@ -583,7 +589,7 @@ strategy = OpenES(
 for env_name in environments:
     config["RUN_NAME"] = f"RND_RC_RNN_{env_name}"
     es_state, _, _, _ = Restore(
-        "/home/batsy/MetaLearnCuriosity/MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/rc_rnn_timed_doorkey_same_keys_as_what_worked_before"
+        "/home/batsy/MetaLearnCuriosity/MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/rnd_rc_rnn_empty_middle"
     )
     print(es_state["gen_counter"])
     rc_params = strategy.param_reshaper.reshape_single(es_state["mean"])
