@@ -69,6 +69,11 @@ config = {
     "PRED_LR": 0.001,
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
+    "HIST_LEN": 1,
+    "POP_SIZE": 128,
+    "RC_SEED": 23,
+    "ES_SEED": 69696969,
+    "NUM_GENERATIONS": 128,
 }
 
 
@@ -798,10 +803,10 @@ fit_log = wandb.init(
 # experiments
 rng = jax.random.PRNGKey(config["SEED"])
 
-train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+train_fn = jax.vmap(train, in_axes=(0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
 train_fn = jax.vmap(
     train_fn,
-    in_axes=(None, 0, None, None, None, None, None, None, None, None, None),
+    in_axes=(None, 0, None, None, None, None, None, None, None, None, None, None),
 )
 train_fn = jax.pmap(train_fn, axis_name="devices")
 
@@ -866,6 +871,7 @@ for _ in tqdm(range(config["NUM_GENERATIONS"]), desc="Processing Generations"):
             init_bt,
             close_init_hstate,
             open_init_hstate,
+            init_action,
             ext_reward_hist,
             int_reward_hist,
             rc_hstate,
