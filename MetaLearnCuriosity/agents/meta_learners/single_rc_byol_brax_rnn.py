@@ -47,7 +47,7 @@ from MetaLearnCuriosity.wrappers import (
 config = {
     "RUN_NAME": "rc_single_brax_byol",
     "SEED": 42,
-    "NUM_SEEDS": 30,
+    "NUM_SEEDS": 1,
     "LR": 3e-4,
     "NUM_ENVS": 2048,
     "NUM_STEPS": 10,  # unroll length
