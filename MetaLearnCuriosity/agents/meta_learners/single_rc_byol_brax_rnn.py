@@ -568,10 +568,6 @@ def train(
                     init_close_hstate,
                     init_open_hstate,
                 )
-                (loss, vloss, aloss, entropy, pred_losses, grads, pred_grads) = jax.lax.pmean(
-                    (loss, vloss, aloss, entropy, pred_losses, grads, pred_grads),
-                    axis_name="devices",
-                )
 
                 def update_target(
                     target_state, pred_state, update_target_counter=update_target_counter
