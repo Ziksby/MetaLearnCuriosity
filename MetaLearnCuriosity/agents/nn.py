@@ -273,6 +273,35 @@ class RewardCombiner(nn.Module):
         return jnp.squeeze(nn.sigmoid(x), -1)
 
 
+class ActionEmbeddedRNNRewardCombiner(nn.Module):
+    @nn.compact
+    def __call__(self, carry, x, action):
+        action_encoder = nn.Embed(6, 16)
+
+        # Input is (1, num_envs, 2)
+        x = nn.Dense(16)(x)
+        x = nn.relu(x)
+        action = action_encoder(action)
+        rc_input = jnp.concatenate(
+            (
+                x,
+                action[
+                    None:,
+                ],
+            ),
+            axis=-1,
+        )
+        carry, rnn_output = RCRNN(features=128)(carry, rc_input)  # features is 32
+
+        ff_input = jnp.squeeze(rnn_output, 0)
+        ff_input = nn.Dense(64)(ff_input)
+        ff_input = nn.relu(ff_input)
+        ff_input = nn.Dense(64)(ff_input)
+        ff_input = nn.relu(ff_input)
+        ff_input = nn.Dense(1)(ff_input)
+        return carry, jnp.squeeze(nn.sigmoid(ff_input), -1)
+
+
 class EmbeddedRNNRewardCombiner(nn.Module):
     @nn.compact
     def __call__(self, carry, x):

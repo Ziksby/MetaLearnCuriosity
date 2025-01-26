@@ -8,6 +8,7 @@ from flax.jax_utils import replicate, unreplicate
 from flax.training.train_state import TrainState
 
 from MetaLearnCuriosity.agents.nn import (
+    ActionEmbeddedRNNRewardCombiner,
     EmbeddedRNNRewardCombiner,
     RewardCombiner,
     TargetNetwork,
@@ -253,7 +254,7 @@ def rnn_rc_byol_calculate_gae(
     ext_reward_norm_params: BYOLRewardNorm,
     rc_hstate,
 ) -> tuple[jax.Array, jax.Array]:
-    rc_network = EmbeddedRNNRewardCombiner()
+    rc_network = ActionEmbeddedRNNRewardCombiner()
     norm_int_reward, byol_reward_norm_params, int_reward_hist = byol_normalize_prior_int_rewards(
         transitions.int_reward,
         byol_reward_norm_params,
@@ -300,7 +301,9 @@ def rnn_rc_byol_calculate_gae(
         )
 
         rc_input = jnp.transpose(rc_input, (1, 0, 2))
-        rc_hstate, int_lambda = rc_network.apply(rc_params, rc_hstate, rc_input)
+        rc_hstate, int_lambda = rc_network.apply(
+            rc_params, rc_hstate, rc_input, transition.action[None, :]
+        )
         delta = (
             (transition.reward + (transition.int_reward * int_lambda))
             + gamma * next_value * (1 - transition.done)
