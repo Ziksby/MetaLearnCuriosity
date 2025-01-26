@@ -44,22 +44,23 @@ from MetaLearnCuriosity.wrappers import (
 jax.config.update("jax_threefry_partitionable", True)
 
 environments = [
+    "MiniGrid-EmptyRandom-16x16",
+    "MiniGrid-Unlock",
+    "MiniGrid-MemoryS8",
+    "MiniGrid-DoorKey-5x5",
+    "MiniGrid-DoorKey-8x8",
+    "MiniGrid-DoorKey-6x6",
     "MiniGrid-Empty-16x16",
     "MiniGrid-Empty-8x8",
     "MiniGrid-Empty-8x8",
     "MiniGrid-Empty-5x5",
-    "MiniGrid-EmptyRandom-16x16",
     "MiniGrid-EmptyRandom-8x8",
     "MiniGrid-EmptyRandom-6x6",
     "MiniGrid-EmptyRandom-5x5",
-    "MiniGrid-DoorKey-16x16",
-    "MiniGrid-DoorKey-8x8",
-    "MiniGrid-DoorKey-6x6",
-    "MiniGrid-DoorKey-5x5",
-    "MiniGrid-FourRooms",
-    "MiniGrid-MemoryS8",
     "MiniGrid-MemoryS16",
-    "MiniGrid-Unlock",
+    "MiniGrid-BlockedUnlockPickUp",
+    "MiniGrid-DoorKey-16x16",
+    "MiniGrid-FourRooms",
 ]
 
 config = {
@@ -672,7 +673,10 @@ def train(
 reward_combiner_network = EmbeddedRNNRewardCombiner()
 
 rc_params_pholder = reward_combiner_network.init(
-    jax.random.PRNGKey(9897), jnp.zeros((32, 128)), jnp.zeros((1, config["HIST_LEN"], 2))
+    jax.random.PRNGKey(9897),
+    jnp.zeros((32, 128)),
+    jnp.zeros((1, config["HIST_LEN"], 2)),
+    jnp.zeros((1, 1), dtype=jnp.int32),
 )
 strategy = OpenES(
     popsize=64,
@@ -686,11 +690,12 @@ strategy = OpenES(
 )
 
 for env_name in environments:
-    config["RUN_NAME"] = f"BYOL_RC_RNN_{env_name}_EPISODE_FIT"
+    config["RUN_NAME"] = f"ACTION_BYOL_RC_RNN_{env_name}_LIFETIME_DIFF_ARCH"
     es_state, _, _, _ = Restore(
-        "/home/batsy/MetaLearnCuriosity/MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/rc_rnn_empty_NOT_TIMED_EPISODE"
+        "/home/batsy/MetaLearnCuriosity/MLC_logs/flax_ckpt/Reward_Combiners/Multi_task/rc_rnn_action_DIFF_ARCH"
     )
-    print(es_state["gen_counter"])
+    if env_name == "MiniGrid-FourRooms":
+        config["TOTAL_TIMESTEPS"] = 20_000_000
     rc_params = strategy.param_reshaper.reshape_single(es_state["mean"])
 
     observations_shape, config, env, env_params = make_env_config(config, env_name)
