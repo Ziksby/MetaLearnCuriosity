@@ -294,9 +294,7 @@ class ActionEmbeddedRNNRewardCombiner(nn.Module):
         carry, rnn_output = RCRNN(features=128)(carry, rc_input)  # features is 32
 
         ff_input = jnp.squeeze(rnn_output, 0)
-        ff_input = nn.Dense(64)(ff_input)
-        ff_input = nn.relu(ff_input)
-        ff_input = nn.Dense(64)(ff_input)
+        ff_input = nn.Dense(128)(ff_input)
         ff_input = nn.relu(ff_input)
         ff_input = nn.Dense(1)(ff_input)
         return carry, jnp.squeeze(nn.sigmoid(ff_input), -1)

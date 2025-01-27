@@ -17,8 +17,8 @@ from flax.training.train_state import TrainState
 import wandb
 from MetaLearnCuriosity.agents.nn import (
     RCRNN,
+    ActionEmbeddedRNNRewardCombiner,
     BYOLTarget,
-    EmbeddedRNNRewardCombiner,
     MiniGridActorCriticRNN,
     MiniGridBYOLPredictor,
 )
@@ -670,7 +670,7 @@ def train(
     }
 
 
-reward_combiner_network = EmbeddedRNNRewardCombiner()
+reward_combiner_network = ActionEmbeddedRNNRewardCombiner()
 
 rc_params_pholder = reward_combiner_network.init(
     jax.random.PRNGKey(9897),
