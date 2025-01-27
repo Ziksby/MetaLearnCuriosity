@@ -19,9 +19,9 @@ from MetaLearnCuriosity.agents.nn import (
     AtariBYOLPredictor,
     BYOLTarget,
     CloseScannedRNN,
-    OpenScannedRNN,
-    RNNRewardCombiner,
 )
+from MetaLearnCuriosity.agents.nn import EmbeddedRNNRewardCombiner as RNNRewardCombiner
+from MetaLearnCuriosity.agents.nn import OpenScannedRNN
 from MetaLearnCuriosity.utils import BYOLRewardNorm
 from MetaLearnCuriosity.utils import RCBYOLTransition as Transition
 from MetaLearnCuriosity.utils import (
@@ -170,7 +170,7 @@ def compile_fns(config):  # noqa: C901
         init_action = jnp.zeros((config["NUM_ENVS_PER_DEVICE"],), dtype=jnp.int32)
         close_init_hstate = CloseScannedRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 128)
         open_init_hstate = OpenScannedRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 128)
-        rc_hstate = RCRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 32)
+        rc_hstate = RCRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 64)
         init_bt = jnp.zeros((1, config["NUM_ENVS_PER_DEVICE"], 128))
         init_pred_input = (init_bt, init_x, init_action[np.newaxis, :], init_action[np.newaxis, :])
         ext_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], config["HIST_LEN"]))
@@ -450,7 +450,7 @@ def compile_fns(config):  # noqa: C901
                         transition.int_reward_hist,
                     )
                     rc_input = jnp.stack(
-                        (ext_reward_hist, int_reward_hist),
+                        (ext_reward_hist, int_reward_hist, transition.norm_time_step),
                         axis=-1,
                     )
                     rc_input = jnp.transpose(rc_input, (1, 0, 2))

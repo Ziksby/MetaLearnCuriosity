@@ -39,12 +39,22 @@ from MetaLearnCuriosity.wrappers import (
 jax.config.update("jax_threefry_partitionable", True)
 
 environments = [
-    "MiniGrid-BlockedUnlockPickUp",
     "MiniGrid-Empty-16x16",
+    "MiniGrid-Empty-8x8",
+    "MiniGrid-Empty-8x8",
+    "MiniGrid-Empty-5x5",
     "MiniGrid-EmptyRandom-16x16",
-    # "MiniGrid-FourRooms",
-    # "MiniGrid-MemoryS128",
-    # "MiniGrid-Unlock",
+    "MiniGrid-EmptyRandom-8x8",
+    "MiniGrid-EmptyRandom-6x6",
+    "MiniGrid-EmptyRandom-5x5",
+    "MiniGrid-DoorKey-16x16",
+    "MiniGrid-DoorKey-8x8",
+    "MiniGrid-DoorKey-6x6",
+    "MiniGrid-DoorKey-5x5",
+    "MiniGrid-FourRooms",
+    "MiniGrid-MemoryS8",
+    "MiniGrid-MemoryS16",
+    "MiniGrid-Unlock",
 ]
 
 config = {
@@ -64,7 +74,7 @@ config = {
     "NUM_STEPS": 16,
     "UPDATE_EPOCHS": 1,
     "NUM_MINIBATCHES": 16,
-    "TOTAL_TIMESTEPS": 50_000_000,
+    "TOTAL_TIMESTEPS": 5_000_000,
     "LR": 0.001,
     "CLIP_EPS": 0.2,
     "GAMMA": 0.99,
@@ -77,7 +87,7 @@ config = {
     "ANNEAL_PRED_LR": False,
     "DEBUG": False,
     "PRED_LR": 0.001,
-    "INT_LAMBDA": 0.0001,
+    "INT_LAMBDA": 0.005,
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
 }
@@ -543,21 +553,39 @@ def train(
     return {
         "train_states": runner_state[1:4],
         "metrics": metric,
-        "loss_info": loss,
-        "rl_total_loss": loss["total_loss"],
-        "rl_value_loss": loss["value_loss"],
-        "rl_actor_loss": loss["actor_loss"],
-        "rl_entrophy_loss": loss["entropy"],
+        # "loss_info": loss,
+        # "rl_total_loss": loss["total_loss"],
+        # "rl_value_loss": loss["value_loss"],
+        # "rl_actor_loss": loss["actor_loss"],
+        # "rl_entrophy_loss": loss["entropy"],
         "int_reward": int_reward,
         "norm_int_reward": norm_int_reward,
-        "pred_loss": loss["pred_loss"],
+        # "pred_loss": loss["pred_loss"],
     }
 
 
-for env_name in environments:
+int_lambdas = [
+    0.0003,
+    0.0003,
+    0.0003,
+    0.0003,
+    0.01,
+    0.01,
+    0.01,
+    0.01,
+    0.005,
+    0.005,
+    0.005,
+    0.005,
+    0.0005,
+    0.0005,
+    0.0005,
+    0.001,
+]
+for env_name, int_lambda in zip(environments, int_lambdas):
 
     observations_shape, config, env, env_params = make_env_config(config, env_name)
-
+    config["RUN_NAME"] = f"BYOL_minigrid_{env_name}"
     # experiments
     rng = jax.random.PRNGKey(config["SEED"])
 
@@ -596,7 +624,7 @@ for env_name in environments:
             )
         )
         elapsed_time = time.time() - t
-
+    # Else for 1 seed
     else:
         (
             init_hstate,
@@ -635,11 +663,11 @@ for env_name in environments:
     )
     output = process_output_general(output)
 
-    logger.log_pred_losses(output, config["NUM_SEEDS"])
-    logger.log_episode_return(output, config["NUM_SEEDS"])
-    logger.log_rl_losses(output, config["NUM_SEEDS"])
-    logger.log_int_rewards(output, config["NUM_SEEDS"])
-    logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
+    # logger.log_pred_losses(output, config["NUM_SEEDS"])
+    logger.log_episode_return_minigrid(output, config["NUM_SEEDS"])
+    # logger.log_rl_losses(output, config["NUM_SEEDS"])
+    # logger.log_int_rewards(output, config["NUM_SEEDS"])
+    # logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
     output = compress_output_for_reasoning(output, minigrid=True)
     # Get the absolute path of the directory

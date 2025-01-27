@@ -38,9 +38,13 @@ environments = [
     # "MiniGrid-BlockedUnlockPickUp",
     # "MiniGrid-Empty-16x16",
     # "MiniGrid-EmptyRandom-16x16",
-    # "MiniGrid-FourRooms",
-    "MiniGrid-MemoryS16",
-    "MiniGrid-Unlock",
+    "MiniGrid-FourRooms",
+    # "MiniGrid-MemoryS16",
+    # "MiniGrid-Unlock",
+    "MiniGrid-EmptyRandom-16x16",
+    "MiniGrid-EmptyRandom-8x8",
+    "MiniGrid-EmptyRandom-6x6",
+    "MiniGrid-EmptyRandom-5x5",
 ]
 
 config = {
@@ -60,7 +64,7 @@ config = {
     "NUM_STEPS": 16,
     "UPDATE_EPOCHS": 1,
     "NUM_MINIBATCHES": 16,
-    "TOTAL_TIMESTEPS": 50_000_000,
+    "TOTAL_TIMESTEPS": 5_000_000,
     "LR": 0.001,
     "CLIP_EPS": 0.2,
     "GAMMA": 0.99,
@@ -303,11 +307,11 @@ def train(rng, init_hstate, train_state):
     return {
         "train_states": runner_state[1],
         "metrics": metric,
-        "loss_info": loss,
-        "rl_total_loss": loss["total_loss"],
-        "rl_value_loss": loss["value_loss"],
-        "rl_actor_loss": loss["actor_loss"],
-        "rl_entrophy_loss": loss["entropy"],
+        # "loss_info": loss,
+        # "rl_total_loss": loss["total_loss"],
+        # "rl_value_loss": loss["value_loss"],
+        # "rl_actor_loss": loss["actor_loss"],
+        # "rl_entrophy_loss": loss["entropy"],
     }
 
 
@@ -320,6 +324,7 @@ for env_name in environments:
 
     if config["NUM_SEEDS"] > 1:
         rng = jax.random.split(rng, config["NUM_SEEDS"])
+        config["RUN_NAME"] = f"minigrid_baseline_ppo_{env_name}"
         init_hstate, train_state, rng = jax.jit(jax.vmap(make_train, out_axes=(0, 0, 1)))(rng)
         init_hstate = replicate(init_hstate, jax.local_devices())
         train_state = replicate(train_state, jax.local_devices())
@@ -345,8 +350,8 @@ for env_name in environments:
     )
     output = process_output_general(output)
 
-    logger.log_episode_return(output, config["NUM_SEEDS"])
-    logger.log_rl_loss_minigrid(output, config["NUM_SEEDS"])
+    logger.log_episode_return_minigrid(output, config["NUM_SEEDS"])
+    # logger.log_rl_loss_minigrid(output, config["NUM_SEEDS"])
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
     # Get the absolute path of the directory

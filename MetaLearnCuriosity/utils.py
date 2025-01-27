@@ -7,7 +7,12 @@ from flax import struct
 from flax.jax_utils import replicate, unreplicate
 from flax.training.train_state import TrainState
 
-from MetaLearnCuriosity.agents.nn import RewardCombiner, TargetNetwork
+from MetaLearnCuriosity.agents.nn import (
+    ActionEmbeddedRNNRewardCombiner,
+    EmbeddedRNNRewardCombiner,
+    RewardCombiner,
+    TargetNetwork,
+)
 
 
 def get_latest_commit_hash():
@@ -130,6 +135,23 @@ class RCBYOLMiniGridTransition(NamedTuple):
     info: jnp.ndarray
 
 
+class RCRNDMiniGridTransition(NamedTuple):
+    done: jnp.ndarray
+    action: jnp.ndarray
+    value: jnp.ndarray
+    reward: jnp.ndarray
+    norm_ext_reward: jnp.array
+    int_reward: jnp.ndarray
+    log_prob: jnp.ndarray
+    obs: jnp.ndarray
+    # for minigrid rnn policy
+    prev_action: jnp.ndarray
+    prev_reward: jnp.ndarray
+    ext_reward_hist: jnp.ndarray
+    int_reward_hist: jnp.ndarray
+    info: jnp.ndarray
+
+
 class RNDMiniGridTransition(NamedTuple):
     done: jnp.ndarray
     action: jnp.ndarray
@@ -221,7 +243,7 @@ def calculate_gae(
     return advantages, advantages + transitions.value
 
 
-def rc_byol_calculate_gae(
+def rnn_rc_byol_calculate_gae(
     transitions: RCBYOLMiniGridTransition,
     rc_params,
     last_val: jax.Array,
@@ -231,6 +253,93 @@ def rc_byol_calculate_gae(
     byol_reward_norm_params: BYOLRewardNorm,
     ext_reward_norm_params: BYOLRewardNorm,
     rc_hstate,
+) -> tuple[jax.Array, jax.Array]:
+    rc_network = ActionEmbeddedRNNRewardCombiner()
+    norm_int_reward, byol_reward_norm_params, int_reward_hist = byol_normalize_prior_int_rewards(
+        transitions.int_reward,
+        byol_reward_norm_params,
+        rew_norm_parameter,
+        transitions.int_reward_hist,
+    )
+    norm_ext_reward, ext_reward_norm_params, ext_reward_hist = byol_normalize_prior_int_rewards(
+        transitions.norm_reward,
+        ext_reward_norm_params,
+        rew_norm_parameter,
+        transitions.ext_reward_hist,
+        prior=False,
+    )
+    norm_traj_batch = RCBYOLMiniGridTransition(
+        transitions.done,
+        transitions.action,
+        transitions.value,
+        transitions.reward,
+        norm_ext_reward,
+        norm_int_reward,
+        transitions.log_prob,
+        transitions.obs,
+        transitions.next_obs,
+        # for minigrid rnn policy
+        transitions.prev_action,
+        transitions.prev_reward,
+        transitions.prev_bt,
+        transitions.norm_time_step,
+        ext_reward_hist,
+        int_reward_hist,
+        transitions.info,
+    )
+    # single iteration for the loop
+
+    def _get_advantages(gae_and_next_value_w_rc_hstate, transition):
+        gae, next_value, rc_hstate = gae_and_next_value_w_rc_hstate
+        rc_input = jnp.stack(
+            (
+                transition.ext_reward_hist,
+                transition.int_reward_hist,
+                # transition.norm_time_step[:, None],
+            ),
+            axis=-1,
+        )
+
+        rc_input = jnp.transpose(rc_input, (1, 0, 2))
+        rc_hstate, int_lambda = rc_network.apply(
+            rc_params, rc_hstate, rc_input, transition.action[None, :]
+        )
+        delta = (
+            (transition.reward + (transition.int_reward * int_lambda))
+            + gamma * next_value * (1 - transition.done)
+            - transition.value
+        )
+        gae = delta + gamma * gae_lambda * (1 - transition.done) * gae
+        return (gae, transition.value, rc_hstate), (gae, int_lambda)
+
+    (_, _, rc_hstate), (advantages, int_lambda) = jax.lax.scan(
+        _get_advantages,
+        (jnp.zeros_like(last_val), last_val, rc_hstate),
+        norm_traj_batch,
+        reverse=True,
+    )
+    # advantages and values (Q)
+    return (
+        advantages,
+        advantages + transitions.value,
+        norm_int_reward,
+        norm_ext_reward,
+        byol_reward_norm_params,
+        ext_reward_norm_params,
+        int_lambda,
+        rc_hstate,
+    )
+
+
+def rc_byol_calculate_gae(
+    transitions: RCBYOLMiniGridTransition,
+    rc_params,
+    last_val: jax.Array,
+    gamma: float,
+    gae_lambda: float,
+    rew_norm_parameter: float,
+    byol_reward_norm_params: BYOLRewardNorm,
+    ext_reward_norm_params: BYOLRewardNorm,
 ) -> tuple[jax.Array, jax.Array]:
     rc_network = RewardCombiner()
     norm_int_reward, byol_reward_norm_params, int_reward_hist = byol_normalize_prior_int_rewards(
@@ -268,23 +377,23 @@ def rc_byol_calculate_gae(
     # single iteration for the loop
 
     def _get_advantages(gae_and_next_value, transition):
-        gae, next_value, rc_hstate = gae_and_next_value
+        gae, next_value = gae_and_next_value
         rc_input = jnp.stack(
             (transition.ext_reward_hist, transition.int_reward_hist),
             axis=-1,
         )
-        int_lambda = rc_network.apply(rc_params, rc_hstate, rc_input)
+        int_lambda = rc_network.apply(rc_params, rc_input)
         delta = (
             (transition.reward + (transition.int_reward * int_lambda))
             + gamma * next_value * (1 - transition.done)
             - transition.value
         )
         gae = delta + gamma * gae_lambda * (1 - transition.done) * gae
-        return (gae, transition.value, rc_hstate), (gae, int_lambda)
+        return (gae, transition.value), (gae, int_lambda)
 
-    (_, _, rc_hstate), (advantages, int_lambda) = jax.lax.scan(
+    (_, _), (advantages, int_lambda) = jax.lax.scan(
         _get_advantages,
-        (jnp.zeros_like(last_val), last_val, rc_hstate),
+        (jnp.zeros_like(last_val), last_val),
         norm_traj_batch,
         reverse=True,
     )
@@ -297,7 +406,6 @@ def rc_byol_calculate_gae(
         byol_reward_norm_params,
         ext_reward_norm_params,
         int_lambda,
-        rc_hstate,
     )
 
 
@@ -350,6 +458,75 @@ def byol_calculate_gae(
     return advantages, advantages + transitions.value, norm_int_reward, byol_reward_norm_params
 
 
+def rnn_rc_rnd_calculate_gae(
+    transitions: RCRNDMiniGridTransition,
+    last_val: jax.Array,
+    gamma: float,
+    int_gamma: float,
+    gae_lambda: float,
+    rnd_int_return_norm_params: RNDNormIntReturnParams,
+    rnd_ext_return_norm_params: RNDNormIntReturnParams,
+    rc_params,
+    rc_hstate,
+) -> tuple[jax.Array, jax.Array]:
+    # single iteration for the loop
+    rc_network = EmbeddedRNNRewardCombiner()
+    norm_int_reward, rnd_int_return_norm_params, int_reward_hist = rnd_normalise_int_rewards(
+        transitions, rnd_int_return_norm_params, int_gamma, transitions.int_reward_hist
+    )
+    norm_ext_reward, rnd_ext_return_norm_params, ext_reward_hist = rnd_normalise_int_rewards(
+        transitions, rnd_int_return_norm_params, int_gamma, transitions.ext_reward_hist
+    )
+
+    norm_traj_batch = RCRNDMiniGridTransition(
+        transitions.done,
+        transitions.action,
+        transitions.value,
+        transitions.reward,
+        transitions.norm_ext_reward,
+        norm_int_reward,
+        transitions.log_prob,
+        transitions.obs,
+        transitions.prev_action,
+        transitions.prev_reward,
+        transitions.ext_reward_hist,
+        transitions.int_reward_hist,
+        transitions.info,
+    )
+
+    def _get_advantages(gae_and_next_value_w_rc_hstate, transition):
+        gae, next_value, rc_hstate = gae_and_next_value_w_rc_hstate
+        rc_input = jnp.stack((transition.ext_reward_hist, transition.int_reward_hist), axis=-1)
+        rc_input = jnp.transpose(rc_input, (1, 0, 2))
+        rc_hstate, int_lambda = rc_network.apply(rc_params, rc_hstate, rc_input)
+        delta = (
+            (transition.reward + (int_lambda * transition.int_reward))
+            + gamma * next_value * (1 - transition.done)
+            - transition.value
+        )
+        gae = delta + gamma * gae_lambda * (1 - transition.done) * gae
+        return (gae, transition.value, rc_hstate), (gae, int_lambda)
+
+    (_, _, rc_hstate), (advantages, int_lambdas) = jax.lax.scan(
+        _get_advantages,
+        (jnp.zeros_like(last_val), last_val, rc_hstate),
+        norm_traj_batch,
+        reverse=True,
+    )
+
+    # advantages and values (Q)
+    return (
+        advantages,
+        advantages + transitions.value,
+        rnd_int_return_norm_params,
+        rnd_ext_return_norm_params,
+        norm_int_reward,
+        int_lambdas,
+        rc_hstate,
+        norm_ext_reward,
+    )
+
+
 def rnd_calculate_gae(
     transitions: RNDMiniGridTransition,
     last_val: jax.Array,
@@ -361,8 +538,8 @@ def rnd_calculate_gae(
 ) -> tuple[jax.Array, jax.Array]:
     # single iteration for the loop
 
-    norm_int_reward, rnd_int_return_norm_params = rnd_normalise_int_rewards(
-        transitions, rnd_int_return_norm_params, int_gamma
+    norm_int_reward, rnd_int_return_norm_params, _ = rnd_normalise_int_rewards(
+        transitions, rnd_int_return_norm_params, int_gamma, jnp.ones((1, 1))
     )
 
     # *** Wrong transition class used here.

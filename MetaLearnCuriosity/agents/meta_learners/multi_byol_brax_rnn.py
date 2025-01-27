@@ -14,7 +14,7 @@ from flax.jax_utils import replicate
 from tqdm import tqdm
 
 import wandb
-from MetaLearnCuriosity.agents.nn import RCRNN, RewardCombiner
+from MetaLearnCuriosity.agents.nn import RCRNN, EmbeddedRNNRewardCombiner
 from MetaLearnCuriosity.checkpoints import Restore, Save
 from MetaLearnCuriosity.compile_byol_brax_rnns_fns import (
     compile_brax_byol_fns as compile_fns,
@@ -26,11 +26,11 @@ from MetaLearnCuriosity.utils import (
     reorder_antithetic_pairs,
 )
 
-env_name = "ant"
+env_name = "walker2d"
 step_intervals = [3, 10, 20, 30]
 config = {
-    "RUN_NAME": "rc_rnn_128_delayed_ant_fixed",
-    "SEED": 42,
+    "RUN_NAME": f"rc_rnn_EMBED_TIMED_64_{env_name}",
+    "SEED": 42_8997767_8776,
     "NUM_SEEDS": 1,
     "LR": 3e-4,
     "NUM_ENVS": 2048,
@@ -54,18 +54,18 @@ config = {
     "REW_NORM_PARAMETER": 0.99,
     "EMA_PARAMETER": 0.99,
     "HIST_LEN": 1,
-    "POP_SIZE": 38,
+    "POP_SIZE": 64,
     "RC_SEED": 23 * 2 * 8,
-    "ES_SEED": 23_000,
+    "ES_SEED": 23_000 * 62,
     "NUM_GENERATIONS": 48,
 }
 
-reward_combiner_network = RewardCombiner()
+reward_combiner_network = EmbeddedRNNRewardCombiner()
 
 rc_params_pholder = reward_combiner_network.init(
     jax.random.PRNGKey(config["RC_SEED"]),
-    jnp.zeros((512, 32)),
-    jnp.zeros((1, config["HIST_LEN"], 2)),
+    jnp.zeros((512, 64)),
+    jnp.zeros((1, config["HIST_LEN"], 3)),
 )
 es_rng = jax.random.PRNGKey(config["ES_SEED"])
 strategy = OpenES(

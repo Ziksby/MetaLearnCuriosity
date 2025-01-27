@@ -12,6 +12,7 @@ import jax.numpy as jnp
 import jax.tree_util
 import numpy as np
 import optax
+from evosax import OpenES
 from flax.jax_utils import replicate, unreplicate
 from flax.linen.initializers import constant, orthogonal
 from flax.training.train_state import TrainState
@@ -21,7 +22,6 @@ import wandb
 from MetaLearnCuriosity.agents.nn import PredictorNetwork, RewardCombiner, TargetNetwork
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
-from MetaLearnCuriosity.pmapped_open_es import OpenES
 from MetaLearnCuriosity.utils import ObsNormParams
 from MetaLearnCuriosity.utils import RCRNDTransition as RNDTransition
 from MetaLearnCuriosity.utils import RNDNormIntReturnParams

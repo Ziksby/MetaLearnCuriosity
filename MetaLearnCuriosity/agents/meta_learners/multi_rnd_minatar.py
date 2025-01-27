@@ -28,7 +28,7 @@ from MetaLearnCuriosity.utils import (
 env_name = "Breakout-Minatar"
 step_intervals = [3, 10, 20, 30]
 config = {
-    "RUN_NAME": "rc_cnn_RND",
+    "RUN_NAME": "rc_cnn_RND_bug_fixed",
     "SEED": 42,
     "NUM_SEEDS": 2,
     "LR": 3e-4,

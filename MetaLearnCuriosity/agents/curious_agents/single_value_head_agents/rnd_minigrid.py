@@ -9,10 +9,10 @@ import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
 import optax
-import wandb
 from flax.jax_utils import replicate, unreplicate
 from flax.training.train_state import TrainState
 
+import wandb
 from MetaLearnCuriosity.agents.nn import (
     MiniGridActorCriticRNN,
     PredictorNetwork,
@@ -41,11 +41,21 @@ from MetaLearnCuriosity.wrappers import (
 jax.config.update("jax_threefry_partitionable", True)
 
 environments = [
-    "MiniGrid-BlockedUnlockPickUp",
     "MiniGrid-Empty-16x16",
+    "MiniGrid-Empty-8x8",
+    "MiniGrid-Empty-8x8",
+    "MiniGrid-Empty-5x5",
     "MiniGrid-EmptyRandom-16x16",
+    "MiniGrid-EmptyRandom-8x8",
+    "MiniGrid-EmptyRandom-6x6",
+    "MiniGrid-EmptyRandom-5x5",
+    "MiniGrid-DoorKey-16x16",
+    "MiniGrid-DoorKey-8x8",
+    "MiniGrid-DoorKey-6x6",
+    "MiniGrid-DoorKey-5x5",
     "MiniGrid-FourRooms",
-    "MiniGrid-MemoryS128",
+    "MiniGrid-MemoryS8",
+    "MiniGrid-MemoryS16",
     "MiniGrid-Unlock",
 ]
 
@@ -66,14 +76,14 @@ config = {
     "NUM_STEPS": 16,
     "UPDATE_EPOCHS": 1,
     "NUM_MINIBATCHES": 16,
-    "TOTAL_TIMESTEPS": 50_000_000,
+    "TOTAL_TIMESTEPS": 5_000_000,
     "LR": 0.001,
     "PRED_LR": 1e-3,
     "CLIP_EPS": 0.2,
     "GAMMA": 0.99,
     "INT_GAMMA": 0.99,
     "GAE_LAMBDA": 0.95,
-    "INT_LAMBDA": 0.01,
+    "INT_LAMBDA": 0.0008,
     "ENT_COEF": 0.01,
     "VF_COEF": 0.5,
     "MAX_GRAD_NORM": 0.5,
@@ -468,21 +478,42 @@ def train(rng, init_hstate, train_state, pred_state, target_params, init_obs_rng
     return {
         "train_states": runner_state[1],
         "metrics": metric,
-        "loss_info": loss,
+        # "loss_info": loss,
         "norm_int_reward": norm_int_reward,
         "int_reward": int_reward,
-        "rl_total_loss": loss["total_loss"],
-        "rl_value_loss": loss["value_loss"],
-        "rl_actor_loss": loss["actor_loss"],
-        "rl_entrophy_loss": loss["entropy"],
-        "rnd_loss": loss["rnd_loss"],
+        # "rl_total_loss": loss["total_loss"],
+        # "rl_value_loss": loss["value_loss"],
+        # "rl_actor_loss": loss["actor_loss"],
+        # "rl_entrophy_loss": loss["entropy"],
+        # "rnd_loss": loss["rnd_loss"],
     }
 
+    # No step intervals
 
-for env_name in environments:
+
+int_lambdas = [
+    0.003,
+    0.003,
+    0.003,
+    0.003,
+    0.1,
+    0.1,
+    0.1,
+    0.1,
+    0.02,
+    0.02,
+    0.02,
+    0.02,
+    0.0008,
+    0.1,
+    0.1,
+    0.0008,
+]
+for env_name, int_lambda in zip(environments, int_lambdas):
     rng = jax.random.PRNGKey(config["SEED"])
+    config["INT_LAMBDA"] = int_lambda
     observations_shape, config, env, env_params = make_env_config(config, env_name)
-
+    config["RUN_NAME"] = f"RND_minigrid_{env_name}"
     if config["NUM_SEEDS"] > 1:
         rng = jax.random.split(rng, config["NUM_SEEDS"])
         init_hstate, train_state, pred_state, target_params, rng, init_obs_rng = jax.jit(
@@ -519,11 +550,11 @@ for env_name in environments:
     )
     output = process_output_general(output)
 
-    logger.log_rnd_losses(output, config["NUM_SEEDS"])
-    logger.log_episode_return(output, config["NUM_SEEDS"])
-    logger.log_rl_losses(output, config["NUM_SEEDS"])
-    logger.log_int_rewards(output, config["NUM_SEEDS"])
-    logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
+    # logger.log_rnd_losses(output, config["NUM_SEEDS"])
+    logger.log_episode_return_minigrid(output, config["NUM_SEEDS"])
+    # logger.log_rl_losses(output, config["NUM_SEEDS"])
+    # logger.log_int_rewards(output, config["NUM_SEEDS"])
+    # logger.log_norm_int_rewards(output, config["NUM_SEEDS"])
     checkpoint_directory = f'MLC_logs/flax_ckpt/{config["ENV_NAME"]}/{config["RUN_NAME"]}'
 
     # Get the absolute path of the directory

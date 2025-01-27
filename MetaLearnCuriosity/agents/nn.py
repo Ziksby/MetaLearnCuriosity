@@ -273,6 +273,50 @@ class RewardCombiner(nn.Module):
         return jnp.squeeze(nn.sigmoid(x), -1)
 
 
+class ActionEmbeddedRNNRewardCombiner(nn.Module):
+    @nn.compact
+    def __call__(self, carry, x, action):
+        action_encoder = nn.Embed(6, 16)
+
+        # Input is (1, num_envs, 2)
+        x = nn.Dense(16)(x)
+        x = nn.relu(x)
+        action = action_encoder(action)
+        rc_input = jnp.concatenate(
+            (
+                x,
+                action[
+                    None:,
+                ],
+            ),
+            axis=-1,
+        )
+        carry, rnn_output = RCRNN(features=128)(carry, rc_input)  # features is 32
+
+        ff_input = jnp.squeeze(rnn_output, 0)
+        ff_input = nn.Dense(128)(ff_input)
+        ff_input = nn.relu(ff_input)
+        ff_input = nn.Dense(1)(ff_input)
+        return carry, jnp.squeeze(nn.sigmoid(ff_input), -1)
+
+
+class EmbeddedRNNRewardCombiner(nn.Module):
+    @nn.compact
+    def __call__(self, carry, x):
+
+        # Input is (1, num_envs, 2)
+        x = nn.Dense(16)(x)
+        x = nn.relu(x)
+
+        carry, x = RCRNN(features=128)(carry, x)  # features is 32
+
+        x = jnp.squeeze(x, 0)
+        x = nn.Dense(128)(x)
+        x = nn.relu(x)
+        x = nn.Dense(1)(x)
+        return carry, jnp.squeeze(nn.sigmoid(x), -1)
+
+
 class RNNRewardCombiner(nn.Module):
     @nn.compact
     def __call__(self, carry, x):
@@ -509,6 +553,18 @@ class BraxBYOLPredictor(nn.Module):
     def __call__(self, close_hidden, open_hidden, x):
         bt, obs, prev_action, action = x
 
+        action_encoder = nn.Dense(
+            features=16,  # or whatever output size you want
+            kernel_init=orthogonal(np.sqrt(2)),
+            bias_init=constant(0.0),
+            name="action_encoder",
+        )
+
+        emb_act = action_encoder(action)
+        emb_act = nn.relu(emb_act)
+        emb_prev_act = action_encoder(prev_action)
+        emb_prev_act = nn.relu(emb_prev_act)
+
         # Encoder
         en_obs = nn.Dense(
             self.encoder_layer_out_shape,
@@ -525,9 +581,9 @@ class BraxBYOLPredictor(nn.Module):
         )(en_obs)
 
         # RNN stuff
-        close_loop_input = jnp.concatenate((bt, en_obs, prev_action), axis=-1)
+        close_loop_input = jnp.concatenate((bt, en_obs, emb_prev_act), axis=-1)
         new_close_hidden, new_bt = CloseScannedRNN()(close_hidden, close_loop_input)
-        open_loop_input = jnp.concatenate((new_bt, action), axis=-1)
+        open_loop_input = jnp.concatenate((new_bt, emb_act), axis=-1)
         new_open_hidden, bt_1 = OpenScannedRNN()(open_hidden, open_loop_input)
 
         # Predictor

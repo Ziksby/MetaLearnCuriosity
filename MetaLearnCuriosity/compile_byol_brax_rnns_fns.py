@@ -18,8 +18,8 @@ from MetaLearnCuriosity.agents.nn import (
     BraxBYOLPredictor,
     BYOLTarget,
     CloseScannedRNN,
+    EmbeddedRNNRewardCombiner,
     OpenScannedRNN,
-    RNNRewardCombiner,
 )
 from MetaLearnCuriosity.checkpoints import Save
 from MetaLearnCuriosity.logger import WBLogger
@@ -42,7 +42,7 @@ from MetaLearnCuriosity.wrappers import (
 )
 
 environments = [
-    "ant",
+    # "ant",
     # "halfcheetah",
     # "hopper",
     # "humanoid",
@@ -51,7 +51,7 @@ environments = [
     # "inverted_double_pendulum",
     # "pusher",
     # "reacher",
-    # "walker2d",
+    "walker2d",
 ]
 
 config = {
@@ -81,7 +81,7 @@ config = {
     "EMA_PARAMETER": 0.99,
 }
 
-step_intervals = [3, 10, 20, 30]
+step_intervals = [3, 10]
 
 
 class PPOActorCritic(nn.Module):
@@ -188,7 +188,7 @@ def compile_brax_byol_fns(config):  # noqa: C901
         init_bt = jnp.zeros((1, config["NUM_ENVS_PER_DEVICE"], 256))
         ext_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], config["HIST_LEN"]))
         int_reward_history = jnp.zeros((config["NUM_ENVS_PER_DEVICE"], config["HIST_LEN"]))
-        rc_hstate = RCRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 32)
+        rc_hstate = RCRNN.initialize_carry(config["NUM_ENVS_PER_DEVICE"], 64)
 
         init_pred_input = (init_bt, init_x, init_action[np.newaxis, :], init_action[np.newaxis, :])
 
@@ -265,7 +265,7 @@ def compile_brax_byol_fns(config):  # noqa: C901
         int_reward_hist,
         rc_hstate,
     ):
-        rc_network = RNNRewardCombiner()
+        rc_network = EmbeddedRNNRewardCombiner()
 
         # INIT STUFF FOR OPTIMIZATION AND NORMALIZATION
         update_target_counter = 0
@@ -458,10 +458,11 @@ def compile_brax_byol_fns(config):  # noqa: C901
                         transition.int_reward_hist,
                     )
                     rc_input = jnp.stack(
-                        (ext_reward_hist, int_reward_hist),
+                        (ext_reward_hist, int_reward_hist, transition.norm_time_step[:, None]),
                         axis=-1,
                     )
                     rc_input = jnp.transpose(rc_input, (1, 0, 2))
+
                     rc_hstate, int_lambda = rc_network.apply(rc_params, rc_hstate, rc_input)
                     delta = (
                         (reward + (int_reward * int_lambda))
