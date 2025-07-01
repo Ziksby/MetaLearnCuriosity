@@ -43,14 +43,14 @@ jax.config.update("jax_threefry_partitionable", True)
 key = jax.random.PRNGKey(76)
 environments = [
     # "MiniGrid-DoorKey-8x8",
-    # "MiniGrid-DoorKey-16x16",
-    # "MiniGrid-DoorKey-8x8",
-    # "MiniGrid-DoorKey-6x6",
-    # "MiniGrid-DoorKey-5x5",
+    "MiniGrid-DoorKey-16x16",
+    "MiniGrid-DoorKey-8x8",
+    "MiniGrid-DoorKey-6x6",
+    "MiniGrid-DoorKey-5x5",
     # "MiniGrid-EmptyRandom-16x16",
     # "MiniGrid-FourRooms",
-    "MiniGrid-MemoryS16",
-    "MiniGrid-MemoryS8",
+    # "MiniGrid-MemoryS16",
+    # "MiniGrid-MemoryS8",
     # "MiniGrid-Unlock",
 ]
 
@@ -648,7 +648,7 @@ for lambda_value in lambda_values:
             target_state,
         )
         samples = []
-        for _ in range(3):
+        for _ in range(10_000):
             key, resample_key = jax.random.split(key)
             samples.append(jax.random.choice(resample_key, epi_ret, shape=(10,), replace=True))
 

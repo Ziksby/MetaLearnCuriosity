@@ -45,12 +45,12 @@ from MetaLearnCuriosity.wrappers import (
 jax.config.update("jax_threefry_partitionable", True)
 
 environments = [
-    # "MiniGrid-DoorKey-16x16",
-    # "MiniGrid-DoorKey-8x8",
-    # "MiniGrid-DoorKey-6x6",
-    "MiniGrid-MemoryS16",
-    "MiniGrid-MemoryS8",
-    # "MiniGrid-DoorKey-5x5",
+    "MiniGrid-DoorKey-16x16",
+    "MiniGrid-DoorKey-8x8",
+    "MiniGrid-DoorKey-6x6",
+    # "MiniGrid-MemoryS16",
+    # "MiniGrid-MemoryS8",
+    "MiniGrid-DoorKey-5x5",
 ]
 
 config = {
@@ -557,7 +557,7 @@ for lambda_value in lambda_values:
             target_params,
         )
         samples = []
-        for _ in range(3):
+        for _ in range(10_000):
             key, resample_key = jax.random.split(key)
             samples.append(jax.random.choice(resample_key, epi_ret, shape=(10,), replace=True))
 
